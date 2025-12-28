@@ -32,53 +32,50 @@ def pull_stargz_image(image):
         raise Exception(f"Pull failed: {result.stderr}")
     return duration
 
-def main():
-    iterations = 1
-
-    # Images from stargz benchmarks
-    standard_img = "ghcr.io/bohdangarchu/bert-split:org"
-    stargz_img = "ghcr.io/bohdangarchu/bert-split:esgz"
-
-    print(f"Pull Time Comparison ({iterations} iterations)")
+def bench_pull_time(standard_img, stargz_img):
+    print(f"Pull Time Comparison")
     print(f"Standard: {standard_img}")
     print(f"Stargz:   {stargz_img}")
     print("-" * 50)
+    
+    standard_time = None
+    stargz_time = None
 
-    standard_times = []
-    stargz_times = []
+    # Test standard image
+    cleanup_image(standard_img)
+    try:
+        std_time = pull_standard_image(standard_img)
+        standard_time = std_time
+        print(f"  Standard: {std_time:.2f}s")
+    except Exception as e:
+        print(f"  Standard: FAILED - {e}")
 
-    for i in range(iterations):
-        print(f"Iteration {i+1}/{iterations}")
+    # Test stargz image
+    cleanup_image(stargz_img)
+    try:
+        sgz_time = pull_stargz_image(stargz_img)
+        stargz_time = sgz_time
+        print(f"  Stargz:   {sgz_time:.2f}s")
+    except Exception as e:
+        print(f"  Stargz:   FAILED - {e}")
+    
+    return standard_time, stargz_time
 
-        # Test standard image
-        cleanup_image(standard_img)
-        try:
-            std_time = pull_standard_image(standard_img)
-            standard_times.append(std_time)
-            print(f"  Standard: {std_time:.2f}s")
-        except Exception as e:
-            print(f"  Standard: FAILED - {e}")
+def main():
+    # Images from stargz benchmarks
+    standard_img = "ghcr.io/stargz-containers/python:3.7-org"
+    stargz_img = "ghcr.io/stargz-containers/python:3.7-esgz"
 
-        # Test stargz image
-        cleanup_image(stargz_img)
-        try:
-            sgz_time = pull_stargz_image(stargz_img)
-            stargz_times.append(sgz_time)
-            print(f"  Stargz:   {sgz_time:.2f}s")
-        except Exception as e:
-            print(f"  Stargz:   FAILED - {e}")
+    standard_time, stargz_time = bench_pull_time(standard_img, stargz_img)
 
     # Results
-    if standard_times and stargz_times:
-        std_avg = sum(standard_times) / len(standard_times)
-        sgz_avg = sum(stargz_times) / len(stargz_times)
-        speedup = std_avg / sgz_avg if sgz_avg > 0 else 0
+    if standard_time and stargz_time:
+        speedup = standard_time / stargz_time if stargz_time > 0 else 0
 
         print(f"\nResults:")
-        print(f"Standard avg: {std_avg:.2f}s")
-        print(f"Stargz avg:   {sgz_avg:.2f}s")
+        print(f"Standard avg: {standard_time:.2f}s")
+        print(f"Stargz avg:   {stargz_time:.2f}s")
         print(f"Speedup:      {speedup:.2f}x")
-        print(f"Improvement:  {((std_avg-sgz_avg)/std_avg)*100:+.1f}%")
 
 if __name__ == "__main__":
     main()
