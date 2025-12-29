@@ -7,6 +7,9 @@ Compares pull time between standard and stargz Python images
 
 import time
 import subprocess
+import uuid
+
+DEBUG_SHELL = False
 
 def cleanup_image(image):
     """Remove image if exists"""
@@ -15,7 +18,7 @@ def cleanup_image(image):
 def pull_standard_image(image):
     """Pull standard image with ctr"""
     start = time.time()
-    result = subprocess.run(f"ctr i pull {image}", shell=True, capture_output=True, text=True)
+    result = subprocess.run(f"ctr i pull {image}", shell=True, text=True, capture_output=not DEBUG_SHELL)
     duration = time.time() - start
 
     if result.returncode != 0:
@@ -25,12 +28,66 @@ def pull_standard_image(image):
 def pull_stargz_image(image):
     """Pull stargz image with ctr-remote"""
     start = time.time()
-    result = subprocess.run(f"ctr-remote i rpull {image}", shell=True, capture_output=True, text=True)
+    result = subprocess.run(f"ctr-remote i rpull {image}", shell=True, text=True, capture_output=not DEBUG_SHELL)
     duration = time.time() - start
 
     if result.returncode != 0:
         raise Exception(f"Pull failed: {result.stderr}")
     return duration
+
+def run_standard_image(image):
+    container_id = f"bench-{uuid.uuid4().hex[:8]}"
+    start = time.time()
+    result = subprocess.run(
+        f"ctr run --rm {image} {container_id} "
+        "python3 -c \"print('ok')\"",
+        shell=True,
+        text=True,
+        capture_output=not DEBUG_SHELL
+    )
+    duration = time.time() - start
+
+    if result.returncode != 0:
+        raise Exception(f"Run failed: {result.stderr}")
+    return duration
+
+
+def run_stargz_image(image):
+    container_id = f"bench-{uuid.uuid4().hex[:8]}"
+    start = time.time()
+    result = subprocess.run(
+        f"ctr run --rm --snapshotter=stargz {image} {container_id} "
+        "python3 -c \"print('ok')\"",
+        shell=True,
+        text=True,
+        capture_output=not DEBUG_SHELL
+    )
+    duration = time.time() - start
+
+    if result.returncode != 0:
+        raise Exception(f"Run failed: {result.stderr}")
+    return duration
+
+def bench_runtime(standard_img, stargz_img):
+    print("\nRuntime Comparison (ctr run)")
+    print("-" * 50)
+
+    standard_time = None
+    stargz_time = None
+
+    try:
+        standard_time = run_standard_image(standard_img)
+        print(f"  Standard run: {standard_time:.2f}s")
+    except Exception as e:
+        print(f"  Standard run: FAILED - {e}")
+
+    try:
+        stargz_time = run_stargz_image(stargz_img)
+        print(f"  Stargz run:   {stargz_time:.2f}s")
+    except Exception as e:
+        print(f"  Stargz run:   FAILED - {e}")
+
+    return standard_time, stargz_time
 
 def bench_pull_time(standard_img, stargz_img):
     print(f"Pull Time Comparison")
@@ -67,6 +124,7 @@ def main():
     stargz_img = "ghcr.io/stargz-containers/python:3.7-esgz"
 
     standard_time, stargz_time = bench_pull_time(standard_img, stargz_img)
+    run_std, run_sgz = bench_runtime(standard_img, stargz_img)
 
     # Results
     if standard_time and stargz_time:
@@ -76,6 +134,10 @@ def main():
         print(f"Standard avg: {standard_time:.2f}s")
         print(f"Stargz avg:   {stargz_time:.2f}s")
         print(f"Speedup:      {speedup:.2f}x")
+    if run_std and run_sgz:
+        print("Run results")
+        print(f"Run std: {run_std:.2f}")
+        print(f"Run stargz: {run_sgz:.2f}")
 
 if __name__ == "__main__":
     main()
