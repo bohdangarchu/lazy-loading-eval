@@ -9,7 +9,10 @@ import time
 import subprocess
 import uuid
 
-DEBUG_SHELL = True
+from trace_file_access import analyze_strace
+
+PULL_DEBUG = True
+RUN_DEBUG = True
 
 def cleanup_image(image):
     """Remove image if exists"""
@@ -18,7 +21,7 @@ def cleanup_image(image):
 def pull_standard_image(image):
     """Pull standard image with ctr"""
     start = time.time()
-    result = subprocess.run(f"ctr i pull {image}", shell=True, text=True, capture_output=not DEBUG_SHELL)
+    result = subprocess.run(f"ctr i pull {image}", shell=True, text=True, capture_output=not PULL_DEBUG)
     duration = time.time() - start
 
     if result.returncode != 0:
@@ -28,7 +31,7 @@ def pull_standard_image(image):
 def pull_stargz_image(image):
     """Pull stargz image with ctr-remote"""
     start = time.time()
-    result = subprocess.run(f"ctr-remote i rpull {image}", shell=True, text=True, capture_output=not DEBUG_SHELL)
+    result = subprocess.run(f"ctr-remote i rpull {image}", shell=True, text=True, capture_output=not PULL_DEBUG)
     duration = time.time() - start
 
     if result.returncode != 0:
@@ -42,7 +45,7 @@ def run_standard_image(image):
         f"ctr run --rm {image} {container_id}",
         shell=True,
         text=True,
-        capture_output=not DEBUG_SHELL
+        capture_output=not RUN_DEBUG
     )
     duration = time.time() - start
 
@@ -58,9 +61,32 @@ def run_stargz_image(image):
         f"ctr run --rm --snapshotter=stargz {image} {container_id}",
         shell=True,
         text=True,
-        capture_output=not DEBUG_SHELL
+        capture_output=not RUN_DEBUG
     )
     duration = time.time() - start
+
+    if result.returncode != 0:
+        raise Exception(f"Run failed: {result.stderr}")
+    return duration
+
+def run_stargz_image_strace(image):
+    container_id = f"bench-{uuid.uuid4().hex[:8]}"
+    start = time.time()
+    result = subprocess.run(
+        f"""ctr run --rm --snapshotter=stargz \
+        {image} {container_id} \
+        strace -f -tt \
+        -e openat,read,stat,execve \
+        python /app/main.py""",
+        shell=True,
+        text=True,
+        capture_output=True
+    )
+    duration = time.time() - start
+    print("----------------------------strace----------------------------\n")
+    print(f"{result.stderr}\n")
+    print("----------------------------strace----------------------------\n")
+    analyze_strace(result.stderr, image)
 
     if result.returncode != 0:
         raise Exception(f"Run failed: {result.stderr}")
@@ -116,11 +142,7 @@ def bench_pull_time(standard_img, stargz_img):
     
     return standard_time, stargz_time
 
-def main():
-    # Images from stargz benchmarks
-    standard_img = "ghcr.io/bohdangarchu/bert-split:org"
-    stargz_img = "ghcr.io/bohdangarchu/bert-split:esgz"
-
+def bench_pull_and_run(standard_img, stargz_img):
     standard_time, stargz_time = bench_pull_time(standard_img, stargz_img)
     run_std, run_sgz = bench_runtime(standard_img, stargz_img)
 
@@ -136,6 +158,16 @@ def main():
         print("Run results")
         print(f"Run std: {run_std:.2f}")
         print(f"Run stargz: {run_sgz:.2f}")
+
+def run_strace(stargz_img):
+    pull_stargz_image(stargz_img)
+    run_stargz_image_strace(stargz_img)
+
+def main():
+    # Images from stargz benchmarks
+    standard_img = "ghcr.io/bohdangarchu/bert-split:org"
+    stargz_img = "ghcr.io/bohdangarchu/bert-split:esgz"
+    run_strace(stargz_img)
 
 if __name__ == "__main__":
     main()

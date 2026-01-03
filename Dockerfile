@@ -50,7 +50,7 @@ COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
 # Copy evaluation script
-COPY eval.py /eval.py
+COPY *.py /
 RUN chmod +x /eval.py
 
 RUN mkdir -p /tmp && chmod 1777 /tmp

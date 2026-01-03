@@ -21,4 +21,5 @@ containerd --config=/etc/containerd/config.toml &
 while ! ctr-remote version >/dev/null 2>&1; do sleep 1; done
 
 echo "Ready for evaluation"
+echo
 exec "$@"
