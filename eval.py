@@ -9,7 +9,7 @@ import time
 import subprocess
 import uuid
 
-DEBUG_SHELL = True
+DEBUG_SHELL = False
 
 def cleanup_image(image):
     """Remove image if exists"""
@@ -39,7 +39,8 @@ def run_standard_image(image):
     container_id = f"bench-{uuid.uuid4().hex[:8]}"
     start = time.time()
     result = subprocess.run(
-        f"ctr run --rm {image} {container_id}",
+        f"ctr run --rm {image} {container_id} "
+        "python3 -c \"print('ok')\"",
         shell=True,
         text=True,
         capture_output=not DEBUG_SHELL
@@ -55,7 +56,8 @@ def run_stargz_image(image):
     container_id = f"bench-{uuid.uuid4().hex[:8]}"
     start = time.time()
     result = subprocess.run(
-        f"ctr run --rm --snapshotter=stargz {image} {container_id}",
+        f"ctr run --rm --snapshotter=stargz {image} {container_id} "
+        "python3 -c \"print('ok')\"",
         shell=True,
         text=True,
         capture_output=not DEBUG_SHELL
@@ -118,8 +120,8 @@ def bench_pull_time(standard_img, stargz_img):
 
 def main():
     # Images from stargz benchmarks
-    standard_img = "ghcr.io/bohdangarchu/bert-split:org"
-    stargz_img = "ghcr.io/bohdangarchu/bert-split:esgz"
+    standard_img = "ghcr.io/stargz-containers/python:3.7-org"
+    stargz_img = "ghcr.io/stargz-containers/python:3.7-esgz"
 
     standard_time, stargz_time = bench_pull_time(standard_img, stargz_img)
     run_std, run_sgz = bench_runtime(standard_img, stargz_img)
