@@ -11,7 +11,7 @@ import uuid
 
 from trace_file_access import analyze_strace
 
-PULL_DEBUG = True
+PULL_DEBUG = False
 RUN_DEBUG = True
 
 def cleanup_image(image):
@@ -42,7 +42,7 @@ def run_standard_image(image):
     container_id = f"bench-{uuid.uuid4().hex[:8]}"
     start = time.time()
     result = subprocess.run(
-        f"ctr run --rm {image} {container_id}",
+        f"ctr run --rm {image} {container_id} python main.py split1",
         shell=True,
         text=True,
         capture_output=not RUN_DEBUG
@@ -58,7 +58,7 @@ def run_stargz_image(image):
     container_id = f"bench-{uuid.uuid4().hex[:8]}"
     start = time.time()
     result = subprocess.run(
-        f"ctr run --rm --snapshotter=stargz {image} {container_id}",
+        f"ctr run --rm --snapshotter=stargz {image} {container_id} python main.py split1",
         shell=True,
         text=True,
         capture_output=not RUN_DEBUG
@@ -77,7 +77,7 @@ def run_stargz_image_strace(image):
         {image} {container_id} \
         strace -f -tt \
         -e openat,read,stat,execve \
-        python /app/main.py""",
+        python /app/main.py split1""",
         shell=True,
         text=True,
         capture_output=True
@@ -86,6 +86,9 @@ def run_stargz_image_strace(image):
     print("----------------------------strace----------------------------\n")
     print(f"{result.stderr}\n")
     print("----------------------------strace----------------------------\n")
+    print("----------------------------run output----------------------------\n")
+    print(result.stdout)
+    print("----------------------------run output----------------------------\n")
     analyze_strace(result.stderr, image)
 
     if result.returncode != 0:
@@ -167,7 +170,7 @@ def main():
     # Images from stargz benchmarks
     standard_img = "ghcr.io/bohdangarchu/bert-split:org"
     stargz_img = "ghcr.io/bohdangarchu/bert-split:esgz"
-    run_strace(stargz_img)
+    bench_pull_and_run(standard_img, stargz_img)
 
 if __name__ == "__main__":
     main()
