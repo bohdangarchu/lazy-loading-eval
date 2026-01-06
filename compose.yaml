@@ -7,12 +7,25 @@ services:
     ports:
       - "5000:5000"
 
+  prepopulate:
+    build:
+      context: .
+      dockerfile: Dockerfile.prepopulate
+    privileged: true
+    image: prepopulate-registry:local
+    container_name: prepopulate-registry
+    depends_on:
+      - registry
+    restart: "no"
+
   benchmark:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: stargz-eval
     container_name: stargz-eval
     privileged: true
 
-    # === exact equivalents of your flags ===
     tmpfs:
       - /tmp:exec,mode=777
     devices:
@@ -23,9 +36,8 @@ services:
       - stargz-data:/var/lib/containerd-stargz-grpc
 
     depends_on:
-      - registry
+      - prepopulate
 
-    # keep container alive, same as interactive run
     command: sleep infinity
 
 volumes:

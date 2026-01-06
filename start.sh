@@ -20,8 +20,6 @@ containerd --config=/etc/containerd/config.toml &
 # Wait for containerd
 while ! ctr-remote version >/dev/null 2>&1; do sleep 1; done
 
-/prepopulate-registry.sh
-
 echo "Ready for evaluation"
 echo
 exec "$@"

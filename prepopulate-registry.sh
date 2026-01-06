@@ -4,24 +4,29 @@ set -eu
 REGISTRY="registry:5000"
 REPO="bert-split"
 
-STANDARD_SRC="ghcr.io/bohdangarchu/bert-split:org"
-STARGZ_SRC="ghcr.io/bohdangarchu/bert-split:esgz"
+SRC="ghcr.io/bohdangarchu/bert-split:esgz"
+DST="${REGISTRY}/${REPO}:esgz"
 
-STANDARD_DST="$REGISTRY/$REPO:org"
-STARGZ_DST="$REGISTRY/$REPO:esgz"
+echo "==> Waiting for registry..."
+until curl -fsS "http://${REGISTRY}/v2/" >/dev/null; do
+  sleep 0.2
+done
 
-echo "==> Pulling STANDARD image (normal OCI)"
-ctr image pull "$STANDARD_SRC"
-ctr image tag "$STANDARD_SRC" "$STANDARD_DST"
-ctr image push --plain-http "$STANDARD_DST"
-ctr image rm "$STANDARD_SRC" "$STANDARD_DST" || true
+echo "==> Starting containerd"
+/usr/local/bin/containerd &
 
-echo "==> Copying STARGZ image WITHOUT materialization"
-ctr-remote image copy --plain-http \
-  "$STARGZ_SRC" \
-  "$STARGZ_DST"
+# wait for containerd socket
+until ctr version >/dev/null 2>&1; do
+  sleep 0.2
+done
 
-echo "==> Verifying STARGZ annotations"
-ctr image inspect "$STARGZ_DST" | grep -i stargz
+echo "==> Pulling STARGZ image (full blobs, no unpack)"
+ctr-remote image pull "${SRC}"
 
-echo "==> DONE: registry populated correctly"
+echo "==> Tagging image for local registry"
+ctr image tag "${SRC}" "${DST}"
+
+echo "==> Pushing image to local registry (plain HTTP)"
+ctr image push --plain-http "${DST}"
+
+echo "==> DONE: registry populated"
