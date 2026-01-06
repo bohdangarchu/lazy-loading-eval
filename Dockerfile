@@ -47,6 +47,8 @@ COPY stargz-config.toml /etc/containerd-stargz-grpc/config.toml
 
 # Copy startup script
 COPY start.sh /start.sh
+COPY prepopulate-registry.sh /prepopulate-registry.sh
+RUN chmod +x /prepopulate-registry.sh
 RUN chmod +x /start.sh
 
 # Copy evaluation script

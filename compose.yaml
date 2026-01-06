@@ -1,0 +1,33 @@
+version: "3.8"
+
+services:
+  registry:
+    image: registry:2
+    container_name: registry
+    ports:
+      - "5000:5000"
+
+  benchmark:
+    image: stargz-eval
+    container_name: stargz-eval
+    privileged: true
+
+    # === exact equivalents of your flags ===
+    tmpfs:
+      - /tmp:exec,mode=777
+    devices:
+      - /dev/fuse
+
+    volumes:
+      - containerd-data:/var/lib/containerd
+      - stargz-data:/var/lib/containerd-stargz-grpc
+
+    depends_on:
+      - registry
+
+    # keep container alive, same as interactive run
+    command: sleep infinity
+
+volumes:
+  containerd-data:
+  stargz-data:
