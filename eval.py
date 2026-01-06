@@ -21,7 +21,7 @@ def cleanup_image(image):
 def pull_standard_image(image):
     """Pull standard image with ctr"""
     start = time.time()
-    result = subprocess.run(f"ctr i pull --plain-http {image}", shell=True, text=True, capture_output=not PULL_DEBUG)
+    result = subprocess.run(f"ctr i pull {image}", shell=True, text=True, capture_output=not PULL_DEBUG)
     duration = time.time() - start
 
     if result.returncode != 0:
@@ -31,7 +31,7 @@ def pull_standard_image(image):
 def pull_stargz_image(image):
     """Pull stargz image with ctr-remote"""
     start = time.time()
-    result = subprocess.run(f"ctr-remote i rpull --plain-http {image}", shell=True, text=True, capture_output=not PULL_DEBUG)
+    result = subprocess.run(f"ctr-remote i rpull {image}", shell=True, text=True, capture_output=not PULL_DEBUG)
     duration = time.time() - start
 
     if result.returncode != 0:
@@ -168,8 +168,8 @@ def run_strace(stargz_img):
 
 def main():
     # Images from stargz benchmarks
-    standard_img = "registry:5000/bert-split:org"
-    stargz_img   = "registry:5000/bert-split:esgz"
+    standard_img = "ghcr.io/bohdangarchu/bert-split:org"
+    stargz_img = "ghcr.io/bohdangarchu/bert-split:esgz"
     bench_pull_and_run(standard_img, stargz_img)
 
 if __name__ == "__main__":
