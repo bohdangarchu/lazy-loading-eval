@@ -50,6 +50,8 @@ RUN wget -O /tmp/nerdctl.tar.gz \
 RUN mkdir -p /etc/containerd /etc/containerd-stargz-grpc
 COPY containerd-config-eval.toml /etc/containerd/config.toml
 COPY stargz-config.toml /etc/containerd-stargz-grpc/config.toml
+RUN mkdir -p /etc/containerd/certs.d/registry:5000
+COPY hosts.toml /etc/containerd/certs.d/registry:5000/hosts.toml
 
 # Copy startup script
 COPY start.sh /start.sh
