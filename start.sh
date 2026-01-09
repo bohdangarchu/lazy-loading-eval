@@ -12,6 +12,7 @@ mkdir -p /var/lib/containerd /var/lib/containerd-stargz-grpc /run/containerd-sta
 containerd-stargz-grpc \
     --address=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock \
     --config=/etc/containerd-stargz-grpc/config.toml \
+    --log-level=debug \
     > /var/log/stargz.log 2>&1 &
 
 # Wait for stargz socket

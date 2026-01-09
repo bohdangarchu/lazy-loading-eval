@@ -1,4 +1,5 @@
 noprefetch = true
+metrics_address = "127.0.0.1:8234"
 
 [[resolver.host."registry:5000".mirrors]]
 host = "registry:5000"
