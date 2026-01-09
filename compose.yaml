@@ -4,6 +4,8 @@ services:
   registry:
     image: registry:2
     container_name: registry
+    volumes:
+      - registry-data:/var/lib/registry
     ports:
       - "5000:5000"
 
@@ -16,7 +18,6 @@ services:
     container_name: prepopulate-registry
     depends_on:
       - registry
-    restart: "no"
 
   benchmark:
     build:
@@ -38,8 +39,9 @@ services:
     depends_on:
       - prepopulate
 
-    command: sleep infinity
+    command: ["/bin/sh", "-c", "/start.sh && sleep infinity"]
 
 volumes:
   containerd-data:
   stargz-data:
+  registry-data:
