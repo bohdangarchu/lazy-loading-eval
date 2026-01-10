@@ -12,6 +12,7 @@ RUN apt-get update -y && apt-get install -y \
     pkg-config \
     fuse3 \
     iproute2 \
+    jq \
     python3 \
     && rm -rf /var/lib/apt/lists/*
 
