@@ -11,6 +11,7 @@ RUN apt-get update -y && apt-get install -y \
     libseccomp-dev \
     pkg-config \
     fuse3 \
+    iproute2 \
     python3 \
     && rm -rf /var/lib/apt/lists/*
 

@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 1s
+
+scrape_configs:
+  - job_name: "stargz-snapshotter"
+    static_configs:
+      - targets: ["benchmark:9333"]

@@ -38,8 +38,19 @@ services:
 
     depends_on:
       - prepopulate
+    
+    expose:
+      - "9333"
 
     command: ["/bin/sh", "-c", "/start.sh && sleep infinity"]
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
 
 volumes:
   containerd-data:
