@@ -1,5 +1,8 @@
 version = 2
 
+[debug]
+  level = "debug"
+
 [proxy_plugins]
   [proxy_plugins.stargz]
     type = "snapshot"

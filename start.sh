@@ -19,7 +19,7 @@ containerd-stargz-grpc \
 while [ ! -S /run/containerd-stargz-grpc/containerd-stargz-grpc.sock ]; do sleep 1; done
 
 # Start containerd
-containerd --config=/etc/containerd/config.toml &
+containerd --config=/etc/containerd/config.toml 2>&1 | tee /var/log/containerd.log &
 
 # Wait for containerd
 while ! ctr-remote version >/dev/null 2>&1; do sleep 1; done
