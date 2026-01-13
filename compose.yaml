@@ -41,6 +41,7 @@ services:
     
     expose:
       - "9333"
+      - "9334"
 
     command: ["/bin/sh", "-c", "/start.sh && sleep infinity"]
 
@@ -49,6 +50,10 @@ services:
     container_name: prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.size=2GB"
     ports:
       - "9090:9090"
 
@@ -56,3 +61,4 @@ volumes:
   containerd-data:
   stargz-data:
   registry-data:
+  prometheus-data:
