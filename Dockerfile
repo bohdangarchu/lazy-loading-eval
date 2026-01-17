@@ -1,5 +1,3 @@
-# Minimal Stargz Evaluation - based on actual benchmark setup
-
 FROM debian:bullseye-slim
 
 RUN apt-get update -y && apt-get install -y \
@@ -16,12 +14,12 @@ RUN apt-get update -y && apt-get install -y \
     python3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Go
+# Go
 RUN wget -O go.tar.gz https://golang.org/dl/go1.24.0.linux-amd64.tar.gz && \
     tar -C /usr/local -xzf go.tar.gz && rm go.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
 
-# Build containerd and runc with exact stargz versions
+# containerd and runc
 ARG CONTAINERD_VERSION=v2.1.5
 ARG RUNC_VERSION=v1.3.3
 ARG NERDCTL_VERSION=2.2.0
@@ -34,7 +32,7 @@ RUN cd /tmp && \
     git clone -b ${RUNC_VERSION} --depth 1 https://github.com/opencontainers/runc && \
     cd runc && make && make install PREFIX=/usr/local
 
-# Clone and build stargz-snapshotter
+# stargz-snapshotter
 RUN cd /tmp && \
     git clone https://github.com/containerd/stargz-snapshotter.git && \
     cd stargz-snapshotter && \
@@ -48,20 +46,20 @@ RUN wget -O /tmp/nerdctl.tar.gz \
     tar -C /usr/local/bin -xzf /tmp/nerdctl.tar.gz && \
     rm /tmp/nerdctl.tar.gz
 
-# Copy configuration files
+# configuration files
 RUN mkdir -p /etc/containerd /etc/containerd-stargz-grpc
 COPY containerd-config-eval.toml /etc/containerd/config.toml
 COPY stargz-config.toml /etc/containerd-stargz-grpc/config.toml
 RUN mkdir -p /etc/containerd/certs.d/registry:5000
 COPY hosts.toml /etc/containerd/certs.d/registry:5000/hosts.toml
 
-# Copy startup script
+# startup script
 COPY start.sh /start.sh
 COPY prepopulate-registry.sh /prepopulate-registry.sh
 RUN chmod +x /prepopulate-registry.sh
 RUN chmod +x /start.sh
 
-# Copy evaluation script
+# evaluation script
 COPY *.py /
 RUN chmod +x /eval.py
 

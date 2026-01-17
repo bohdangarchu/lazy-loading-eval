@@ -3,8 +3,8 @@ version = 2
 [debug]
   level = "debug"
 
-[metrics]
-  address = "0.0.0.0:9334"
+# [metrics]
+#   address = "0.0.0.0:9334"
 
 [proxy_plugins]
   [proxy_plugins.stargz]
