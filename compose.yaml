@@ -1,0 +1,64 @@
+version: "3.8"
+
+services:
+  registry:
+    image: registry:2
+    container_name: registry
+    volumes:
+      - registry-data:/var/lib/registry
+    ports:
+      - "5000:5000"
+
+  prepopulate:
+    build:
+      context: .
+      dockerfile: Dockerfile.prepopulate
+    privileged: true
+    image: prepopulate-registry:local
+    container_name: prepopulate-registry
+    depends_on:
+      - registry
+
+  benchmark:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: stargz-eval
+    container_name: stargz-eval
+    privileged: true
+
+    tmpfs:
+      - /tmp:exec,mode=777
+    devices:
+      - /dev/fuse
+
+    volumes:
+      - containerd-data:/var/lib/containerd
+      - stargz-data:/var/lib/containerd-stargz-grpc
+
+    depends_on:
+      - prepopulate
+    
+    expose:
+      - "9333"
+      - "9334"
+
+    command: ["/bin/sh", "-c", "/start.sh && sleep infinity"]
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.size=2GB"
+    ports:
+      - "9090:9090"
+
+volumes:
+  containerd-data:
+  stargz-data:
+  registry-data:
+  prometheus-data:
