@@ -9,7 +9,7 @@ import time
 import subprocess
 import uuid
 
-from trace_file_access import analyze_strace
+from util.trace_file_access import analyze_strace
 
 PULL_DEBUG = False
 RUN_DEBUG = True
