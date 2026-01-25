@@ -12,6 +12,7 @@ RUN apt-get update -y && apt-get install -y \
     iproute2 \
     jq \
     python3 \
+    file \
     && rm -rf /var/lib/apt/lists/*
 
 # Go
@@ -55,9 +56,13 @@ COPY hosts.toml /etc/containerd/certs.d/registry:5000/hosts.toml
 
 # startup script
 COPY start.sh /start.sh
-COPY prepopulate-registry.sh /prepopulate-registry.sh
-RUN chmod +x /prepopulate-registry.sh
 RUN chmod +x /start.sh
+
+# 2dfs from local binary
+# TODO replace with remote install script
+COPY tdfs /usr/local/bin/tdfs
+RUN mkdir /2dfs-small
+COPY 2dfs-small/ /2dfs-small/
 
 # evaluation script
 COPY *.py /

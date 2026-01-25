@@ -24,22 +24,22 @@ containerd --config=/etc/containerd/config.toml 2>&1 | tee /var/log/containerd.l
 # Wait for containerd
 while ! ctr-remote version >/dev/null 2>&1; do sleep 1; done
 
-check_manifest() {
-  repo="$1"
-  tag="$2"
-  curl -fsS -o /dev/null \
-    -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
-    "http://${REGISTRY}/v2/${repo}/manifests/${tag}"
-}
+# check_manifest() {
+#   repo="$1"
+#   tag="$2"
+#   curl -fsS -o /dev/null \
+#     -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+#     "http://${REGISTRY}/v2/${repo}/manifests/${tag}"
+# }
 
-echo "==> Waiting for images to be available..."
+# echo "==> Waiting for images to be available..."
 
-until \
-  check_manifest "$REPO" "org" && \
-  check_manifest "$REPO" "esgz"
-do
-  sleep 1
-done
+# until \
+#   check_manifest "$REPO" "org" && \
+#   check_manifest "$REPO" "esgz"
+# do
+#   sleep 1
+# done
 
 echo "images are available - ready for evaluation"
 echo
