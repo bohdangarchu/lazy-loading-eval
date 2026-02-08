@@ -35,7 +35,7 @@ RUN cd /tmp && \
 
 # stargz-snapshotter
 RUN cd /tmp && \
-    git clone https://github.com/containerd/stargz-snapshotter.git && \
+    git clone --branch prefetch-annotation-fix https://github.com/bohdangarchu/stargz-snapshotter.git && \
     cd stargz-snapshotter && \
     make containerd-stargz-grpc && \
     make ctr-remote && \
@@ -60,9 +60,9 @@ RUN chmod +x /start.sh
 
 # 2dfs from local binary
 # TODO replace with remote install script
-COPY tdfs /usr/local/bin/tdfs
-RUN mkdir /2dfs-small
-COPY 2dfs-small/ /2dfs-small/
+COPY binaries/tdfs /usr/local/bin/tdfs
+RUN mkdir /2dfs-files
+COPY 2dfs-big/ /2dfs-files/
 
 # evaluation script
 COPY *.py /

@@ -6,6 +6,7 @@ version = 2
 # [metrics]
 #   address = "0.0.0.0:9334"
 
+# https://github.com/containerd/stargz-snapshotter/blob/main/docs/transfer.md#how-to-enable-stargz-snapshotter-when-transfer-service-is-enabled
 [proxy_plugins]
   [proxy_plugins.stargz]
     type = "snapshot"
