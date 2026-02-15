@@ -7,6 +7,7 @@ REPO="bert-split"
 # Cleanup and setup directories
 rm -rf /var/lib/containerd/* /var/lib/containerd-stargz-grpc/* || true
 mkdir -p /var/lib/containerd /var/lib/containerd-stargz-grpc /run/containerd-stargz-grpc
+mkdir -p /run/buildkit
 
 # Start stargz snapshotter first
 containerd-stargz-grpc \
@@ -23,6 +24,18 @@ containerd --config=/etc/containerd/config.toml 2>&1 | tee /var/log/containerd.l
 
 # Wait for containerd
 while ! ctr-remote version >/dev/null 2>&1; do sleep 1; done
+
+# Start BuildKit
+echo "starting buildkit" 
+buildkitd \
+  --addr unix:///run/buildkit/buildkitd.sock \
+  --oci-worker=true \
+  --containerd-worker=true \
+  --containerd-worker-addr=/run/containerd/containerd.sock \
+  > /var/log/buildkitd.log 2>&1 &
+
+# Wait for buildkitd
+while [ ! -S /run/buildkit/buildkitd.sock ]; do sleep 1; done
 
 # check_manifest() {
 #   repo="$1"
