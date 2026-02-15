@@ -70,6 +70,7 @@ services:
 volumes:
   containerd-data:
   stargz-data:
+  # registry-data:
   2dfs-registry-data:
   # prometheus-data:
   benchmark-tmp:

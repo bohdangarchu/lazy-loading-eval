@@ -63,17 +63,17 @@ RUN chmod +x /start.sh
 # TODO replace with remote install script
 COPY binaries/tdfs /usr/local/bin/tdfs
 RUN mkdir /2dfs-files
-COPY 2dfs-big/ /2dfs-files/
+COPY 2dfs-small/ /2dfs-files/
 
 # evaluation script
 # COPY *.py /
 # RUN chmod +x /eval.py
 
 # sample dockerfiles
-RUN mkdir -p /workspace/sample-image
-COPY sample-image/ /workspace/sample-image
+# RUN mkdir -p /workspace/sample-image
+# COPY sample-image/ /workspace/sample-image
 
 RUN mkdir -p /tmp && chmod 1777 /tmp
 
-WORKDIR /workspace/sample-image
+WORKDIR /workspace
 CMD ["/start.sh", "python3", "/eval.py"]
