@@ -1,1 +1,1 @@
-second file
+old file2 contents

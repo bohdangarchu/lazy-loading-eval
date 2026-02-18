@@ -26,7 +26,7 @@ tdfs image push --force-http registry:5000/python-2dfs:v1
 tdfs image push --force-http registry:5000/python-2dfs:v2
 
 ctr-remote i rpull --plain-http registry:5000/library/python-2dfs:v1--0.0.0.1
-ctr run -d --snapshotter=stargz registry:5000/library/python-2dfs:v1--0.0.0.1 test-ctr sh -c 'while true; do cat /file2.txt; sleep 2; done'
+ctr run -d --snapshotter=stargz registry:5000/library/python-2dfs:v1--0.0.0.1 test-ctr sh -c 'sleep infinity'
 ctr task exec --exec-id=check1 test-ctr cat /file2.txt
 
 ctr-remote refresh-layer "sha256:$OLD_LAYER" "sha256:$NEW_BLOB"

@@ -75,5 +75,5 @@ COPY 2dfs-small/ /2dfs-files/
 
 RUN mkdir -p /tmp && chmod 1777 /tmp
 
-WORKDIR /workspace
+WORKDIR /2dfs-files
 CMD ["/start.sh", "python3", "/eval.py"]
