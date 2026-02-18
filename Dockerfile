@@ -63,7 +63,7 @@ RUN chmod +x /start.sh
 # TODO replace with remote install script
 COPY binaries/tdfs /usr/local/bin/tdfs
 RUN mkdir /2dfs-files
-COPY 2dfs-small/ /2dfs-files/
+COPY 2dfs-large/ /2dfs-files/
 
 # evaluation script
 # COPY *.py /
