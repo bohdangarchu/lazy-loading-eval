@@ -17,6 +17,7 @@ RUNC_VERSION="1.3.4"
 CNI_VERSION="1.9.0"
 STARGZ_VERSION="0.18.2"
 NERDCTL_VERSION="2.2.1"
+PROMETHEUS_VERSION=3.9.1
 
 ARCH="amd64"
 OS="linux"
@@ -152,12 +153,15 @@ EOF
 
 mkdir -p /etc/containerd-stargz-grpc
 
-cat > /etc/containerd-stargz-grpc/config.toml <<'EOF'
+cat > /etc/containerd-stargz-grpc/config.toml <<EOF
 noprefetch = true
 no_background_fetch = true
 disable_verification = true
+[[resolver.host."${REGISTRY_NODE}:5000".mirrors]]
+host = "${REGISTRY_NODE}:5000"
+insecure = true
 
-# metrics_address = "0.0.0.0:9333"
+metrics_address = "127.0.0.1:8234"
 EOF
 
 # -------------------------------------------------------------------
@@ -166,6 +170,53 @@ EOF
 systemctl daemon-reload
 systemctl enable --now stargz-snapshotter
 systemctl restart containerd
+                                                                                                                                 
+# -------------------------------------------------------------------
+# Step 8: Run prometheus
+# -------------------------------------------------------------------       
+curl -sL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" \
+  | sudo tar -xz -C /usr/local/bin --strip-components=1 \
+    "prometheus-${PROMETHEUS_VERSION}.linux-amd64/prometheus" \
+    "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+
+sudo mkdir -p /etc/prometheus
+sudo tee /etc/prometheus/prometheus.yml > /dev/null <<EOF
+global:
+  scrape_interval: 3s
+
+scrape_configs:
+  - job_name: 'stargz-snapshotter'
+    static_configs:
+      - targets: ['127.0.0.1:8234']
+EOF
+
+# 4. Create systemd service for Prometheus
+sudo tee /etc/systemd/system/prometheus.service > /dev/null <<EOF
+[Unit]
+Description=Prometheus
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/var/lib/prometheus
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now prometheus
+# verify
+sleep 3
+echo "--- stargz metrics endpoint ---"
+curl -sf http://127.0.0.1:8234/metrics | grep -c "^stargz_" && echo "stargz metrics OK"
+
+echo "--- Prometheus targets ---"
+curl -sf http://localhost:9090/api/v1/targets \
+  | grep -o '"health":"[^"]*"' | head -1 \
+  | cut -d'"' -f4 \
+  | xargs -I{} echo "Target health: {}"
 
 # -------------------------------------------------------------------
 # Cleanup
