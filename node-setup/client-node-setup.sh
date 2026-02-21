@@ -9,6 +9,7 @@ RUNC_VERSION="1.3.4"
 CNI_VERSION="1.9.0"
 STARGZ_VERSION="0.18.2"
 REGISTRY_NODE=10.10.1.2
+NERDCTL_VERSION="2.2.1"
 
 ARCH="amd64"
 OS="linux"
@@ -76,6 +77,40 @@ curl -Lo /etc/systemd/system/stargz-snapshotter.service \
   https://raw.githubusercontent.com/containerd/stargz-snapshotter/main/script/config/etc/systemd/system/stargz-snapshotter.service
 
 # -------------------------------------------------------------------
+# Step 5b: Install nerdctl (full) + bundled dependencies
+# -------------------------------------------------------------------
+curl -LO "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-full-${NERDCTL_VERSION}-${OS}-${ARCH}.tar.gz"
+
+tar -C /usr/local -xvf \
+  "nerdctl-full-${NERDCTL_VERSION}-${OS}-${ARCH}.tar.gz"
+
+# -------------------------------------------------------------------
+# Step 5c: Enable BuildKit daemon (buildkitd)
+# -------------------------------------------------------------------
+cat > /etc/systemd/system/buildkit.service <<'EOF'
+[Unit]
+Description=BuildKit
+Documentation=https://github.com/moby/buildkit
+After=containerd.service
+Requires=containerd.service
+
+[Service]
+ExecStart=/usr/local/bin/buildkitd \
+  --addr unix:///run/buildkit/buildkitd.sock \
+  --containerd-worker=true \
+  --containerd-worker-addr=/run/containerd/containerd.sock
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+mkdir -p /run/buildkit
+systemctl daemon-reload
+systemctl enable --now buildkit
+
+# -------------------------------------------------------------------
 # Step 6: Configure containerd for stargz
 # -------------------------------------------------------------------
 mkdir -p /etc/containerd
@@ -135,8 +170,11 @@ rm -rf "$TMP_DIR"
 # Verification
 # -------------------------------------------------------------------
 containerd --version
+nerdctl --version
+buildkitd --version
 runc --version
 ctr-remote --help | head -n 5
 systemctl status stargz-snapshotter --no-pager
+systemctl status buildkit --no-pager
 
 echo "✅ containerd + stargz snapshotter installed successfully"
