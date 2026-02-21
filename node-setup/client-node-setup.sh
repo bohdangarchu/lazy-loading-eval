@@ -8,6 +8,7 @@ CONTAINERD_VERSION="2.2.1"
 RUNC_VERSION="1.3.4"
 CNI_VERSION="1.9.0"
 STARGZ_VERSION="0.15.1"
+REGISTRY_NODE=10.10.1.2
 
 ARCH="amd64"
 OS="linux"
@@ -84,8 +85,11 @@ if [[ ! -f /etc/containerd/config.toml ]]; then
 fi
 
 # overwrite with required stargz config
-cat > /etc/containerd/config.toml <<'EOF'
+cat > /etc/containerd/config.toml <<EOF
 version = 2
+
+[debug]
+  level = "debug"
 
 [plugins."io.containerd.grpc.v1.cri".containerd]
   snapshotter = "stargz"
@@ -95,8 +99,23 @@ version = 2
   [proxy_plugins.stargz]
     type = "snapshot"
     address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+
   [proxy_plugins.stargz.exports]
     root = "/var/lib/containerd-stargz-grpc/"
+
+[plugins."io.containerd.grpc.v1.cri".registry.mirrors]
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."${REGISTRY_NODE}:5000"]
+    endpoint = ["http://${REGISTRY_NODE}:5000"]
+EOF
+
+mkdir -p /etc/containerd-stargz-grpc
+
+cat > /etc/containerd-stargz-grpc/config.toml <<'EOF'
+noprefetch = true
+no_background_fetch = true
+disable_verification = true
+
+# metrics_address = "0.0.0.0:9333"
 EOF
 
 # -------------------------------------------------------------------
