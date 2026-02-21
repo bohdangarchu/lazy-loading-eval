@@ -1,8 +1,9 @@
 #!/bin/bash
+set -euox pipefail
 
 # docker
 sudo apt update
-sudo apt install ca-certificates curl git
+sudo apt install -y ca-certificates curl git
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
@@ -15,10 +16,23 @@ Components: stable
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
 sudo apt update
-sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-# todo: 2dfs registry
-docker run -d \
+# Enable Docker at boot and start it
+sudo systemctl enable docker
+sudo systemctl start docker
+
+WORKDIR="$HOME/2dfs-registry"
+if [ ! -d "$WORKDIR" ]; then
+  git clone https://github.com/2DFS/2dfs-registry.git "$WORKDIR"
+fi
+
+cd "$WORKDIR"
+
+sudo docker build -t 2dfs/registry:latest .
+
+sudo docker run -d \
+  --name 2dfs-registry \
   -p 5000:5000 \
-  --name registry \
-  registry:2
+  -v 2dfs-registry-data:/var/lib/registry \
+  2dfs/registry:latest
