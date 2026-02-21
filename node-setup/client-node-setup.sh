@@ -1,13 +1,15 @@
 #!/bin/bash
 set -euox pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 <REGISTRY_IP>"
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  echo "Usage: $0 <REGISTRY_IP> [STARGZ_REPO_URL]"
   echo "Example: $0 10.10.1.2"
+  echo "Example: $0 10.10.1.2 https://github.com/2DFS/stargz-snapshotter.git"
   exit 1
 fi
 
 REGISTRY_NODE="$1"
+STARGZ_REPO_URL="${2:-}"
 
 # -------------------------------------------------------------------
 # Versions
@@ -18,6 +20,7 @@ CNI_VERSION="1.9.0"
 STARGZ_VERSION="0.18.2"
 NERDCTL_VERSION="2.2.1"
 PROMETHEUS_VERSION=3.9.1
+GO_VERSION="1.23.6"
 
 ARCH="amd64"
 OS="linux"
@@ -72,13 +75,29 @@ apt-get install -y fuse
 modprobe fuse
 
 # -------------------------------------------------------------------
+# Step 4b: Install Go
+# -------------------------------------------------------------------
+curl -LO "https://go.dev/dl/go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
+rm -rf /usr/local/go
+tar -C /usr/local -xzf "go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
+export PATH="/usr/local/go/bin:$PATH"
+
+# -------------------------------------------------------------------
 # Step 5: Install stargz-snapshotter + ctr-remote
 # -------------------------------------------------------------------
-curl -LO "https://github.com/containerd/stargz-snapshotter/releases/download/v${STARGZ_VERSION}/stargz-snapshotter-${STARGZ_VERSION}-${OS}-${ARCH}.tar.gz"
-
-tar -C /usr/local/bin -xvf \
-  "stargz-snapshotter-${STARGZ_VERSION}-${OS}-${ARCH}.tar.gz" \
-  containerd-stargz-grpc ctr-remote
+if [[ -n "$STARGZ_REPO_URL" ]]; then
+  STARGZ_REPO_DIR="$(mktemp -d)"
+  git clone "$STARGZ_REPO_URL" "$STARGZ_REPO_DIR"
+  make -C "$STARGZ_REPO_DIR"
+  install -m 755 "$STARGZ_REPO_DIR/out/containerd-stargz-grpc" /usr/local/bin/containerd-stargz-grpc
+  install -m 755 "$STARGZ_REPO_DIR/out/ctr-remote" /usr/local/bin/ctr-remote
+  rm -rf "$STARGZ_REPO_DIR"
+else
+  curl -LO "https://github.com/containerd/stargz-snapshotter/releases/download/v${STARGZ_VERSION}/stargz-snapshotter-${STARGZ_VERSION}-${OS}-${ARCH}.tar.gz"
+  tar -C /usr/local/bin -xvf \
+    "stargz-snapshotter-${STARGZ_VERSION}-${OS}-${ARCH}.tar.gz" \
+    containerd-stargz-grpc ctr-remote
+fi
 
 # systemd service
 curl -Lo /etc/systemd/system/stargz-snapshotter.service \
