@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euox pipefail
 
+if [[ $# -ne 1 ]]; then
+  echo "Usage: $0 <REGISTRY_IP>"
+  echo "Example: $0 10.10.1.2"
+  exit 1
+fi
+
+REGISTRY_NODE="$1"
+
 # -------------------------------------------------------------------
 # Versions
 # -------------------------------------------------------------------
@@ -8,7 +16,6 @@ CONTAINERD_VERSION="2.2.1"
 RUNC_VERSION="1.3.4"
 CNI_VERSION="1.9.0"
 STARGZ_VERSION="0.18.2"
-REGISTRY_NODE=10.10.1.2
 NERDCTL_VERSION="2.2.1"
 
 ARCH="amd64"
