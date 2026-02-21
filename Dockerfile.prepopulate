@@ -30,12 +30,18 @@ RUN cd /tmp && \
     make ctr-remote && \
     cp out/ctr-remote /usr/local/bin/
 
+# 2dfs
+RUN curl -sfL 2dfs.github.io/install-tdfs.sh | sh -
+RUN mv tdfs /usr/local/bin/tdfs
+RUN mkdir /2dfs
+COPY 2dfs/ /2dfs/
+
 # containerd config
 RUN mkdir -p /etc/containerd
 COPY containerd-config-prepopulate.toml /etc/containerd/config.toml
 
 # prepopulation script
-COPY prepopulate-registry.sh /prepopulate-registry.sh
+COPY prepopulate-2dfs.sh /prepopulate-registry.sh
 RUN chmod +x /prepopulate-registry.sh
 
 WORKDIR /workspace

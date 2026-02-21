@@ -12,6 +12,7 @@ RUN apt-get update -y && apt-get install -y \
     iproute2 \
     jq \
     python3 \
+    file \
     && rm -rf /var/lib/apt/lists/*
 
 # Go
@@ -23,6 +24,7 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 ARG CONTAINERD_VERSION=v2.1.5
 ARG RUNC_VERSION=v1.3.3
 ARG NERDCTL_VERSION=2.2.0
+ARG BUILDKIT_VERSION=v0.13.2
 
 RUN cd /tmp && \
     git clone -b ${CONTAINERD_VERSION} --depth 1 https://github.com/containerd/containerd && \
@@ -33,13 +35,13 @@ RUN cd /tmp && \
     cd runc && make && make install PREFIX=/usr/local
 
 # stargz-snapshotter
-RUN cd /tmp && \
-    git clone https://github.com/containerd/stargz-snapshotter.git && \
-    cd stargz-snapshotter && \
-    make containerd-stargz-grpc && \
-    make ctr-remote && \
-    cp out/containerd-stargz-grpc /usr/local/bin/ && \
-    cp out/ctr-remote /usr/local/bin/
+COPY binaries/containerd-stargz-grpc /usr/local/bin/
+COPY binaries/ctr-remote /usr/local/bin/
+
+RUN wget -O /tmp/buildkit.tar.gz \
+      https://github.com/moby/buildkit/releases/download/${BUILDKIT_VERSION}/buildkit-${BUILDKIT_VERSION}.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf /tmp/buildkit.tar.gz && \
+    rm /tmp/buildkit.tar.gz
 
 RUN wget -O /tmp/nerdctl.tar.gz \
       https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-amd64.tar.gz && \
@@ -55,15 +57,23 @@ COPY hosts.toml /etc/containerd/certs.d/registry:5000/hosts.toml
 
 # startup script
 COPY start.sh /start.sh
-COPY prepopulate-registry.sh /prepopulate-registry.sh
-RUN chmod +x /prepopulate-registry.sh
 RUN chmod +x /start.sh
 
+# 2dfs from local binary
+# TODO replace with remote install script
+COPY binaries/tdfs /usr/local/bin/tdfs
+RUN mkdir /2dfs-files
+COPY 2dfs-large/ /2dfs-files/
+
 # evaluation script
-COPY *.py /
-RUN chmod +x /eval.py
+# COPY *.py /
+# RUN chmod +x /eval.py
+
+# sample dockerfiles
+# RUN mkdir -p /workspace/sample-image
+# COPY sample-image/ /workspace/sample-image
 
 RUN mkdir -p /tmp && chmod 1777 /tmp
 
-WORKDIR /workspace
+WORKDIR /2dfs-files
 CMD ["/start.sh", "python3", "/eval.py"]

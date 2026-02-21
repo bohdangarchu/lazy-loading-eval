@@ -1,5 +1,7 @@
 noprefetch = true
 no_background_fetch = true
+# or use skipVerify per layer
+disable_verification = true
 # metrics_address = "0.0.0.0:9333"
 
 [[resolver.host."registry:5000".mirrors]]
