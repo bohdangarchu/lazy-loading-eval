@@ -83,15 +83,23 @@ tar -C /usr/local -xzf "go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
 export PATH="/usr/local/go/bin:$PATH"
 
 # -------------------------------------------------------------------
-# Step 5: Install stargz-snapshotter + ctr-remote
+# Step 5a: Install nerdctl (full) + bundled dependencies
+# -------------------------------------------------------------------
+curl -LO "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-full-${NERDCTL_VERSION}-${OS}-${ARCH}.tar.gz"
+
+tar -C /usr/local -xvf \
+  "nerdctl-full-${NERDCTL_VERSION}-${OS}-${ARCH}.tar.gz"
+
+# -------------------------------------------------------------------
+# Step 5b: Install stargz-snapshotter + ctr-remote
 # -------------------------------------------------------------------
 if [[ -n "$STARGZ_REPO_URL" ]]; then
-  STARGZ_REPO_DIR="$(mktemp -d)"
+  STARGZ_REPO_DIR="/opt/stargz-snapshotter"
+  rm -rf "$STARGZ_REPO_DIR"
   git clone "$STARGZ_REPO_URL" "$STARGZ_REPO_DIR"
   make -C "$STARGZ_REPO_DIR"
   install -m 755 "$STARGZ_REPO_DIR/out/containerd-stargz-grpc" /usr/local/bin/containerd-stargz-grpc
   install -m 755 "$STARGZ_REPO_DIR/out/ctr-remote" /usr/local/bin/ctr-remote
-  rm -rf "$STARGZ_REPO_DIR"
 else
   curl -LO "https://github.com/containerd/stargz-snapshotter/releases/download/v${STARGZ_VERSION}/stargz-snapshotter-${STARGZ_VERSION}-${OS}-${ARCH}.tar.gz"
   tar -C /usr/local/bin -xvf \
@@ -102,14 +110,6 @@ fi
 # systemd service
 curl -Lo /etc/systemd/system/stargz-snapshotter.service \
   https://raw.githubusercontent.com/containerd/stargz-snapshotter/main/script/config/etc/systemd/system/stargz-snapshotter.service
-
-# -------------------------------------------------------------------
-# Step 5b: Install nerdctl (full) + bundled dependencies
-# -------------------------------------------------------------------
-curl -LO "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-full-${NERDCTL_VERSION}-${OS}-${ARCH}.tar.gz"
-
-tar -C /usr/local -xvf \
-  "nerdctl-full-${NERDCTL_VERSION}-${OS}-${ARCH}.tar.gz"
 
 # -------------------------------------------------------------------
 # Step 5c: Enable BuildKit daemon (buildkitd)
