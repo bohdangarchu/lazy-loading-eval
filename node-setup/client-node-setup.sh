@@ -176,11 +176,11 @@ cat > /etc/containerd-stargz-grpc/config.toml <<EOF
 noprefetch = true
 no_background_fetch = true
 disable_verification = true
+metrics_address = "127.0.0.1:8234"
+
 [[resolver.host."${REGISTRY_NODE}:5000".mirrors]]
 host = "${REGISTRY_NODE}:5000"
 insecure = true
-
-metrics_address = "127.0.0.1:8234"
 EOF
 
 # -------------------------------------------------------------------
