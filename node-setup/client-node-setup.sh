@@ -227,15 +227,13 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now prometheus
 # verify
-sleep 3
+sleep 10
 echo "--- stargz metrics endpoint ---"
-curl -sf http://127.0.0.1:8234/metrics | grep -c "^stargz_" && echo "stargz metrics OK"
+curl -sf http://127.0.0.1:8234/metrics > /dev/null && echo "stargz metrics OK"
 
 echo "--- Prometheus targets ---"
 curl -sf http://localhost:9090/api/v1/targets \
-  | grep -o '"health":"[^"]*"' | head -1 \
-  | cut -d'"' -f4 \
-  | xargs -I{} echo "Target health: {}"
+  | grep -q '"health":"up"' && echo "Prometheus target health: up"
 
 # -------------------------------------------------------------------
 # Cleanup

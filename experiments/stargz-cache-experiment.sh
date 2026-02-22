@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euox pipefail
 
+IMAGE="10.10.1.2:5000/ubuntu:stargz"
+STARGZ_ROOT="/var/lib/containerd-stargz-grpc"
+
 clear_cache() {
   systemctl stop stargz-snapshotter
   rm -rf "${STARGZ_ROOT:?}"/*
@@ -9,9 +12,6 @@ clear_cache() {
   systemctl start stargz-snapshotter
   systemctl restart containerd
 }
-
-IMAGE="10.10.1.2:5000/ubuntu:stargz"
-STARGZ_ROOT="/var/lib/containerd-stargz-grpc"
 
 clear_cache
 

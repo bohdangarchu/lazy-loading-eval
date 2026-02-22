@@ -19,7 +19,7 @@ RUNC_VERSION="1.3.4"
 CNI_VERSION="1.9.0"
 NERDCTL_VERSION="2.2.1"
 STARGZ_VERSION="0.18.2"
-GO_VERSION="1.23.6"
+GO_VERSION="1.24.0"
 
 ARCH="amd64"
 OS="linux"
@@ -60,20 +60,26 @@ curl -LO "https://github.com/opencontainers/runc/releases/download/v${RUNC_VERSI
 install -m 755 "runc.${ARCH}" /usr/local/sbin/runc
 
 # -------------------------------------------------------------------
-# Step 3: CNI plugins
+# Step 3: Python3
+# -------------------------------------------------------------------
+apt-get update
+apt-get install -y python3
+
+# -------------------------------------------------------------------
+# Step 5: CNI plugins
 # -------------------------------------------------------------------
 curl -LO "https://github.com/containernetworking/plugins/releases/download/v${CNI_VERSION}/cni-plugins-${OS}-${ARCH}-v${CNI_VERSION}.tgz"
 mkdir -p /opt/cni/bin
 tar Cxzvf /opt/cni/bin "cni-plugins-${OS}-${ARCH}-v${CNI_VERSION}.tgz"
 
 # -------------------------------------------------------------------
-# Step 4: nerdctl (full) + bundled dependencies (includes buildkitd)
+# Step 6: nerdctl (full) + bundled dependencies (includes buildkitd)
 # -------------------------------------------------------------------
 curl -LO "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-full-${NERDCTL_VERSION}-${OS}-${ARCH}.tar.gz"
 tar -C /usr/local -xvf "nerdctl-full-${NERDCTL_VERSION}-${OS}-${ARCH}.tar.gz"
 
 # -------------------------------------------------------------------
-# Step 5: BuildKit daemon
+# Step 7: BuildKit daemon
 # -------------------------------------------------------------------
 cat > /etc/systemd/system/buildkit.service <<'EOF'
 [Unit]
@@ -99,7 +105,7 @@ systemctl daemon-reload
 systemctl enable --now buildkit
 
 # -------------------------------------------------------------------
-# Step 6: Configure containerd for insecure registry
+# Step 8: Configure containerd for insecure registry
 # -------------------------------------------------------------------
 mkdir -p /etc/containerd
 
@@ -114,7 +120,7 @@ EOF
 systemctl restart containerd
 
 # -------------------------------------------------------------------
-# Step 7: Install Go (required for 2dfs builder)
+# Step 9: Install Go (required for 2dfs builder)
 # -------------------------------------------------------------------
 curl -LO "https://go.dev/dl/go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
 rm -rf /usr/local/go
@@ -122,7 +128,7 @@ tar -C /usr/local -xzf "go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
 export PATH="/usr/local/go/bin:$PATH"
 
 # -------------------------------------------------------------------
-# Step 8: Install stargz-snapshotter binaries (containerd-stargz-grpc, ctr-remote)
+# Step 10: Install stargz-snapshotter binaries (containerd-stargz-grpc, ctr-remote)
 # -------------------------------------------------------------------
 if [[ -n "$STARGZ_REPO_URL" ]]; then
   STARGZ_REPO_DIR="$(mktemp -d)"
@@ -139,13 +145,18 @@ else
 fi
 
 # -------------------------------------------------------------------
-# Step 9: Install 2DFS builder
+# Step 11: Install 2DFS builder
 # -------------------------------------------------------------------
-BUILDER_DIR="$(mktemp -d)"
+export GOPATH=/usr/local/gopath
+export GOCACHE=/usr/local/gocache
+export GOTOOLCHAIN=local
+
+BUILDER_DIR="/opt/2dfs-builder"
+rm -rf "$BUILDER_DIR"
 git clone https://github.com/2DFS/2dfs-builder.git "$BUILDER_DIR"
 git -C "$BUILDER_DIR" checkout stargz-build
-bash "$BUILDER_DIR/install.sh"
-rm -rf "$BUILDER_DIR"
+cd "$BUILDER_DIR"
+bash install.sh
 
 # -------------------------------------------------------------------
 # Cleanup
