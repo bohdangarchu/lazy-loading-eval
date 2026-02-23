@@ -24,7 +24,7 @@ sudo systemctl start docker
 
 WORKDIR="$HOME/2dfs-registry"
 if [ ! -d "$WORKDIR" ]; then
-  git clone https://github.com/2DFS/2dfs-registry.git "$WORKDIR"
+  git clone https://github.com/bohdangarchu/2dfs-registry.git "$WORKDIR"
 fi
 
 cd "$WORKDIR"
