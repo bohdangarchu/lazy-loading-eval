@@ -37,6 +37,13 @@ RUN cd /tmp && \
 # stargz-snapshotter
 COPY binaries/containerd-stargz-grpc /usr/local/bin/
 COPY binaries/ctr-remote /usr/local/bin/
+# RUN cd /tmp && \
+#     git clone https://github.com/containerd/stargz-snapshotter.git && \
+#     cd stargz-snapshotter && \
+#     make containerd-stargz-grpc && \
+#     make ctr-remote && \
+#     cp out/containerd-stargz-grpc /usr/local/bin/ && \
+#     cp out/ctr-remote /usr/local/bin/
 
 RUN wget -O /tmp/buildkit.tar.gz \
       https://github.com/moby/buildkit/releases/download/${BUILDKIT_VERSION}/buildkit-${BUILDKIT_VERSION}.linux-amd64.tar.gz && \
@@ -61,9 +68,9 @@ RUN chmod +x /start.sh
 
 # 2dfs from local binary
 # TODO replace with remote install script
-COPY binaries/tdfs /usr/local/bin/tdfs
-RUN mkdir /2dfs-files
-COPY 2dfs-large/ /2dfs-files/
+# COPY binaries/tdfs /usr/local/bin/tdfs
+# RUN mkdir /2dfs-files
+# COPY 2dfs-large/ /2dfs-files/
 
 # evaluation script
 # COPY *.py /
