@@ -2,3 +2,5 @@
 .venv
 big_file*
 tdfs
+Dockerfile.base.*
+Dockerfile.stargz

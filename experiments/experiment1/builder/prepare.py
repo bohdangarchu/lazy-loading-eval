@@ -39,9 +39,19 @@ def write_2dfs_json(src_files, output_path: str = "2dfs.json") -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
 
+def create_base_dockerfile(src_files, col: int, output_path: str) -> None:
+    """Generate a Dockerfile for a single allotment (one file per client)."""
+    lines = [f"FROM {BASE_IMAGE}"]
+    lines.append(f"COPY {src_files[col]} /{src_files[col]}")
+    lines.append("COPY main.py /main.py")
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
 if __name__ == "__main__":
     file_names = ["big_file1", "big_file2", "big_file3"]
     for file_name in file_names:
         create_random_file(700, file_name)
     write_2dfs_json(file_names)
     create_full_dockerfile(file_names)
+    for i, _ in enumerate(file_names):
+        create_base_dockerfile(file_names, i, f"Dockerfile.base.{i + 1}")
