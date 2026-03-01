@@ -100,6 +100,13 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+mkdir -p /etc/buildkit
+tee /etc/buildkit/buildkitd.toml <<EOF
+[registry."${REGISTRY_NODE}:5000"]
+  http = true
+  insecure = true
+EOF
+
 mkdir -p /run/buildkit
 systemctl daemon-reload
 systemctl enable --now buildkit
@@ -157,6 +164,12 @@ git clone https://github.com/bohdangarchu/2dfs-builder.git "$BUILDER_DIR"
 git -C "$BUILDER_DIR" checkout stargz-build
 cd "$BUILDER_DIR"
 bash install.sh
+
+# -------------------------------------------------------------------
+# Step 12: libs
+# -------------------------------------------------------------------
+sudo apt update
+sudo apt install -y pigz gzip
 
 # -------------------------------------------------------------------
 # Cleanup

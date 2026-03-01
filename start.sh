@@ -27,6 +27,13 @@ while ! ctr-remote version >/dev/null 2>&1; do sleep 1; done
 
 # Start BuildKit
 echo "starting buildkit" 
+mkdir -p /etc/buildkit
+tee /etc/buildkit/buildkitd.toml <<EOF
+[registry."registry:5000"]
+  http = true
+  insecure = true
+EOF
+
 buildkitd \
   --addr unix:///run/buildkit/buildkitd.sock \
   --oci-worker=true \

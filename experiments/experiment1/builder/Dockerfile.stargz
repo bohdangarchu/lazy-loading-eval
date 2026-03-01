@@ -1,0 +1,5 @@
+FROM ghcr.io/bohdangarchu/python:3.10-esgz
+COPY big_file1 /big_file1
+COPY big_file2 /big_file2
+COPY big_file3 /big_file3
+COPY main.py /main.py

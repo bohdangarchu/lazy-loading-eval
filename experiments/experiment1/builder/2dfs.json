@@ -1,0 +1,22 @@
+{
+    "allotments": [
+        {
+            "src": "./big_file1",
+            "dst": "/big_file1",
+            "row": 0,
+            "col": 0
+        },
+        {
+            "src": "./big_file2",
+            "dst": "/big_file2",
+            "row": 0,
+            "col": 1
+        },
+        {
+            "src": "./big_file3",
+            "dst": "/big_file3",
+            "row": 0,
+            "col": 2
+        }
+    ]
+}

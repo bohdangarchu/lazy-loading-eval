@@ -35,15 +35,15 @@ RUN cd /tmp && \
     cd runc && make && make install PREFIX=/usr/local
 
 # stargz-snapshotter
-COPY binaries/containerd-stargz-grpc /usr/local/bin/
-COPY binaries/ctr-remote /usr/local/bin/
-# RUN cd /tmp && \
-#     git clone https://github.com/containerd/stargz-snapshotter.git && \
-#     cd stargz-snapshotter && \
-#     make containerd-stargz-grpc && \
-#     make ctr-remote && \
-#     cp out/containerd-stargz-grpc /usr/local/bin/ && \
-#     cp out/ctr-remote /usr/local/bin/
+# COPY binaries/containerd-stargz-grpc /usr/local/bin/
+# COPY binaries/ctr-remote /usr/local/bin/
+RUN cd /tmp && \
+    git clone https://github.com/containerd/stargz-snapshotter.git && \
+    cd stargz-snapshotter && \
+    make containerd-stargz-grpc && \
+    make ctr-remote && \
+    cp out/containerd-stargz-grpc /usr/local/bin/ && \
+    cp out/ctr-remote /usr/local/bin/
 
 RUN wget -O /tmp/buildkit.tar.gz \
       https://github.com/moby/buildkit/releases/download/${BUILDKIT_VERSION}/buildkit-${BUILDKIT_VERSION}.linux-amd64.tar.gz && \
@@ -71,6 +71,8 @@ RUN chmod +x /start.sh
 # COPY binaries/tdfs /usr/local/bin/tdfs
 # RUN mkdir /2dfs-files
 # COPY 2dfs-large/ /2dfs-files/
+
+COPY experiments/experiment1/ /experiment1
 
 # evaluation script
 # COPY *.py /
