@@ -20,6 +20,8 @@ CNI_VERSION="1.9.0"
 NERDCTL_VERSION="2.2.1"
 STARGZ_VERSION="0.18.2"
 GO_VERSION="1.24.0"
+NODE_EXPORTER_VERSION="1.8.2"
+PROMETHEUS_VERSION="3.9.1"
 
 ARCH="amd64"
 OS="linux"
@@ -100,6 +102,13 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+mkdir -p /etc/buildkit
+tee /etc/buildkit/buildkitd.toml <<EOF
+[registry."${REGISTRY_NODE}:5000"]
+  http = true
+  insecure = true
+EOF
+
 mkdir -p /run/buildkit
 systemctl daemon-reload
 systemctl enable --now buildkit
@@ -159,6 +168,71 @@ cd "$BUILDER_DIR"
 bash install.sh
 
 # -------------------------------------------------------------------
+# Step 12: libs
+# -------------------------------------------------------------------
+sudo apt update
+sudo apt install -y pigz gzip
+
+# -------------------------------------------------------------------
+# Step 13: Install node_exporter
+# -------------------------------------------------------------------
+curl -LO "https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.${OS}-${ARCH}.tar.gz"
+tar -xzf "node_exporter-${NODE_EXPORTER_VERSION}.${OS}-${ARCH}.tar.gz"
+install -m 755 "node_exporter-${NODE_EXPORTER_VERSION}.${OS}-${ARCH}/node_exporter" /usr/local/bin/node_exporter
+
+cat > /etc/systemd/system/node-exporter.service <<'EOF'
+[Unit]
+Description=Prometheus Node Exporter
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/node_exporter
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now node-exporter
+
+# -------------------------------------------------------------------
+# Step 14: Install Prometheus (scrapes node_exporter)
+# -------------------------------------------------------------------
+curl -sL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" \
+  | tar -xz -C /usr/local/bin --strip-components=1 \
+    "prometheus-${PROMETHEUS_VERSION}.linux-amd64/prometheus" \
+    "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+
+mkdir -p /etc/prometheus /var/lib/prometheus
+
+cat > /etc/prometheus/prometheus.yml <<EOF
+global:
+  scrape_interval: 3s
+
+scrape_configs:
+  - job_name: 'node'
+    static_configs:
+      - targets: ['127.0.0.1:9100']
+EOF
+
+cat > /etc/systemd/system/prometheus.service <<'EOF'
+[Unit]
+Description=Prometheus
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/var/lib/prometheus
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now prometheus
+
+# -------------------------------------------------------------------
 # Cleanup
 # -------------------------------------------------------------------
 cd /
@@ -173,5 +247,7 @@ buildkitd --version
 runc --version
 ctr-remote --help | head -n 5
 systemctl status buildkit --no-pager
+systemctl status node-exporter --no-pager
+systemctl status prometheus --no-pager
 
 echo "✅ Builder node setup complete"
