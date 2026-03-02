@@ -4,3 +4,5 @@ big_file*
 tdfs
 Dockerfile.base.*
 Dockerfile.stargz
+.idea
+.claude
