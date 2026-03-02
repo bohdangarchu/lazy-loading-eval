@@ -14,7 +14,7 @@ echo "▶ Tearing down builder node setup..."
 # -------------------------------------------------------------------
 # Step 1: Stop and disable systemd services
 # -------------------------------------------------------------------
-for svc in buildkit containerd; do
+for svc in prometheus node-exporter buildkit containerd; do
   if systemctl is-active --quiet "$svc" 2>/dev/null; then
     systemctl stop "$svc" || true
   fi
@@ -27,6 +27,8 @@ done
 # Step 2: Remove systemd service files
 # -------------------------------------------------------------------
 rm -f /etc/systemd/system/buildkit.service
+rm -f /etc/systemd/system/node-exporter.service
+rm -f /etc/systemd/system/prometheus.service
 rm -f /usr/local/lib/systemd/system/containerd.service
 
 systemctl daemon-reload
@@ -48,6 +50,11 @@ rm -f /usr/local/sbin/runc
 # stargz binaries
 rm -f /usr/local/bin/containerd-stargz-grpc
 rm -f /usr/local/bin/ctr-remote
+
+# node_exporter and prometheus
+rm -f /usr/local/bin/node_exporter
+rm -f /usr/local/bin/prometheus
+rm -f /usr/local/bin/promtool
 
 # nerdctl-full bundle (extracted to /usr/local)
 rm -f /usr/local/bin/nerdctl
@@ -82,11 +89,14 @@ rm -rf /opt/2dfs-builder
 # /usr/local/bin — remove known candidates
 rm -f /usr/local/bin/2dfs-builder
 rm -f /usr/local/bin/2dfs
+rm -f /usr/local/bin/tdfs
 
 # -------------------------------------------------------------------
 # Step 7: Remove configuration files
 # -------------------------------------------------------------------
 rm -rf /etc/containerd
+rm -rf /etc/buildkit
+rm -rf /etc/prometheus
 
 # -------------------------------------------------------------------
 # Step 8: Unmount active mounts, then remove runtime directories
@@ -100,6 +110,7 @@ for dir in /run/containerd /var/lib/containerd; do
 done
 
 rm -rf /var/lib/containerd
+rm -rf /var/lib/prometheus
 rm -rf /run/containerd
 rm -rf /run/buildkit
 
@@ -107,5 +118,10 @@ rm -rf /run/buildkit
 # Step 9: Remove nerdctl-full lib artifacts
 # -------------------------------------------------------------------
 rm -rf /usr/local/lib/nerdctl
+
+# -------------------------------------------------------------------
+# Step 10: Remove apt-installed packages
+# -------------------------------------------------------------------
+apt-get remove -y pigz || true
 
 echo "✅ Builder node teardown complete"
