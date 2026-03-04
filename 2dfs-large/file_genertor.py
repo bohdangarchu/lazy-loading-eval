@@ -30,7 +30,7 @@ def write_2dfs_json(src_files, output_path: str = "2dfs.json") -> None:
         json.dump(data, f, indent=4)
 
 if __name__ == "__main__":
-    file_names = ["big_file1", "big_file2"]
+    file_names = ["big_file1", "big_file2", "big_file3"]
     for file_name in file_names:
         create_random_file(700, file_name)
     write_2dfs_json(file_names)

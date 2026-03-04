@@ -163,7 +163,6 @@ export GOTOOLCHAIN=local
 BUILDER_DIR="/opt/2dfs-builder"
 rm -rf "$BUILDER_DIR"
 git clone https://github.com/bohdangarchu/2dfs-builder.git "$BUILDER_DIR"
-git -C "$BUILDER_DIR" checkout stargz-build
 cd "$BUILDER_DIR"
 bash install.sh
 

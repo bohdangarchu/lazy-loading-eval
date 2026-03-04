@@ -11,6 +11,12 @@
             "dst": "/big_file2",
             "row": 0,
             "col": 1
+        },
+        {
+            "src": "./big_file3",
+            "dst": "/big_file3",
+            "row": 0,
+            "col": 2
         }
     ]
 }

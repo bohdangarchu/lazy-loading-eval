@@ -68,10 +68,10 @@ modprobe fuse
 # -------------------------------------------------------------------
 # Step 4b: Install Go
 # -------------------------------------------------------------------
-# curl -LO "https://go.dev/dl/go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
-# rm -rf /usr/local/go
-# tar -C /usr/local -xzf "go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
-# export PATH="/usr/local/go/bin:$PATH"
+curl -LO "https://go.dev/dl/go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
+rm -rf /usr/local/go
+tar -C /usr/local -xzf "go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
+export PATH="/usr/local/go/bin:$PATH"
 
 # -------------------------------------------------------------------
 # Step 5a: Install nerdctl (full) + bundled dependencies
