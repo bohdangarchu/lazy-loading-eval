@@ -8,3 +8,4 @@ Dockerfile.stargz
 .claude
 *.safetensors
 .cache
+experiments/experiment1/builder/2dfs.json
