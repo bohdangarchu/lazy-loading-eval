@@ -7,3 +7,6 @@ nerdctl image prune -a --force
 ctr content ls | awk 'NR>1 {print $1}' | xargs ctr content rm
 ctr snapshots rm $(ctr snapshots ls | awk 'NR>1 {print $2}')
 nerdctl volume prune --force
+rm -rf ~/.2dfs/blobs/* \
+       ~/.2dfs/uncompressed-keys/* \
+       ~/.2dfs/index/*

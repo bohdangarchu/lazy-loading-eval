@@ -6,3 +6,5 @@ Dockerfile.base.*
 Dockerfile.stargz
 .idea
 .claude
+*.safetensors
+.cache
