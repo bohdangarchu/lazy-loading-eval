@@ -3,14 +3,16 @@ import os
 
 from huggingface_hub import hf_hub_download
 
-MODEL_ID = "microsoft/Phi-3-mini-4k-instruct"
+MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
 BASE_IMAGE = "ghcr.io/bohdangarchu/python:3.10-esgz"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 SHARD_FILES = [
-    "model-00001-of-00002.safetensors",
-    "model-00002-of-00002.safetensors",
+    "model-00001-of-00004.safetensors",
+    "model-00002-of-00004.safetensors",
+    "model-00003-of-00004.safetensors",
+    "model-00004-of-00004.safetensors",
 ]
 
 
