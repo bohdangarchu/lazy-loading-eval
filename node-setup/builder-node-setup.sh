@@ -20,7 +20,6 @@ CNI_VERSION="1.9.0"
 NERDCTL_VERSION="2.2.1"
 STARGZ_VERSION="0.18.2"
 GO_VERSION="1.24.0"
-TDFS_OLD_VERSION="v0.0.102"
 NODE_EXPORTER_VERSION="1.8.2"
 PROMETHEUS_VERSION="3.9.1"
 
@@ -168,13 +167,17 @@ cd "$BUILDER_DIR"
 bash install.sh
 
 # -------------------------------------------------------------------
-# Step 11b: Install tdfs-old
+# Step 11b: Install tdfs-old (built from source at specific sha)
 # -------------------------------------------------------------------
-cd "$TMP_DIR"
-curl -L -O "https://github.com/2DFS/2dfs-builder/releases/download/${TDFS_OLD_VERSION}/tdfs_${OS}_${ARCH}.tar.gz"
-tar -xzf "tdfs_${OS}_${ARCH}.tar.gz"
+TDFS_OLD_DIR="$(mktemp -d)"
+git clone https://github.com/2DFS/2dfs-builder.git "$TDFS_OLD_DIR"
+cd "$TDFS_OLD_DIR"
+git checkout bb799633510c2c2c424af375ef6608094d52f078
+go get ./internal
+go build -o tdfs ./internal/tdfs.go
 install -m 755 tdfs /usr/local/bin/tdfs-old
-rm -f "tdfs_${OS}_${ARCH}.tar.gz" tdfs
+cd "$TMP_DIR"
+rm -rf "$TDFS_OLD_DIR"
 
 # -------------------------------------------------------------------
 # Step 12: libs
@@ -217,7 +220,8 @@ mkdir -p /etc/prometheus /var/lib/prometheus
 
 cat > /etc/prometheus/prometheus.yml <<EOF
 global:
-  scrape_interval: 3s
+  scrape_interval: 1s
+  scrape_timeout: 800ms
 
 scrape_configs:
   - job_name: 'node'

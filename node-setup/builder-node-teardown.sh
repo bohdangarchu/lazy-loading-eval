@@ -90,6 +90,7 @@ rm -rf /opt/2dfs-builder
 rm -f /usr/local/bin/2dfs-builder
 rm -f /usr/local/bin/2dfs
 rm -f /usr/local/bin/tdfs
+rm -f /usr/local/bin/tdfs-old
 
 # -------------------------------------------------------------------
 # Step 7: Remove configuration files
@@ -122,6 +123,6 @@ rm -rf /usr/local/lib/nerdctl
 # -------------------------------------------------------------------
 # Step 10: Remove apt-installed packages
 # -------------------------------------------------------------------
-apt-get remove -y pigz || true
+apt-get remove -y pigz python3-pip python3.12-venv || true
 
 echo "✅ Builder node teardown complete"
