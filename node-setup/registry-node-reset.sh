@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euox pipefail
+
+sudo docker stop 2dfs-registry
+sudo docker rm 2dfs-registry
+sudo docker volume rm 2dfs-registry-data
+
+sudo docker run -d \
+  --name 2dfs-registry \
+  -p 5000:5000 \
+  -v 2dfs-registry-data:/var/lib/registry \
+  2dfs/registry:latest

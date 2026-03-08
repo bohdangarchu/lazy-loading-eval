@@ -20,6 +20,7 @@ CNI_VERSION="1.9.0"
 NERDCTL_VERSION="2.2.1"
 STARGZ_VERSION="0.18.2"
 GO_VERSION="1.24.0"
+TDFS_OLD_VERSION="v0.0.102"
 NODE_EXPORTER_VERSION="1.8.2"
 PROMETHEUS_VERSION="3.9.1"
 
@@ -65,7 +66,7 @@ install -m 755 "runc.${ARCH}" /usr/local/sbin/runc
 # Step 3: Python3
 # -------------------------------------------------------------------
 apt-get update
-apt-get install -y python3
+apt-get install -y python3 python3-pip python3.12-venv
 
 # -------------------------------------------------------------------
 # Step 5: CNI plugins
@@ -167,6 +168,15 @@ cd "$BUILDER_DIR"
 bash install.sh
 
 # -------------------------------------------------------------------
+# Step 11b: Install tdfs-old
+# -------------------------------------------------------------------
+cd "$TMP_DIR"
+curl -L -O "https://github.com/2DFS/2dfs-builder/releases/download/${TDFS_OLD_VERSION}/tdfs_${OS}_${ARCH}.tar.gz"
+tar -xzf "tdfs_${OS}_${ARCH}.tar.gz"
+install -m 755 tdfs /usr/local/bin/tdfs-old
+rm -f "tdfs_${OS}_${ARCH}.tar.gz" tdfs
+
+# -------------------------------------------------------------------
 # Step 12: libs
 # -------------------------------------------------------------------
 sudo apt update
@@ -245,6 +255,8 @@ nerdctl --version
 buildkitd --version
 runc --version
 ctr-remote --help | head -n 5
+tdfs version
+tdfs-old version
 systemctl status buildkit --no-pager
 systemctl status node-exporter --no-pager
 systemctl status prometheus --no-pager

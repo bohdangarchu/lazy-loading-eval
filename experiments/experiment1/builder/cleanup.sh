@@ -21,3 +21,6 @@ rm -f "${SCRIPT_DIR}/Dockerfile.base.3"
 
 # huggingface_hub download cache (created by prepare.py local_dir)
 rm -rf "${SCRIPT_DIR}/.cache"
+
+# build logs
+rm -f "${SCRIPT_DIR}"/*.log
