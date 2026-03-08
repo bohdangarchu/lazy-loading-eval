@@ -22,10 +22,13 @@ build_image() {
     echo "[build ${i}] done in $(( end - start ))s"
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+indices=($(ls "${SCRIPT_DIR}"/Dockerfile.base.* | grep -oP '\d+$' | sort -n))
+
 total_start=$(date +%s)
 
 pids=()
-for i in 1 2 3; do
+for i in "${indices[@]}"; do
     build_image "$i" &
     pids+=($!)
 done
@@ -38,7 +41,7 @@ done
 total_end=$(date +%s)
 echo "Total time: $(( total_end - total_start ))s"
 
-for i in 1 2 3; do
+for i in "${indices[@]}"; do
     echo ""
     echo "=== build-base-${i}.log ==="
     cat "build-base-${i}.log"
