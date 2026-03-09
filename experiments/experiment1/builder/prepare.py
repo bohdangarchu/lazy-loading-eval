@@ -4,7 +4,7 @@ import os
 from huggingface_hub import hf_hub_download
 
 MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
-BASE_IMAGE = "ghcr.io/bohdangarchu/python:3.10-esgz"
+BASE_IMAGE = "10.10.1.2:5000/python:3.10-esgz"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
