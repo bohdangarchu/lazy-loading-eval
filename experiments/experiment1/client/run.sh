@@ -2,13 +2,15 @@
 set -euox pipefail
 
 REGISTRY_NODE="10.10.1.2"
-ALLOTMENT=0  # column index: 0=big_file1, 1=big_file2, 2=big_file3
+ALLOTMENT=0  # column index: 0=distilbert-base-uncased, 1=distilgpt2, 2=flan-t5-small
+
+FILES=("distilbert-base-uncased.safetensors" "distilgpt2.safetensors" "flan-t5-small.safetensors")
 
 BASE_IMAGE="${REGISTRY_NODE}:5000/experiment1-base:$((ALLOTMENT + 1))"
 STARGZ_IMAGE="${REGISTRY_NODE}:5000/python:3.10-experiment1-esgz"
 TDFS_IMAGE="${REGISTRY_NODE}:5000/python:3.10-experiment1-2dfs--0.${ALLOTMENT}.0.${ALLOTMENT}"
 
-FILE_PATH="/big_file$((ALLOTMENT + 1))"
+FILE_PATH="/${FILES[$ALLOTMENT]}"
 STARGZ_ROOT="/var/lib/containerd-stargz-grpc"
 
 clear_cache() {

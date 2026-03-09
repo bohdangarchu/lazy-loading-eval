@@ -20,6 +20,7 @@ CNI_VERSION="1.9.0"
 STARGZ_VERSION="0.18.2"
 NERDCTL_VERSION="2.2.1"
 PROMETHEUS_VERSION=3.9.1
+NODE_EXPORTER_VERSION="1.8.2"
 GO_VERSION="1.23.6"
 
 ARCH="amd64"
@@ -191,7 +192,30 @@ systemctl enable --now stargz-snapshotter
 systemctl restart containerd
                                                                                                                                  
 # -------------------------------------------------------------------
-# Step 8: Run prometheus
+# Step 8: Install node_exporter
+# -------------------------------------------------------------------
+curl -LO "https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.${OS}-${ARCH}.tar.gz"
+tar -xzf "node_exporter-${NODE_EXPORTER_VERSION}.${OS}-${ARCH}.tar.gz"
+sudo install -m 755 "node_exporter-${NODE_EXPORTER_VERSION}.${OS}-${ARCH}/node_exporter" /usr/local/bin/node_exporter
+
+sudo tee /etc/systemd/system/node-exporter.service > /dev/null <<'EOF'
+[Unit]
+Description=Prometheus Node Exporter
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/node_exporter
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now node-exporter
+
+# -------------------------------------------------------------------
+# Step 9: Run prometheus
 # -------------------------------------------------------------------       
 curl -sL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" \
   | sudo tar -xz -C /usr/local/bin --strip-components=1 \
@@ -201,12 +225,16 @@ curl -sL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHE
 sudo mkdir -p /etc/prometheus
 sudo tee /etc/prometheus/prometheus.yml > /dev/null <<EOF
 global:
-  scrape_interval: 3s
+  scrape_interval: 1s
+  scrape_timeout: 800ms
 
 scrape_configs:
   - job_name: 'stargz-snapshotter'
     static_configs:
       - targets: ['127.0.0.1:8234']
+  - job_name: 'node'
+    static_configs:
+      - targets: ['127.0.0.1:9100']
 EOF
 
 # 4. Create systemd service for Prometheus
@@ -251,5 +279,6 @@ runc --version
 ctr-remote --help | head -n 5
 systemctl status stargz-snapshotter --no-pager
 systemctl status buildkit --no-pager
+systemctl status node-exporter --no-pager
 
 echo "✅ containerd + stargz snapshotter installed successfully"
