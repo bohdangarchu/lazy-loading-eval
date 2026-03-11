@@ -133,10 +133,13 @@ systemctl restart containerd
 # -------------------------------------------------------------------
 BASE_IMAGE="ghcr.io/bohdangarchu/python:3.10-esgz"
 LOCAL_BASE_IMAGE="${REGISTRY_NODE}:5000/python:3.10-esgz"
+LOCAL_BASE_IMAGE_2DFS="${REGISTRY_NODE}:5000/library/python:3.10-esgz"
 
 nerdctl pull "$BASE_IMAGE"
 nerdctl tag "$BASE_IMAGE" "$LOCAL_BASE_IMAGE"
+nerdctl tag "$BASE_IMAGE" "$LOCAL_BASE_IMAGE_2DFS"
 nerdctl push --insecure-registry "$LOCAL_BASE_IMAGE"
+nerdctl push --insecure-registry "$LOCAL_BASE_IMAGE_2DFS"
 
 # -------------------------------------------------------------------
 # Step 9: Install Go (required for 2dfs builder)
@@ -190,10 +193,18 @@ cd "$TMP_DIR"
 rm -rf "$TDFS_OLD_DIR"
 
 # -------------------------------------------------------------------
-# Step 12: libs
+# Step 12: libs + buildah
 # -------------------------------------------------------------------
 sudo apt update
-sudo apt install -y pigz gzip
+sudo apt install -y pigz gzip "buildah=1.33.7+ds1-1ubuntu0.24.04.3"
+
+# Configure buildah to allow insecure registry
+mkdir -p /etc/containers/registries.conf.d
+cat > /etc/containers/registries.conf.d/insecure.conf <<EOF
+[[registry]]
+location = "${REGISTRY_NODE}:5000"
+insecure = true
+EOF
 
 # -------------------------------------------------------------------
 # Step 13: Install node_exporter
@@ -271,6 +282,7 @@ runc --version
 ctr-remote --help | head -n 5
 tdfs version
 tdfs-old version
+buildah --version
 systemctl status buildkit --no-pager
 systemctl status node-exporter --no-pager
 systemctl status prometheus --no-pager

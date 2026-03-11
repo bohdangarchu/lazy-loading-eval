@@ -9,3 +9,4 @@ Dockerfile.stargz
 *.safetensors
 .cache
 experiments/experiment1/builder/2dfs.json
+logs/

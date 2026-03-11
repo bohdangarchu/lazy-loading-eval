@@ -12,3 +12,4 @@ nerdctl volume prune --force
 rm -rf ~/.2dfs/blobs/* \
        ~/.2dfs/uncompressed-keys/* \
        ~/.2dfs/index/*
+buildah rmi -a
