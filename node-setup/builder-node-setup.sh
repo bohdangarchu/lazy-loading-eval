@@ -91,15 +91,23 @@ After=containerd.service
 Requires=containerd.service
 
 [Service]
+Environment=TMPDIR=/mydata/tmp
 ExecStart=/usr/local/bin/buildkitd \
   --addr unix:///run/buildkit/buildkitd.sock \
   --containerd-worker=true \
-  --containerd-worker-addr=/run/containerd/containerd.sock
+  --containerd-worker-addr=/run/containerd/containerd.sock \
+  --root /mydata/buildkit
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
+EOF
+
+mkdir -p /etc/systemd/system/containerd.service.d
+cat > /etc/systemd/system/containerd.service.d/override.conf <<'EOF'
+[Service]
+Environment=TMPDIR=/mydata/tmp
 EOF
 
 mkdir -p /etc/buildkit
@@ -275,8 +283,9 @@ rm -rf "$TMP_DIR"
 # -------------------------------------------------------------------
 # Set TMPDIR to /mydata for large temp files (e.g. stargz builds)
 # -------------------------------------------------------------------
-echo 'export TMPDIR=/mydata' >> /root/.bashrc
-source /root/.bashrc
+mkdir -p /mydata/tmp /mydata/buildkit
+echo 'export TMPDIR=/mydata/tmp' >> /root/.bashrc
+export TMPDIR=/mydata/tmp
 
 # -------------------------------------------------------------------
 # Verification
