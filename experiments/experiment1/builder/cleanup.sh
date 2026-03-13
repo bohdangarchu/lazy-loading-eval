@@ -9,6 +9,7 @@ rm -f "${SCRIPT_DIR}"/*.safetensors
 rm -f "${SCRIPT_DIR}/2dfs.json"
 rm -f "${SCRIPT_DIR}/Dockerfile.stargz"
 rm -f "${SCRIPT_DIR}"/Dockerfile.base.*
+rm -f "${SCRIPT_DIR}"/*.bin
 
 # huggingface_hub download cache (created by prepare.py local_dir)
 rm -rf "${SCRIPT_DIR}/.cache"
