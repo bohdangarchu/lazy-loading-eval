@@ -22,6 +22,8 @@ STARGZ_VERSION="0.18.2"
 GO_VERSION="1.24.0"
 NODE_EXPORTER_VERSION="1.8.2"
 PROMETHEUS_VERSION="3.9.1"
+GRAFANA_PROM_URL="https://prometheus-prod-65-prod-eu-west-2.grafana.net/api/prom/push"
+GRAFANA_PROM_USER="3041204"
 
 ARCH="amd64"
 OS="linux"
@@ -31,6 +33,11 @@ OS="linux"
 # -------------------------------------------------------------------
 if [[ $EUID -ne 0 ]]; then
   echo "Please run as root"
+  exit 1
+fi
+
+if [[ -z "${GRAFANA_API_KEY:-}" ]]; then
+  echo "Error: GRAFANA_API_KEY env var must be set"
   exit 1
 fi
 
@@ -256,6 +263,17 @@ scrape_configs:
   - job_name: 'node'
     static_configs:
       - targets: ['127.0.0.1:9100']
+EOF
+
+cat >> /etc/prometheus/prometheus.yml <<EOF
+
+remote_write:
+  - url: ${GRAFANA_PROM_URL}
+    basic_auth:
+      username: "${GRAFANA_PROM_USER}"
+      password: "${GRAFANA_API_KEY}"
+    external_labels:
+      host: $(hostname)
 EOF
 
 cat > /etc/systemd/system/prometheus.service <<'EOF'
