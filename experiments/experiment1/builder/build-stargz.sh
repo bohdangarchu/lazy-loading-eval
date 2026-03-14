@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euox pipefail
-export REGISTRY_NODE="10.10.1.2"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCHEMA="${SCRIPT_DIR}/../schema.yaml"
+export REGISTRY_NODE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['registry_node'])")
 
 time buildctl build \
     --frontend dockerfile.v0 \

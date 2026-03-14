@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euox pipefail
 
-export REGISTRY_NODE="10.10.1.2"
+export REGISTRY_NODE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['registry_node'])")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- base images (parallel) ---

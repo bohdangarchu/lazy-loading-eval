@@ -5,7 +5,7 @@ set -euox pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA="${SCRIPT_DIR}/../schema.yaml"
 
-REGISTRY_NODE="10.10.1.2"
+REGISTRY_NODE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['registry_node'])")
 
 ALLOTMENT=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['refresh_index'])")
 
