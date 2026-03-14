@@ -1,0 +1,7 @@
+model:
+  base: "unsloth/Meta-Llama-3.1-8B-bnb-4bit"
+  updated: "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
+
+base_image: "10.10.1.2:5000/python:3.10-esgz"
+splits: 4
+refresh_index: 0  # 0-based chunk index to replace (chunk1.bin = 0)
