@@ -1,14 +1,18 @@
-import argparse
 import json
 import os
 
+import yaml
 from huggingface_hub import hf_hub_download, list_repo_files
-
-MODEL_ID = "unsloth/Meta-Llama-3.1-8B-bnb-4bit"
-BASE_IMAGE = "10.10.1.2:5000/python:3.10-esgz"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BUFFER_SIZE = 8 * 1024 * 1024  # 8 MB
+
+with open(os.path.join(SCRIPT_DIR, "..", "schema.yaml")) as f:
+    schema = yaml.safe_load(f)
+
+MODEL_ID = schema["model"]["base"]
+NUM_SPLITS = schema["splits"]
+BASE_IMAGE = schema["base_image"]
 
 
 def get_shard_files(token: str = None) -> list[str]:
@@ -112,15 +116,11 @@ def create_base_dockerfile(chunk_names: list[str], col: int, output_path: str) -
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-n", type=int, required=True, help="Number of chunks to split the model into")
-    args = parser.parse_args()
-
     token = os.environ.get("HF_TOKEN")
     shard_files = get_shard_files(token=token)
     print(f"Found {len(shard_files)} shards in {MODEL_ID}: {shard_files}")
     shard_paths = download_model_shards(shard_files, token=token)
-    chunk_names = split_into_chunks(shard_paths, args.n)
+    chunk_names = split_into_chunks(shard_paths, NUM_SPLITS)
     write_2dfs_json(chunk_names)
     create_full_dockerfile(chunk_names)
     for i in range(len(chunk_names)):
