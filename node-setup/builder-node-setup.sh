@@ -258,22 +258,19 @@ cat > /etc/prometheus/prometheus.yml <<EOF
 global:
   scrape_interval: 1s
   scrape_timeout: 800ms
+  external_labels:
+    host: $(hostname)
 
 scrape_configs:
   - job_name: 'node'
     static_configs:
       - targets: ['127.0.0.1:9100']
-EOF
-
-cat >> /etc/prometheus/prometheus.yml <<EOF
 
 remote_write:
   - url: ${GRAFANA_PROM_URL}
     basic_auth:
       username: "${GRAFANA_PROM_USER}"
       password: "${GRAFANA_API_KEY}"
-    external_labels:
-      host: $(hostname)
 EOF
 
 cat > /etc/systemd/system/prometheus.service <<'EOF'
@@ -288,6 +285,8 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
+
+promtool check config /etc/prometheus/prometheus.yml
 
 systemctl daemon-reload
 systemctl enable --now prometheus
