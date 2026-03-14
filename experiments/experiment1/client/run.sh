@@ -25,8 +25,8 @@ clear_cache() {
     # remove all content blobs
     sudo ctr content rm $(sudo ctr content ls -q) 2>/dev/null || true
     # remove all snapshots (overlayfs and stargz)
-    sudo ctr snapshots --snapshotter overlayfs rm $(sudo ctr snapshots --snapshotter overlayfs ls -q) 2>/dev/null || true
-    sudo ctr snapshots --snapshotter stargz rm $(sudo ctr snapshots --snapshotter stargz ls -q) 2>/dev/null || true
+    sudo ctr snapshots --snapshotter overlayfs ls | awk 'NR>1 {print $1}' | xargs -r sudo ctr snapshots --snapshotter overlayfs rm 2>/dev/null || true
+    sudo ctr snapshots --snapshotter stargz ls | awk 'NR>1 {print $1}' | xargs -r sudo ctr snapshots --snapshotter stargz rm 2>/dev/null || true
     # clear stargz on-disk cache
     sudo rm -rf "${STARGZ_ROOT:?}"/*
     sudo systemctl start stargz-snapshotter
@@ -38,7 +38,7 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] === BASE: ${BASE_IMAGE} ==="
 clear_cache
 time sudo nerdctl pull --insecure-registry "${BASE_IMAGE}"
 time sudo nerdctl run --rm "${BASE_IMAGE}" python3 /main.py "${FILE_PATH}"
-sleep 60
+sleep 6
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === 2DFS: ${TDFS_IMAGE} ==="
 clear_cache
@@ -47,9 +47,9 @@ time sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" python3 /main.py
 echo "printing checksum for validation"
 time sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" sha256sum "${FILE_PATH}"
 clear_cache
+sleep 6
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === STARGZ: ${STARGZ_IMAGE} ==="
-clear_cache
 time sudo nerdctl pull --insecure-registry --snapshotter=stargz "${STARGZ_IMAGE}"
 time sudo nerdctl run --rm --snapshotter=stargz "${STARGZ_IMAGE}" python3 /main.py "${FILE_PATH}"
-sleep 60
+clear_cache

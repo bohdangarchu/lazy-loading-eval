@@ -15,4 +15,3 @@ sleep 60
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting build-stargz"
 sudo ./build-stargz.sh
 sudo ./clear-builder-cache.sh
-sleep 60

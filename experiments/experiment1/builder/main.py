@@ -1,5 +1,6 @@
 import sys
 import time
+from datetime import datetime
 
 def main():
     path = sys.argv[1]
@@ -11,8 +12,8 @@ def main():
 
     duration = after - before
     fmt = "%Y-%m-%d %H:%M:%S.%f"
-    print(f"before: {time.strftime(fmt, time.localtime(before))}")
-    print(f"after:  {time.strftime(fmt, time.localtime(after))}")
+    print(f"before: {datetime.fromtimestamp(before).strftime(fmt)}")
+    print(f"after:  {datetime.fromtimestamp(after).strftime(fmt)}")
     print(f"duration: {duration:.6f}s")
 
     _ = len(data)
