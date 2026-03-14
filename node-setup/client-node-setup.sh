@@ -174,7 +174,7 @@ EOF
 mkdir -p /etc/containerd-stargz-grpc
 
 cat > /etc/containerd-stargz-grpc/config.toml <<EOF
-noprefetch = true
+noprefetch = false
 no_background_fetch = true
 disable_verification = true
 metrics_address = "127.0.0.1:8234"
