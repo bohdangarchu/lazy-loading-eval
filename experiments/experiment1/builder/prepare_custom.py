@@ -39,7 +39,7 @@ def split_into_chunks(shard_paths: list[str], n: int) -> list[str]:
     total_size = sum(os.path.getsize(p) for p in shard_paths)
     chunk_size = total_size // n
 
-    chunk_names = [f"chunk-{i + 1:04d}-of-{n:04d}.bin" for i in range(n)]
+    chunk_names = [f"chunk{i + 1}.bin" for i in range(n)]
     chunk_paths = [os.path.join(SCRIPT_DIR, name) for name in chunk_names]
 
     if all(os.path.exists(p) for p in chunk_paths):
