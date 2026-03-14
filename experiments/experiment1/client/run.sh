@@ -14,7 +14,7 @@ FILE_PATH="/${FILE_NAME}"
 
 BASE_IMAGE="${REGISTRY_NODE}:5000/experiment1-base:$((ALLOTMENT + 1))"
 STARGZ_IMAGE="${REGISTRY_NODE}:5000/python:3.10-experiment1-esgz"
-TDFS_IMAGE="${REGISTRY_NODE}:5000/python:3.10-experiment1-2dfs--0.${ALLOTMENT}.0.${ALLOTMENT}"
+TDFS_IMAGE="${REGISTRY_NODE}:5000/library/python:3.10-experiment1-2dfs--0.0.0.$((ALLOTMENT + 1))"
 STARGZ_ROOT="/var/lib/containerd-stargz-grpc"
 
 clear_cache() {
@@ -37,19 +37,19 @@ clear_cache() {
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === BASE: ${BASE_IMAGE} ==="
 clear_cache
 time sudo nerdctl pull --insecure-registry "${BASE_IMAGE}"
-sudo nerdctl run --rm "${BASE_IMAGE}" python3 /main.py "${FILE_PATH}"
-sleep 60
-
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] === STARGZ: ${STARGZ_IMAGE} ==="
-clear_cache
-time sudo nerdctl pull --insecure-registry --snapshotter=stargz "${STARGZ_IMAGE}"
-sudo nerdctl run --rm --snapshotter=stargz "${STARGZ_IMAGE}" python3 /main.py "${FILE_PATH}"
+time sudo nerdctl run --rm "${BASE_IMAGE}" python3 /main.py "${FILE_PATH}"
 sleep 60
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === 2DFS: ${TDFS_IMAGE} ==="
 clear_cache
 time sudo ctr-remote images rpull --plain-http "${TDFS_IMAGE}"
-sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" python3 /main.py "${FILE_PATH}"
+time sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" python3 /main.py "${FILE_PATH}"
 echo "printing checksum for validation"
-sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" sha256sum "${FILE_PATH}"
+time sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" sha256sum "${FILE_PATH}"
 clear_cache
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] === STARGZ: ${STARGZ_IMAGE} ==="
+clear_cache
+time sudo nerdctl pull --insecure-registry --snapshotter=stargz "${STARGZ_IMAGE}"
+time sudo nerdctl run --rm --snapshotter=stargz "${STARGZ_IMAGE}" python3 /main.py "${FILE_PATH}"
+sleep 60

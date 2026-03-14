@@ -2,8 +2,8 @@
 set -euox pipefail
 
 sudo ./clear-builder-cache.sh
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting build-base"
-sudo ./build-base.sh
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting rebuild-base"
+sudo ./rebuild-base.sh
 sudo ./clear-builder-cache.sh
 sleep 60
 
