@@ -37,8 +37,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 if [[ -z "${GRAFANA_API_KEY:-}" ]]; then
-  echo "Error: GRAFANA_API_KEY env var must be set"
-  exit 1
+  echo "Warning: GRAFANA_API_KEY not set — Grafana remote_write will be disabled"
 fi
 
 echo "▶ Installing containerd=${CONTAINERD_VERSION}, runc=${RUNC_VERSION}, cni=${CNI_VERSION}, nerdctl=${NERDCTL_VERSION}, stargz=${STARGZ_VERSION}"
@@ -266,12 +265,17 @@ scrape_configs:
     static_configs:
       - targets: ['127.0.0.1:9100']
 
+EOF
+
+if [[ -n "${GRAFANA_API_KEY:-}" ]]; then
+  cat >> /etc/prometheus/prometheus.yml <<EOF
 remote_write:
   - url: ${GRAFANA_PROM_URL}
     basic_auth:
       username: "${GRAFANA_PROM_USER}"
       password: "${GRAFANA_API_KEY}"
 EOF
+fi
 
 cat > /etc/systemd/system/prometheus.service <<'EOF'
 [Unit]

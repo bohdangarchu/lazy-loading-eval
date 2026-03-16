@@ -1,23 +1,28 @@
 import json
 import os
 
-from huggingface_hub import hf_hub_download
-
-MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
-BASE_IMAGE = "10.10.1.2:5000/python:3.10-esgz"
+import yaml
+from huggingface_hub import list_repo_files, hf_hub_download
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCHEMA_PATH = os.path.join(SCRIPT_DIR, "../schema.yaml")
 
-SHARD_FILES = [
-    "model-00001-of-00004.safetensors",
-    "model-00002-of-00004.safetensors",
-    "model-00003-of-00004.safetensors",
-    "model-00004-of-00004.safetensors",
-]
+with open(SCHEMA_PATH) as f:
+    _schema = yaml.safe_load(f)
+
+MODEL_ID = _schema["model"]["base"]
+BASE_IMAGE = _schema["base_image"]
 
 
-def download_model_shards(token: str = None) -> None:
-    for filename in SHARD_FILES:
+def discover_shards(token: str = None) -> list[str]:
+    return sorted(
+        f for f in list_repo_files(MODEL_ID, token=token)
+        if f.endswith(".safetensors")
+    )
+
+
+def download_model_shards(shard_files: list[str], token: str = None) -> None:
+    for filename in shard_files:
         dest = os.path.join(SCRIPT_DIR, filename)
         if os.path.exists(dest):
             print(f"Skipping {filename} (already exists)")
@@ -57,7 +62,6 @@ def create_full_dockerfile(src_files, output_path: str = "Dockerfile.stargz") ->
 
 
 def create_base_dockerfile(src_files, col: int, output_path: str) -> None:
-    """Generate a Dockerfile for a single allotment (one shard per client)."""
     lines = [f"FROM {BASE_IMAGE}"]
     lines.append(f"COPY {src_files[col]} /{src_files[col]}")
     lines.append("COPY main.py /main.py")
@@ -67,8 +71,10 @@ def create_base_dockerfile(src_files, col: int, output_path: str) -> None:
 
 if __name__ == "__main__":
     token = os.environ.get("HF_TOKEN")
-    download_model_shards(token=token)
-    write_2dfs_json(SHARD_FILES)
-    create_full_dockerfile(SHARD_FILES)
-    for i in range(len(SHARD_FILES)):
-        create_base_dockerfile(SHARD_FILES, i, f"Dockerfile.base.{i + 1}")
+    shard_files = discover_shards(token=token)
+    print(f"Found {len(shard_files)} shard(s): {shard_files}")
+    download_model_shards(shard_files, token=token)
+    write_2dfs_json(shard_files)
+    create_full_dockerfile(shard_files)
+    for i in range(len(shard_files)):
+        create_base_dockerfile(shard_files, i, f"Dockerfile.base.{i + 1}")
