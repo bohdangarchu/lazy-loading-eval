@@ -1,7 +1,7 @@
 model:
-  base: "unsloth/Meta-Llama-3.1-8B-bnb-4bit"
+  base: "Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8"
 
 registry_node: "10.10.1.2"
-base_image: "10.10.1.2:5000/python:3.10-esgz"
-splits: 4
+base_image: "10.10.1.2:5000/python:3.12-torch-esgz"
+splits: 3
 refresh_index: 0  # 0-based chunk index to replace (chunk1.bin = 0)
