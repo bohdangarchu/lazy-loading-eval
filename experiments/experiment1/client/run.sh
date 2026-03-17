@@ -37,19 +37,17 @@ clear_cache() {
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === BASE: ${BASE_IMAGE} ==="
 clear_cache
 time sudo nerdctl pull --insecure-registry "${BASE_IMAGE}"
-time sudo nerdctl run --rm "${BASE_IMAGE}" python3 /main.py "${FILE_PATH}"
+time sudo nerdctl run --rm "${BASE_IMAGE}" python3 /main.py
 sleep 6
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === 2DFS: ${TDFS_IMAGE} ==="
 clear_cache
 time sudo ctr-remote images rpull --plain-http "${TDFS_IMAGE}"
-time sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" python3 /main.py "${FILE_PATH}"
-echo "printing checksum for validation"
-time sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" sha256sum "${FILE_PATH}"
+time sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" python3 /main.py
 clear_cache
 sleep 6
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === STARGZ: ${STARGZ_IMAGE} ==="
 time sudo nerdctl pull --insecure-registry --snapshotter=stargz "${STARGZ_IMAGE}"
-time sudo nerdctl run --rm --snapshotter=stargz "${STARGZ_IMAGE}" python3 /main.py "${FILE_PATH}"
+time sudo nerdctl run --rm --snapshotter=stargz "${STARGZ_IMAGE}" python3 /main.py
 clear_cache
