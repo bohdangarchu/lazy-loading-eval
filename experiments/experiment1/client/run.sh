@@ -9,12 +9,9 @@ REGISTRY_NODE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))
 
 ALLOTMENT=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['refresh_index'])")
 
-FILE_NAME="chunk$((ALLOTMENT + 1)).bin"
-FILE_PATH="/${FILE_NAME}"
-
 BASE_IMAGE="${REGISTRY_NODE}:5000/experiment1-base:$((ALLOTMENT + 1))"
 STARGZ_IMAGE="${REGISTRY_NODE}:5000/experiment1-esgz"
-TDFS_IMAGE="${REGISTRY_NODE}:5000/library/experiment1-2dfs--0.0.0.$((ALLOTMENT + 1))"
+TDFS_IMAGE="${REGISTRY_NODE}:5000/library/experiment1-2dfs--0.0.0.$((ALLOTMENT))"
 STARGZ_ROOT="/var/lib/containerd-stargz-grpc"
 
 clear_cache() {

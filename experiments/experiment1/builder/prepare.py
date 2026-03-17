@@ -56,7 +56,6 @@ def create_full_dockerfile(src_files, output_path: str = "Dockerfile.stargz") ->
     lines = [f"FROM {BASE_IMAGE}"]
     for src in src_files:
         lines.append(f"COPY {src} /{src}")
-    lines.append("COPY main.py /main.py")
     with open(os.path.join(SCRIPT_DIR, output_path), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
@@ -64,7 +63,6 @@ def create_full_dockerfile(src_files, output_path: str = "Dockerfile.stargz") ->
 def create_base_dockerfile(src_files, col: int, output_path: str) -> None:
     lines = [f"FROM {BASE_IMAGE}"]
     lines.append(f"COPY {src_files[col]} /{src_files[col]}")
-    lines.append("COPY main.py /main.py")
     with open(os.path.join(SCRIPT_DIR, output_path), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
