@@ -146,8 +146,8 @@ systemctl restart containerd
 # Step 8b: Mirror base image to local registry
 # -------------------------------------------------------------------
 BASE_IMAGE="ghcr.io/bohdangarchu/python:3.12-torch-esgz"
-LOCAL_BASE_IMAGE="${REGISTRY_NODE}:5000/python:3.10-esgz"
-LOCAL_BASE_IMAGE_2DFS="${REGISTRY_NODE}:5000/library/python:3.10-esgz"
+LOCAL_BASE_IMAGE="${REGISTRY_NODE}:5000/python:3.12-torch-esgz"
+LOCAL_BASE_IMAGE_2DFS="${REGISTRY_NODE}:5000/library/python:3.12-torch-esgz"
 
 nerdctl pull "$BASE_IMAGE"
 nerdctl tag "$BASE_IMAGE" "$LOCAL_BASE_IMAGE"

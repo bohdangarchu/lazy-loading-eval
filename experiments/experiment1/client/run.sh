@@ -13,8 +13,8 @@ FILE_NAME="chunk$((ALLOTMENT + 1)).bin"
 FILE_PATH="/${FILE_NAME}"
 
 BASE_IMAGE="${REGISTRY_NODE}:5000/experiment1-base:$((ALLOTMENT + 1))"
-STARGZ_IMAGE="${REGISTRY_NODE}:5000/python:3.10-experiment1-esgz"
-TDFS_IMAGE="${REGISTRY_NODE}:5000/library/python:3.10-experiment1-2dfs--0.0.0.$((ALLOTMENT + 1))"
+STARGZ_IMAGE="${REGISTRY_NODE}:5000/experiment1-esgz"
+TDFS_IMAGE="${REGISTRY_NODE}:5000/library/experiment1-2dfs--0.0.0.$((ALLOTMENT + 1))"
 STARGZ_ROOT="/var/lib/containerd-stargz-grpc"
 
 clear_cache() {
