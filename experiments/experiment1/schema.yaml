@@ -1,7 +1,7 @@
 model:
-  base: "Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8"
+  base: "meta-llama/Meta-Llama-3-8B-Instruct" # gated
 
 registry_node: "10.10.1.2"
 base_image: "10.10.1.2:5000/python:3.12-torch-esgz"
-splits: 3
+splits: 4
 refresh_index: 0  # 0-based chunk index to replace (chunk1.bin = 0)

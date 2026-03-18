@@ -12,8 +12,8 @@ FILE_NAME="chunk$((ALLOTMENT + 1)).bin"
 FILE_PATH="/${FILE_NAME}"
 
 BASE_IMAGE="${REGISTRY_NODE}:5000/experiment2-base:$((ALLOTMENT + 1))"
-STARGZ_IMAGE="${REGISTRY_NODE}:5000/python:3.10-experiment2-esgz"
-TDFS_IMAGE="${REGISTRY_NODE}:5000/python:3.10-experiment2-2dfs--0.0.0.$((ALLOTMENT + 1))"
+STARGZ_IMAGE="${REGISTRY_NODE}:5000/experiment2-esgz"
+TDFS_IMAGE="${REGISTRY_NODE}:5000/library/experiment2-2dfs--0.0.0.$((ALLOTMENT))"
 
 OLD_LAYER="${OLD_LAYER:?OLD_LAYER env var required}"
 NEW_LAYER="${NEW_LAYER:?NEW_LAYER env var required}"

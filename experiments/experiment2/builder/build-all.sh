@@ -1,8 +1,10 @@
 #!/bin/bash
 set -euox pipefail
 
-export REGISTRY_NODE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['registry_node'])")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCHEMA="${SCRIPT_DIR}/../schema.yaml"
+export REGISTRY_NODE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['registry_node'])")
+export BASE_IMAGE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['base_image'])")
 
 # --- base images (parallel) ---
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting build-base"
@@ -52,9 +54,9 @@ fi
 # --- 2dfs ---
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting build-2dfs"
 time tdfs build --platforms linux/amd64 --enable-stargz --force-http \
-    ${REGISTRY_NODE}:5000/python:3.10-esgz \
-    ${REGISTRY_NODE}:5000/python:3.10-experiment2-2dfs
-tdfs image push --force-http ${REGISTRY_NODE}:5000/python:3.10-experiment2-2dfs
+    ${BASE_IMAGE} \
+    ${REGISTRY_NODE}:5000/experiment2-2dfs
+tdfs image push --force-http ${REGISTRY_NODE}:5000/experiment2-2dfs
 
 # --- stargz ---
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting build-stargz"
@@ -63,4 +65,4 @@ time buildctl build \
     --opt filename=Dockerfile.stargz \
     --local context=. \
     --local dockerfile=. \
-    --output type=image,name=${REGISTRY_NODE}:5000/python:3.10-experiment2-esgz,push=true,compression=estargz,oci-mediatypes=true,registry.insecure=true
+    --output type=image,name=${REGISTRY_NODE}:5000/experiment2-esgz,push=true,compression=estargz,oci-mediatypes=true,registry.insecure=true

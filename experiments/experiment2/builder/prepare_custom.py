@@ -83,9 +83,8 @@ def split_into_chunks(shard_paths: list[str], n: int) -> list[str]:
 
 
 def write_2dfs_json(chunk_names: list[str], output_path: str = "2dfs.json") -> None:
-    allotments = [{"src": "./main.py", "dst": "/main.py", "row": 0, "col": 0}]
-    allotments += [
-        {"src": f"./{name}", "dst": f"/{name}", "row": 0, "col": idx + 1}
+    allotments = [
+        {"src": f"./{name}", "dst": f"/{name}", "row": 0, "col": idx}
         for idx, name in enumerate(chunk_names)
     ]
     data = {"allotments": allotments}
