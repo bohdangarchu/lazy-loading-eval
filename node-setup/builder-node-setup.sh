@@ -194,19 +194,6 @@ cd "$BUILDER_DIR"
 bash install.sh
 
 # -------------------------------------------------------------------
-# Step 11b: Install tdfs-old (built from source at specific sha)
-# -------------------------------------------------------------------
-TDFS_OLD_DIR="$(mktemp -d)"
-git clone https://github.com/2DFS/2dfs-builder.git "$TDFS_OLD_DIR"
-cd "$TDFS_OLD_DIR"
-git checkout bb799633510c2c2c424af375ef6608094d52f078
-go get ./internal
-go build -o tdfs ./internal/tdfs.go
-install -m 755 tdfs /usr/local/bin/tdfs-old
-cd "$TMP_DIR"
-rm -rf "$TDFS_OLD_DIR"
-
-# -------------------------------------------------------------------
 # Step 12: libs + buildah
 # -------------------------------------------------------------------
 sudo apt update
