@@ -4,10 +4,9 @@ set -euox pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA="${SCRIPT_DIR}/../schema.yaml"
 
-REGISTRY_NODE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['registry_node'])")
-REFRESH_INDEX=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['refresh_index'])")
+eval "$(python3 "${SCRIPT_DIR}/../../load-schema.py" "${SCHEMA}")"
 IMAGE_NUM=$((REFRESH_INDEX + 1))
-IMAGE="${REGISTRY_NODE}:5000/experiment2-base:${IMAGE_NUM}"
+IMAGE="${REGISTRY_NODE}:5000/${IMG_BASE_NAME}:${IMAGE_NUM}"
 
 echo "=== BUILD+PUSH: ${IMAGE} ==="
 time buildctl build \

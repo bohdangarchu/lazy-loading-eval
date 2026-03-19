@@ -5,3 +5,18 @@ registry_node: "10.10.1.2"
 base_image: "10.10.1.2:5000/python:3.12-torch-esgz"
 splits: 4
 refresh_index: 0  # 0-based chunk index to replace (chunk1.bin = 0)
+
+images:
+  base:
+    name: "experiment1-base"          # tag: :<split_number>
+  stargz:
+    name: "experiment1-esgz"
+    tag: "latest"
+  2dfs:
+    name: "experiment1-2dfs"
+    tag: "latest"
+    registry_path: "library/experiment1-2dfs"    # 2dfs registry uses library/ prefix
+  2dfs_stargz:
+    name: "experiment1-2dfs-stargz"
+    tag: "latest"
+    registry_path: "library/experiment1-2dfs-stargz"

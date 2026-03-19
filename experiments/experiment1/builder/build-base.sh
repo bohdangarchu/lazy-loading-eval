@@ -3,11 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA="${SCRIPT_DIR}/../schema.yaml"
-export REGISTRY_NODE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['registry_node'])")
+eval "$(python3 "${SCRIPT_DIR}/../../load-schema.py" "${SCHEMA}")"
 
 build_image() {
     local i=$1
-    local IMAGE="${REGISTRY_NODE}:5000/experiment1-base:${i}"
+    local IMAGE="${REGISTRY_NODE}:5000/${IMG_BASE_NAME}:${i}"
     local log="build-base-${i}.log"
     local start
     start=$(date +%s)
