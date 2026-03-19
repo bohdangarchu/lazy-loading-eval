@@ -11,7 +11,7 @@ ALLOTMENT=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['re
 
 BASE_IMAGE="${REGISTRY_NODE}:5000/experiment1-base:$((ALLOTMENT + 1))"
 STARGZ_IMAGE="${REGISTRY_NODE}:5000/experiment1-esgz"
-TDFS_IMAGE="${REGISTRY_NODE}:5000/library/experiment1-2dfs--0.0.0.$((ALLOTMENT))"
+TDFS_IMAGE="${REGISTRY_NODE}:5000/library/experiment1-2dfs:latest--0.0.0.$((ALLOTMENT))"
 STARGZ_ROOT="/var/lib/containerd-stargz-grpc"
 
 clear_cache() {
@@ -28,23 +28,21 @@ clear_cache() {
     sudo rm -rf "${STARGZ_ROOT:?}"/*
     sudo systemctl start stargz-snapshotter
     sudo systemctl restart containerd
-    sleep 2
+    sleep 10
 }
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === BASE: ${BASE_IMAGE} ==="
 clear_cache
-time sudo nerdctl pull --insecure-registry "${BASE_IMAGE}"
-time sudo nerdctl run --rm "${BASE_IMAGE}" python3 /main.py
-sleep 6
+time sudo ctr images pull --plain-http "${BASE_IMAGE}"
+time sudo ctr run --rm "${BASE_IMAGE}" run-base-$$ python3 /main.py
+clear_cache
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === 2DFS: ${TDFS_IMAGE} ==="
+time sudo ctr-remote images rpull --plain-http --containerd-labels "${TDFS_IMAGE}"
+time sudo ctr-remote run --rm --snapshotter=stargz "${TDFS_IMAGE}" run-2dfs-$$ python3 /main.py
 clear_cache
-time sudo ctr-remote images rpull --plain-http "${TDFS_IMAGE}"
-time sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" python3 /main.py
-clear_cache
-sleep 6
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === STARGZ: ${STARGZ_IMAGE} ==="
-time sudo nerdctl pull --insecure-registry --snapshotter=stargz "${STARGZ_IMAGE}"
-time sudo nerdctl run --rm --snapshotter=stargz "${STARGZ_IMAGE}" python3 /main.py
+time sudo ctr-remote images rpull --plain-http "${STARGZ_IMAGE}"
+time sudo ctr-remote run --rm --snapshotter=stargz "${STARGZ_IMAGE}" run-stargz-$$ python3 /main.py
 clear_cache

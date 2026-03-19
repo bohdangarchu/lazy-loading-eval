@@ -9,4 +9,4 @@ time buildctl build \
     --opt filename=Dockerfile.stargz \
     --local context=. \
     --local dockerfile=. \
-    --output type=image,name=${REGISTRY_NODE}:5000/python:3.10-experiment1-esgz,push=true,compression=estargz,oci-mediatypes=true,registry.insecure=true
+    --output type=image,name=${REGISTRY_NODE}:5000/experiment1-esgz,push=true,compression=estargz,oci-mediatypes=true,registry.insecure=true

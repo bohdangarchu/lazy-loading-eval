@@ -21,17 +21,17 @@ NEW_LAYER="${NEW_LAYER:?NEW_LAYER env var required}"
 STARGZ_ROOT="/var/lib/containerd-stargz-grpc"
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === BASE REFRESH: ${BASE_IMAGE} ==="
-time sudo nerdctl pull --insecure-registry "${BASE_IMAGE}"
-time sudo nerdctl run --rm "${BASE_IMAGE}" python3 /main.py "${FILE_PATH}"
+time sudo ctr images pull --plain-http "${BASE_IMAGE}"
+time sudo ctr run --rm "${BASE_IMAGE}" run-base-$$ python3 /main.py "${FILE_PATH}"
 sleep 6
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === STARGZ REFRESH: ${STARGZ_IMAGE} ==="
-time sudo nerdctl pull --insecure-registry --snapshotter=stargz "${STARGZ_IMAGE}"
-time sudo nerdctl run --rm --snapshotter=stargz "${STARGZ_IMAGE}" python3 /main.py "${FILE_PATH}"
+time sudo ctr-remote images rpull --plain-http "${STARGZ_IMAGE}"
+time sudo ctr-remote run --rm --snapshotter=stargz "${STARGZ_IMAGE}" run-stargz-$$ python3 /main.py "${FILE_PATH}"
 sleep 6
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === 2DFS REFRESH: ${TDFS_IMAGE} ==="
 time sudo ctr-remote refresh-layer "sha256:${OLD_LAYER}" "sha256:${NEW_LAYER}"
-time sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" python3 /main.py "${FILE_PATH}"
+time sudo ctr-remote run --rm --snapshotter=stargz "${TDFS_IMAGE}" run-2dfs-$$ python3 /main.py "${FILE_PATH}"
 echo "printing checksum for validation"
-sudo nerdctl run --rm --snapshotter=stargz "${TDFS_IMAGE}" sha256sum "${FILE_PATH}"
+sudo ctr-remote run --rm --snapshotter=stargz "${TDFS_IMAGE}" run-2dfs-checksum-$$ sha256sum "${FILE_PATH}"
