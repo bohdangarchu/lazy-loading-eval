@@ -1,4 +1,4 @@
-noprefetch = true
+noprefetch = false
 no_background_fetch = true
 # or use skipVerify per layer
 disable_verification = true

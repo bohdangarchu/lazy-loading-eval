@@ -11,3 +11,4 @@ Dockerfile.stargz
 experiments/experiment1/builder/2dfs.json
 logs/
 *.bin
+sample-image/
