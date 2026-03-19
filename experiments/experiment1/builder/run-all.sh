@@ -7,6 +7,11 @@ sudo ./build-base.sh
 sudo ./clear-builder-cache.sh
 sleep 60
 
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting build-2dfs-stargz"
+./build-2dfs-stargz.sh
+sudo ./clear-builder-cache.sh
+sleep 60
+
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting build-2dfs"
 ./build-2dfs.sh
 sudo ./clear-builder-cache.sh
