@@ -293,7 +293,11 @@ rm -rf "$TMP_DIR"
 # -------------------------------------------------------------------
 mkdir -p /mydata/tmp /mydata/buildkit
 echo 'export TMPDIR=/mydata/tmp' >> /root/.bashrc
+# TODO: dooesn't influence current session if run with sudo
 export TMPDIR=/mydata/tmp
+
+mkdir -p /mydata/.2dfs
+ln -s /mydata/.2dfs ~/.2dfs
 
 # -------------------------------------------------------------------
 # Verification

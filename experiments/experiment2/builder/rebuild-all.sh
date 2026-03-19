@@ -12,10 +12,10 @@ sudo ./rebuild-base.sh
 sleep 60
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting rebuild-2dfs"
-time tdfs build --platforms linux/amd64 --enable-stargz --force-http \
+time sudo TMPDIR=/mydata/tmp TDFS_HOME=/mydata/.2dfs tdfs build --platforms linux/amd64 --enable-stargz --force-http \
     ${BASE_IMAGE} \
     ${REGISTRY_NODE}:5000/experiment2-2dfs
-tdfs image push --force-http ${REGISTRY_NODE}:5000/experiment2-2dfs
+time sudo TMPDIR=/mydata/tmp TDFS_HOME=/mydata/.2dfs tdfs image push --force-http ${REGISTRY_NODE}:5000/experiment2-2dfs
 sleep 60
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting rebuild-stargz"

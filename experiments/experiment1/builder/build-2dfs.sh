@@ -6,5 +6,5 @@ export REGISTRY_NODE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCH
 export BASE_IMAGE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['base_image'])")
 export IMAGE=${REGISTRY_NODE}:5000/experiment1-2dfs:latest
 
-time tdfs build --platforms linux/amd64 --force-http ${BASE_IMAGE} ${IMAGE}
-tdfs image push --force-http ${IMAGE}
+time sudo TMPDIR=/mydata/tmp TDFS_HOME=/mydata/.2dfs tdfs build --platforms linux/amd64 --force-http ${BASE_IMAGE} ${IMAGE}
+time sudo TMPDIR=/mydata/tmp TDFS_HOME=/mydata/.2dfs tdfs image push --force-http ${IMAGE}

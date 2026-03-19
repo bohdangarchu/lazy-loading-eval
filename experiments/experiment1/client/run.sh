@@ -39,7 +39,7 @@ time sudo ctr run --rm "${BASE_IMAGE}" run-base-$$ python3 /main.py
 clear_cache
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === 2DFS + STARGZ: ${TDFS_STARGZ_IMAGE} ==="
-time sudo ctr-remote images rpull --plain-http --containerd-labels "${TDFS_STARGZ_IMAGE}"
+time sudo ctr-remote images rpull --plain-http --use-containerd-labels "${TDFS_STARGZ_IMAGE}"
 time sudo ctr-remote run --rm --snapshotter=stargz "${TDFS_STARGZ_IMAGE}" run-2dfs-$$ python3 /main.py
 clear_cache
 
