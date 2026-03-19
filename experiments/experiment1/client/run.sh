@@ -10,7 +10,7 @@ REGISTRY_NODE=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))
 ALLOTMENT=$(python3 -c "import yaml; print(yaml.safe_load(open('${SCHEMA}'))['refresh_index'])")
 
 BASE_IMAGE="${REGISTRY_NODE}:5000/experiment1-base:$((ALLOTMENT + 1))"
-STARGZ_IMAGE="${REGISTRY_NODE}:5000/experiment1-esgz"
+STARGZ_IMAGE="${REGISTRY_NODE}:5000/experiment1-esgz:latest"
 TDFS_IMAGE="${REGISTRY_NODE}:5000/library/experiment1-2dfs:latest--0.0.0.$((ALLOTMENT))"]
 TDFS_STARGZ_IMAGE="${REGISTRY_NODE}:5000/library/experiment1-2dfs-stargz:latest--0.0.0.$((ALLOTMENT))"
 STARGZ_ROOT="/var/lib/containerd-stargz-grpc"
