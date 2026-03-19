@@ -98,6 +98,8 @@ rm -f /usr/local/bin/tdfs-old
 rm -rf /etc/containerd
 rm -rf /etc/buildkit
 rm -rf /etc/prometheus
+rm -rf /etc/systemd/system/containerd.service.d
+rm -rf /etc/containers/registries.conf.d
 
 # -------------------------------------------------------------------
 # Step 8: Unmount active mounts, then remove runtime directories
@@ -123,6 +125,14 @@ rm -rf /usr/local/lib/nerdctl
 # -------------------------------------------------------------------
 # Step 10: Remove apt-installed packages
 # -------------------------------------------------------------------
-apt-get remove -y pigz python3-pip python3.12-venv || true
+apt-get remove -y pigz python3-pip python3.12-venv buildah || true
+
+# -------------------------------------------------------------------
+# Step 11: Remove /mydata artifacts and symlinks
+# -------------------------------------------------------------------
+rm -rf /mydata/.2dfs
+rm -rf /mydata/tmp
+rm -f /root/.2dfs
+sed -i '/export TMPDIR=\/mydata\/tmp/d' /root/.bashrc
 
 echo "✅ Builder node teardown complete"
