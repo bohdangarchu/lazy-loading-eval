@@ -61,7 +61,7 @@ run_mode "2DFS+STARGZ" "bash -c '
     TDFS_STARGZ_IMAGE=\"\${REGISTRY_NODE}:5000/\${IMG_2DFS_STARGZ_PATH}:\${IMG_2DFS_STARGZ_TAG}--0.0.0.\${REFRESH_INDEX}\"
     echo \"[\$(date +\"%Y-%m-%d %H:%M:%S\")] === 2DFS + STARGZ: \${TDFS_STARGZ_IMAGE} ===\"
     bash ${CLEAR_CACHE}
-    time sudo ctr-remote images rpull --plain-http --use-containerd-labels \"\${TDFS_STARGZ_IMAGE}\"
+    time sudo ctr-remote images rpull --plain-http --use-containerd-labels \"\${TDFS_STARGZ_IMAGE}\" >/dev/null
     time sudo ctr-remote run --rm --snapshotter=stargz \"\${TDFS_STARGZ_IMAGE}\" run-2dfs-stargz python3 /main.py
 '"
 
@@ -74,7 +74,7 @@ run_mode "STARGZ" "bash -c '
     STARGZ_IMAGE=\"\${REGISTRY_NODE}:5000/\${IMG_STARGZ_NAME}:\${IMG_STARGZ_TAG}\"
     echo \"[\$(date +\"%Y-%m-%d %H:%M:%S\")] === STARGZ: \${STARGZ_IMAGE} ===\"
     bash ${CLEAR_CACHE}
-    time sudo ctr-remote images rpull --plain-http \"\${STARGZ_IMAGE}\"
+    time sudo ctr-remote images rpull --plain-http \"\${STARGZ_IMAGE}\" >/dev/null
     time sudo ctr-remote run --rm --snapshotter=stargz \"\${STARGZ_IMAGE}\" run-stargz python3 /main.py
 '"
 
@@ -87,7 +87,7 @@ run_mode "2DFS" "bash -c '
     TDFS_IMAGE=\"\${REGISTRY_NODE}:5000/\${IMG_2DFS_PATH}:\${IMG_2DFS_TAG}--0.0.0.\${REFRESH_INDEX}\"
     echo \"[\$(date +\"%Y-%m-%d %H:%M:%S\")] === 2DFS: \${TDFS_IMAGE} ===\"
     bash ${CLEAR_CACHE}
-    time sudo ctr images pull --plain-http \"\${TDFS_IMAGE}\"
+    time sudo ctr images pull --plain-http \"\${TDFS_IMAGE}\" >/dev/null
     time sudo ctr run --rm \"\${TDFS_IMAGE}\" run-2dfs python3 /main.py
 '"
 
