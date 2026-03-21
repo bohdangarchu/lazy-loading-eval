@@ -17,7 +17,7 @@ build_image() {
         --opt filename="Dockerfile.base.${i}" \
         --local context=. \
         --local dockerfile=. \
-        --output type=image,name="${IMAGE}",push=false,registry.insecure=true \
+        --output type=image,name="${IMAGE}",push=true,registry.insecure=true \
         >"${log}" 2>&1
     local end
     end=$(date +%s)

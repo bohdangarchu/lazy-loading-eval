@@ -9,4 +9,4 @@ time buildctl build \
     --opt filename=Dockerfile.stargz \
     --local context=. \
     --local dockerfile=. \
-    --output type=image,name=${REGISTRY_NODE}:5000/${IMG_STARGZ_NAME}:${IMG_STARGZ_TAG},push=false,compression=estargz,oci-mediatypes=true,registry.insecure=true
+    --output type=image,name=${REGISTRY_NODE}:5000/${IMG_STARGZ_NAME}:${IMG_STARGZ_TAG},push=true,compression=estargz,oci-mediatypes=true,registry.insecure=true
