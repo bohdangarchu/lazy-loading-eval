@@ -28,7 +28,7 @@ clear_cache() {
     sudo rm -rf "${STARGZ_ROOT:?}"/*
     sudo systemctl start stargz-snapshotter
     sudo systemctl restart containerd
-    sleep 10
+    sleep 60
 }
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === BASE: ${BASE_IMAGE} ==="
@@ -45,4 +45,9 @@ clear_cache
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === STARGZ: ${STARGZ_IMAGE} ==="
 time sudo ctr-remote images rpull --plain-http "${STARGZ_IMAGE}"
 time sudo ctr-remote run --rm --snapshotter=stargz "${STARGZ_IMAGE}" run-stargz-$$ python3 /main.py
+clear_cache
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] === 2DFS: ${TDFS_IMAGE} ==="
+time sudo ctr images pull --plain-http "${TDFS_IMAGE}"
+time sudo ctr run --rm "${TDFS_IMAGE}" run-2dfs-$$ python3 /main.py
 clear_cache
