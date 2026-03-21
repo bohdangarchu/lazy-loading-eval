@@ -192,6 +192,16 @@ systemctl enable --now stargz-snapshotter
 systemctl restart containerd
                                                                                                                                  
 # -------------------------------------------------------------------
+# Step 7b: Move containerd storage to /mydata (more space)
+# -------------------------------------------------------------------
+systemctl stop containerd stargz-snapshotter
+mv /var/lib/containerd /mydata/containerd
+ln -s /mydata/containerd /var/lib/containerd
+mv /var/lib/containerd-stargz-grpc /mydata/containerd-stargz-grpc
+ln -s /mydata/containerd-stargz-grpc /var/lib/containerd-stargz-grpc
+systemctl start containerd stargz-snapshotter
+
+# -------------------------------------------------------------------
 # Step 8: Install node_exporter
 # -------------------------------------------------------------------
 curl -LO "https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.${OS}-${ARCH}.tar.gz"
