@@ -48,7 +48,7 @@ run_mode "BASE" "bash -c '
     BASE_IMAGE=\"\${REGISTRY_NODE}:5000/\${IMG_BASE_NAME}:\$((REFRESH_INDEX + 1))\"
     echo \"[\$(date +\"%Y-%m-%d %H:%M:%S\")] === BASE: \${BASE_IMAGE} ===\"
     bash ${CLEAR_CACHE}
-    time sudo ctr images pull --plain-http \"\${BASE_IMAGE}\"
+    time sudo ctr images pull --plain-http \"\${BASE_IMAGE}\" >/dev/null
     time sudo ctr run --rm \"\${BASE_IMAGE}\" run-base python3 /main.py
 '"
 
