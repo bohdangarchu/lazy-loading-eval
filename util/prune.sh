@@ -17,8 +17,10 @@ sudo ctr snapshots --snapshotter stargz ls | awk 'NR>1 {print $1}' | xargs -r su
 sudo rm -rf "${STARGZ_ROOT:?}"/*
 
 # --- buildkit cache ---
+sudo systemctl stop buildkit 2>/dev/null || true
 buildctl prune --all 2>/dev/null || true
 sudo ctr -n buildkit content ls | awk 'NR>1 {print $1}' | xargs -r sudo ctr -n buildkit content rm 2>/dev/null || true
+sudo rm -rf /var/lib/buildkit/*
 
 # --- 2dfs builder cache ---
 rm -rf ~/.2dfs/blobs/* \
@@ -26,5 +28,6 @@ rm -rf ~/.2dfs/blobs/* \
        ~/.2dfs/index/*
 
 # --- restart ---
+sudo systemctl start buildkit
 sudo systemctl start stargz-snapshotter
 sudo systemctl restart containerd

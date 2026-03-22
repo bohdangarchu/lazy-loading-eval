@@ -1,0 +1,10 @@
+{
+    "allotments": [
+        {
+            "src": "./model.safetensors",
+            "dst": "/model.safetensors",
+            "row": 0,
+            "col": 0
+        }
+    ]
+}
