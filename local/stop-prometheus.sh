@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PIDFILE=/tmp/prometheus-stargz.pid
+stop_pid() {
+    local name=$1
+    local pidfile=$2
+    if [[ ! -f "$pidfile" ]]; then
+        echo "$name: no pidfile found, may not be running"
+        return
+    fi
+    local pid
+    pid=$(cat "$pidfile")
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid"
+        rm -f "$pidfile"
+        echo "$name stopped (pid $pid)"
+    else
+        echo "$name: process $pid not running, cleaning up pidfile"
+        rm -f "$pidfile"
+    fi
+}
 
-if [[ ! -f "$PIDFILE" ]]; then
-    echo "no pidfile found, prometheus may not be running"
-    exit 0
-fi
-
-PID=$(cat "$PIDFILE")
-if kill -0 "$PID" 2>/dev/null; then
-    kill "$PID"
-    rm -f "$PIDFILE"
-    echo "prometheus stopped (pid $PID)"
-else
-    echo "process $PID not running, cleaning up pidfile"
-    rm -f "$PIDFILE"
-fi
+stop_pid "prometheus" /tmp/prometheus-stargz.pid
+stop_pid "node_exporter" /tmp/node-exporter.pid
