@@ -1,7 +1,9 @@
 noprefetch = true
-no_background_fetch = true
+no_background_fetch = false
 disable_verification = true
 # prefetch_async_size = 1
+# prefetch_chunk_size = 33554432   # 32MB — small enough to complete well within timeout
+fetching_timeout_sec = 900       # double the default to be safe. only matters when prefetch_async_size is not set
 # metrics_address = "127.0.0.1:8234"
 
 [[resolver.host."localhost:5000".mirrors]]

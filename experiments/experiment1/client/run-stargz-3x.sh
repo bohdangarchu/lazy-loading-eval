@@ -4,7 +4,7 @@ set -euox pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA_DIR="${SCRIPT_DIR}/.."
 
-eval "$(python3 /users/bgarchu/lazy-loading-eval/experiments/load-schema.py ${SCHEMA_DIR}/schema.yaml)"
+eval "$(python3 "${SCRIPT_DIR}/../../load-schema.py" ${SCHEMA_DIR}/schema.yaml)"
 
 STARGZ_IMAGE="${REGISTRY_NODE}:5000/${IMG_STARGZ_NAME}:${IMG_STARGZ_TAG}"
 
