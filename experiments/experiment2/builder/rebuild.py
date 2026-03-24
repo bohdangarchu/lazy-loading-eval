@@ -12,6 +12,7 @@ with open(SCHEMA_PATH) as f:
 
 MODEL_ID = _schema["model"]["updated"]
 BASE_IMAGE = _schema["base_image"]
+REFRESH_INDEX = _schema["refresh_index"]
 
 
 def discover_shards(token: str = None) -> list[str]:
@@ -68,7 +69,7 @@ if __name__ == "__main__":
     token = os.environ.get("HF_TOKEN")
     shard_files = discover_shards(token=token)
     print(f"Found {len(shard_files)} shard(s): {shard_files}")
-    download_model_shards(shard_files, token=token)
+    download_model_shards([shard_files[REFRESH_INDEX]], token=token)
     write_2dfs_json(shard_files)
     create_full_dockerfile(shard_files)
     for i in range(len(shard_files)):
