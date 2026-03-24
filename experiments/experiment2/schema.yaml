@@ -13,7 +13,7 @@ images:
   stargz:
     name: "experiment2-esgz"
     tag: "latest"
-  2dfs:
-    name: "experiment2-2dfs"
+  2dfs_stargz:
+    name: "experiment2-2dfs-stargz"
     tag: "latest"
-    registry_path: "library/experiment2-2dfs"    # 2dfs registry uses library/ prefix
+    registry_path: "library/experiment2-2dfs-stargz"    # 2dfs registry uses library/ prefix

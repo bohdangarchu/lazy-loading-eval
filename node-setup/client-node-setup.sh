@@ -174,7 +174,7 @@ EOF
 mkdir -p /etc/containerd-stargz-grpc
 
 cat > /etc/containerd-stargz-grpc/config.toml <<EOF
-noprefetch = false
+noprefetch = true
 no_background_fetch = true
 disable_verification = true
 prefetch_async_size = 1
