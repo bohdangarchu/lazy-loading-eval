@@ -11,8 +11,8 @@ if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
 fi
 
 if ! command -v prometheus &>/dev/null; then
-    echo "installing prometheus..."
-    sudo apt-get install -y prometheus
+    echo "prometheus not found — run setup-prometheus.sh first"
+    exit 1
 fi
 
 prometheus \
