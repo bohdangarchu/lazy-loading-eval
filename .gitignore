@@ -13,3 +13,8 @@ logs/
 *.log
 *.bin
 sample-image/
+__pycache__
+models/
+chunks/
+2dfs.json
+results/
