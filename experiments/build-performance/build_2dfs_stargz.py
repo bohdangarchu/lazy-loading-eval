@@ -31,7 +31,7 @@ def run(model: str, max_splits: int) -> list[tuple[int, float]]:
             target,
         ]
 
-        print(f"=== Building with {n} split(s) (stargz) ===")
+        print(f"=== Building with {n} split(s) (2dfs-stargz) ===")
         start = time.perf_counter()
         subprocess.run(cmd, check=True, cwd=SCRIPT_DIR)
         elapsed = time.perf_counter() - start

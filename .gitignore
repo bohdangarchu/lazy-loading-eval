@@ -18,4 +18,5 @@ models/
 chunks/
 2dfs.json
 results/
+charts/
 Dockerfile.base

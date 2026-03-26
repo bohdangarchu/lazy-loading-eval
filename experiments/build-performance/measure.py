@@ -1,3 +1,4 @@
+import csv
 import os
 
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ import build_base as bb
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
+CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts")
 
 MODEL = "openai-community/gpt2"  # ~500 MB safetensors
 # MODEL = "openai-community/gpt2-medium"  # ~1.5 GB safetensors
@@ -33,6 +35,25 @@ def measure_builds(
     return results_2dfs, results_2dfs_stargz, results_stargz, results_base
 
 
+def save_csv(
+    splits: list[int],
+    times_2dfs: list[float],
+    times_2dfs_stargz: list[float],
+    times_stargz: list[float],
+    times_base: list[float],
+    model: str,
+) -> None:
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    model_slug = model.replace("/", "--")
+    output_path = os.path.join(RESULTS_DIR, f"{model_slug}_splits_{len(splits)}.csv")
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["splits", "2dfs_s", "2dfs_stargz_s", "stargz_s", "base_s"])
+        for row in zip(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base):
+            writer.writerow([row[0], f"{row[1]:.4f}", f"{row[2]:.4f}", f"{row[3]:.4f}", f"{row[4]:.4f}"])
+    print(f"Results saved to {output_path}")
+
+
 def plot(
     results_2dfs: list[tuple[int, float]],
     results_2dfs_stargz: list[tuple[int, float]],
@@ -53,12 +74,12 @@ def plot(
     ax.set_xticks(splits)
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
-    os.makedirs(RESULTS_DIR, exist_ok=True)
+    os.makedirs(CHARTS_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
-    output_path = os.path.join(RESULTS_DIR, f"{model_slug}_splits_{len(splits)}.png")
+    output_path = os.path.join(CHARTS_DIR, f"{model_slug}_splits_{len(splits)}.png")
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
-    print(f"\nChart saved to {output_path}")
+    print(f"Chart saved to {output_path}")
 
 
 def main():
@@ -76,6 +97,7 @@ def main():
     for n, t1, t2, t3, t4 in zip(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base):
         print(f"{n:>8}  {t1:>12.2f}  {t2:>16.2f}  {t3:>12.2f}  {t4:>10.2f}")
 
+    save_csv(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base, MODEL)
     plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL)
 
 
