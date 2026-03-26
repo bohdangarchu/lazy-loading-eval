@@ -18,3 +18,4 @@ models/
 chunks/
 2dfs.json
 results/
+Dockerfile.base
