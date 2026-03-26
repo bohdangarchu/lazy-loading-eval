@@ -94,8 +94,20 @@ def _write_2dfs_json(chunk_paths: list[str]) -> None:
         json.dump(data, f, indent=4)
 
 
+def create_dockerfile(chunk_paths: list[str]) -> None:
+    lines = [f"FROM {BASE_IMAGE}"]
+    for p in chunk_paths:
+        rel = os.path.relpath(p, SCRIPT_DIR)
+        name = os.path.basename(p)
+        lines.append(f"COPY {rel} /{name}")
+    out_path = os.path.join(SCRIPT_DIR, "Dockerfile.stargz")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 def prepare(model_name: str, num_splits: int) -> list[str]:
     shard_paths = _download_model(model_name)
     chunk_paths = _split_model(shard_paths, num_splits)
     _write_2dfs_json(chunk_paths)
+    create_dockerfile(chunk_paths)
     return chunk_paths
