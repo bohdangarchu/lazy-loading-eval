@@ -6,14 +6,15 @@ import time
 from prepare import BASE_IMAGE, prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TDFS = os.path.join(SCRIPT_DIR, "tdfs")
-CLEAR_CACHE = "rm -rf ~/.2dfs/blobs/* ~/.2dfs/uncompressed-keys/* ~/.2dfs/index/*"
 CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
 REGISTRY = "localhost:5000"
+CLEAR_CACHE = "rm -rf ~/.2dfs/blobs/* ~/.2dfs/uncompressed-keys/* ~/.2dfs/index/*"
 
 
-def run(model: str, max_splits: int) -> list[tuple[int, float]]:
+def run(model: str, max_splits: int, is_local: bool = True) -> list[tuple[int, float]]:
     results = []
+
+    tdfs_cmd = [os.path.join(SCRIPT_DIR, "tdfs")] if is_local else ["sudo", "tdfs"]
 
     for n in range(1, max_splits + 1):
         print(f"\n=== Preparing {n} split(s) ===")
@@ -21,8 +22,8 @@ def run(model: str, max_splits: int) -> list[tuple[int, float]]:
         prepare(model, n)
 
         target = f"{REGISTRY}/build-perf:{n}"
-        cmd = [
-            TDFS, "build",
+        cmd = tdfs_cmd + [
+            "build",
             "--platforms", "linux/amd64",
             "--force-http",
             "-f", "2dfs.json",
@@ -48,9 +49,10 @@ def main():
     parser = argparse.ArgumentParser(description="Benchmark tdfs build across split counts")
     parser.add_argument("--model", required=True, help="HuggingFace model name")
     parser.add_argument("--max-splits", type=int, required=True, help="Maximum number of splits")
+    parser.add_argument("--is-local", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
 
-    results = run(args.model, args.max_splits)
+    results = run(args.model, args.max_splits, args.is_local)
 
     print("\n=== Results ===")
     print(f"{'splits':>8}  {'seconds':>10}")

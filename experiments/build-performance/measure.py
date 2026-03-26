@@ -15,16 +15,17 @@ CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts")
 MODEL = "openai-community/gpt2"  # ~500 MB safetensors
 # MODEL = "openai-community/gpt2-medium"  # ~1.5 GB safetensors
 MAX_SPLITS = 10
+IS_LOCAL = True
 
 
 def measure_builds(
-    model: str, max_splits: int
+    model: str, max_splits: int, is_local: bool = IS_LOCAL
 ) -> tuple[list[tuple[int, float]], list[tuple[int, float]], list[tuple[int, float]], list[tuple[int, float]]]:
     print("=== Running 2dfs builds ===")
-    results_2dfs = b2.run(model, max_splits)
+    results_2dfs = b2.run(model, max_splits, is_local)
 
     print("\n=== Running 2dfs+stargz builds ===")
-    results_2dfs_stargz = b2s.run(model, max_splits)
+    results_2dfs_stargz = b2s.run(model, max_splits, is_local)
 
     print("\n=== Running stargz builds ===")
     results_stargz = bs.run(model, max_splits)
@@ -83,7 +84,7 @@ def plot(
 
 
 def main():
-    results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure_builds(MODEL, MAX_SPLITS)
+    results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure_builds(MODEL, MAX_SPLITS, IS_LOCAL)
 
     splits = [n for n, _ in results_2dfs]
     times_2dfs = [t for _, t in results_2dfs]
