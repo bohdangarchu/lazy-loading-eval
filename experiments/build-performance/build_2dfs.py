@@ -8,13 +8,19 @@ from prepare import BASE_IMAGE, prepare
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
 REGISTRY = "localhost:5000"
-CLEAR_CACHE = "rm -rf ~/.2dfs/blobs/* ~/.2dfs/uncompressed-keys/* ~/.2dfs/index/*"
+CLEAR_CACHE_LOCAL = "rm -rf ~/.2dfs/blobs/* ~/.2dfs/uncompressed-keys/* ~/.2dfs/index/*"
+CLEAR_CACHE_REMOTE = "rm -rf /mydata/.2dfs/blobs/* /mydata/.2dfs/uncompressed-keys/* /mydata/.2dfs/index/*"
+REMOTE_ENV = {**os.environ, "TMPDIR": "/mydata/tmp", "TDFS_HOME": "/mydata/.2dfs"}
 
 
 def run(model: str, max_splits: int, is_local: bool = True) -> list[tuple[int, float]]:
     results = []
 
     tdfs_cmd = [os.path.join(SCRIPT_DIR, "tdfs")] if is_local else ["sudo", "tdfs"]
+    clear_cache = CLEAR_CACHE_LOCAL if is_local else CLEAR_CACHE_REMOTE
+    run_kwargs: dict = {"cwd": SCRIPT_DIR}
+    if not is_local:
+        run_kwargs["env"] = REMOTE_ENV
 
     for n in range(1, max_splits + 1):
         print(f"\n=== Preparing {n} split(s) ===")
@@ -33,14 +39,14 @@ def run(model: str, max_splits: int, is_local: bool = True) -> list[tuple[int, f
 
         print(f"=== Building with {n} split(s) (2dfs) ===")
         start = time.perf_counter()
-        subprocess.run(cmd, check=True, cwd=SCRIPT_DIR)
+        subprocess.run(cmd, check=True, **run_kwargs)
         elapsed = time.perf_counter() - start
 
         print(f"Build time for {n} split(s): {elapsed:.2f}s")
         results.append((n, elapsed))
 
         print(f"=== Clearing 2dfs cache ===")
-        subprocess.run(CLEAR_CACHE, shell=True, check=True)
+        subprocess.run(clear_cache, shell=True, check=True)
 
     return results
 
