@@ -15,7 +15,7 @@ CLEAR_CACHE_REMOTE = "rm -rf /mydata/.2dfs/blobs/* /mydata/.2dfs/uncompressed-ke
 def run(model: str, max_splits: int, is_local: bool = True) -> list[tuple[int, float]]:
     results = []
 
-    tdfs_cmd = [os.path.join(SCRIPT_DIR, "tdfs")] if is_local else ["sudo", "env", "TMPDIR=/mydata/tmp", "TDFS_HOME=/mydata/.2dfs", "tdfs"]
+    tdfs_cmd = [os.path.join(SCRIPT_DIR, "tdfs")] if is_local else ["sudo", "tdfs", "--home-dir", "/mydata/.2dfs"]
     clear_cache = CLEAR_CACHE_LOCAL if is_local else CLEAR_CACHE_REMOTE
     run_kwargs: dict = {"cwd": SCRIPT_DIR}
 
