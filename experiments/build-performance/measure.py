@@ -25,8 +25,8 @@ CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 MODEL = "openai-community/gpt2"  # ~500 MB safetensors
 # MODEL = "openai-community/gpt2-medium"  # ~1.5 GB safetensors
 MAX_SPLITS = 1
-IS_LOCAL = False
-WITH_RESOURCE = True
+IS_LOCAL = True
+WITH_RESOURCE = False
 SLEEP_SECONDS = 5
 
 

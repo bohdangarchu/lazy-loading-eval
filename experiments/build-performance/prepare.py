@@ -5,7 +5,7 @@ from huggingface_hub import hf_hub_download, list_repo_files
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BUFFER_SIZE = 8 * 1024 * 1024  # 8 MB
-BASE_IMAGE_LOCAL = "ghcr.io/bohdangarchu/python:3.10-esgz"
+BASE_IMAGE_LOCAL = "localhost:5000/python:3.10-esgz"
 BASE_IMAGE_REMOTE = "10.10.1.2:5000/python:3.10-esgz"
 
 
