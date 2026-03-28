@@ -11,38 +11,43 @@ CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
 REGISTRY = "localhost:5000"
 
 
-def run(model: str, max_splits: int) -> list[tuple[int, float]]:
-    results = []
-
+def clear_cache() -> None:
     print("=== Pruning buildkit cache ===")
     subprocess.run(["sudo", "buildctl", "prune", "--all"], check=True)
 
+
+def run_one(model: str, n: int) -> float:
+    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
+    subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
+    prepare(model, n)
+
+    target = f"{REGISTRY}/build-perf-stargz-only:{n}"
+    cmd = [
+        "sudo", "buildctl", "build",
+        "--frontend", "dockerfile.v0",
+        "--opt", "filename=Dockerfile.stargz",
+        "--local", f"context={SCRIPT_DIR}",
+        "--local", f"dockerfile={SCRIPT_DIR}",
+        "--output", f"type=image,name={target},push=false,compression=estargz,oci-mediatypes=true,registry.insecure=true",
+    ]
+
+    print(f"=== Building with {n} split(s) (stargz) ===")
+    start = time.perf_counter()
+    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR)
+    elapsed = time.perf_counter() - start
+
+    print(f"Build time for {n} split(s): {elapsed:.2f}s")
+
+    clear_cache()
+    return elapsed
+
+
+def run(model: str, max_splits: int) -> list[tuple[int, float]]:
+    clear_cache()
+    results = []
     for n in range(1, max_splits + 1):
-        print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
-        subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
-        prepare(model, n)
-
-        target = f"{REGISTRY}/build-perf-stargz-only:{n}"
-        cmd = [
-            "sudo", "buildctl", "build",
-            "--frontend", "dockerfile.v0",
-            "--opt", "filename=Dockerfile.stargz",
-            "--local", f"context={SCRIPT_DIR}",
-            "--local", f"dockerfile={SCRIPT_DIR}",
-            "--output", f"type=image,name={target},push=false,compression=estargz,oci-mediatypes=true,registry.insecure=true",
-        ]
-
-        print(f"=== Building with {n} split(s) (stargz) ===")
-        start = time.perf_counter()
-        subprocess.run(cmd, check=True, cwd=SCRIPT_DIR)
-        elapsed = time.perf_counter() - start
-
-        print(f"Build time for {n} split(s): {elapsed:.2f}s")
+        elapsed = run_one(model, n)
         results.append((n, elapsed))
-
-        print(f"=== Pruning buildkit cache ===")
-        subprocess.run(["sudo", "buildctl", "prune", "--all"], check=True)
-
     return results
 
 

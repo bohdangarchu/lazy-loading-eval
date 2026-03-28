@@ -13,42 +13,47 @@ CLEAR_CACHE_LOCAL = "rm -rf ~/.2dfs/blobs/* ~/.2dfs/uncompressed-keys/* ~/.2dfs/
 CLEAR_CACHE_REMOTE = "sudo rm -rf /mydata/.2dfs/blobs/* /mydata/.2dfs/uncompressed-keys/* /mydata/.2dfs/index/*"
 
 
-def run(model: str, max_splits: int, is_local: bool = True) -> list[tuple[int, float]]:
-    results = []
+def clear_cache(is_local: bool = True) -> None:
+    cache_cmd = CLEAR_CACHE_LOCAL if is_local else CLEAR_CACHE_REMOTE
+    print("=== Clearing 2dfs cache ===")
+    subprocess.run(cache_cmd, shell=True, check=True)
 
+
+def run_one(model: str, n: int, is_local: bool = True) -> float:
     tdfs_cmd = [os.path.join(SCRIPT_DIR, "tdfs")] if is_local else ["sudo", "tdfs", "--home-dir", "/mydata/.2dfs"]
-    clear_cache = CLEAR_CACHE_LOCAL if is_local else CLEAR_CACHE_REMOTE
     run_kwargs: dict = {"cwd": SCRIPT_DIR}
 
-    print("=== Clearing 2dfs cache ===")
-    subprocess.run(clear_cache, shell=True, check=True)
+    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
+    subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
+    prepare(model, n)
 
+    target = f"{REGISTRY}/build-perf:{n}"
+    cmd = tdfs_cmd + [
+        "build",
+        "--platforms", "linux/amd64",
+        "--force-http",
+        "-f", "2dfs.json",
+        BASE_IMAGE,
+        target,
+    ]
+
+    print(f"=== Building with {n} split(s) (2dfs) ===")
+    start = time.perf_counter()
+    subprocess.run(cmd, check=True, **run_kwargs)
+    elapsed = time.perf_counter() - start
+
+    print(f"Build time for {n} split(s): {elapsed:.2f}s")
+
+    clear_cache(is_local)
+    return elapsed
+
+
+def run(model: str, max_splits: int, is_local: bool = True) -> list[tuple[int, float]]:
+    clear_cache(is_local)
+    results = []
     for n in range(1, max_splits + 1):
-        print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
-        subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
-        prepare(model, n)
-
-        target = f"{REGISTRY}/build-perf:{n}"
-        cmd = tdfs_cmd + [
-            "build",
-            "--platforms", "linux/amd64",
-            "--force-http",
-            "-f", "2dfs.json",
-            BASE_IMAGE,
-            target,
-        ]
-
-        print(f"=== Building with {n} split(s) (2dfs) ===")
-        start = time.perf_counter()
-        subprocess.run(cmd, check=True, **run_kwargs)
-        elapsed = time.perf_counter() - start
-
-        print(f"Build time for {n} split(s): {elapsed:.2f}s")
+        elapsed = run_one(model, n, is_local)
         results.append((n, elapsed))
-
-        print(f"=== Clearing 2dfs cache ===")
-        subprocess.run(clear_cache, shell=True, check=True)
-
     return results
 
 
