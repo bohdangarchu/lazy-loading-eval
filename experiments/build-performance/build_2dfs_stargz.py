@@ -19,13 +19,8 @@ def clear_cache(is_local: bool = True) -> None:
     subprocess.run(cache_cmd, shell=True, check=True)
 
 
-def run_one(model: str, n: int, is_local: bool = True) -> float:
+def build_only(n: int, is_local: bool = True) -> float:
     tdfs_cmd = [os.path.join(SCRIPT_DIR, "tdfs")] if is_local else ["sudo", "tdfs", "--home-dir", "/mydata/.2dfs"]
-    run_kwargs: dict = {"cwd": SCRIPT_DIR}
-
-    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
-    subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
-    prepare(model, n, is_local)
 
     target = f"{REGISTRY}/build-perf-stargz:{n}"
     cmd = tdfs_cmd + [
@@ -40,10 +35,19 @@ def run_one(model: str, n: int, is_local: bool = True) -> float:
 
     print(f"=== Building with {n} split(s) (2dfs-stargz) ===")
     start = time.perf_counter()
-    subprocess.run(cmd, check=True, **run_kwargs)
+    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR)
     elapsed = time.perf_counter() - start
 
     print(f"Build time for {n} split(s): {elapsed:.2f}s")
+    return elapsed
+
+
+def run_one(model: str, n: int, is_local: bool = True) -> float:
+    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
+    subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
+    prepare(model, n, is_local)
+
+    elapsed = build_only(n, is_local)
 
     clear_cache(is_local)
     return elapsed

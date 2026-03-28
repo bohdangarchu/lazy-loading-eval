@@ -16,11 +16,7 @@ def clear_cache() -> None:
     subprocess.run(["sudo", "buildctl", "prune", "--all"], check=True)
 
 
-def run_one(model: str, n: int) -> float:
-    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
-    subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
-    prepare(model, n)
-
+def build_only(n: int) -> float:
     target = f"{REGISTRY}/build-perf-stargz-only:{n}"
     cmd = [
         "sudo", "buildctl", "build",
@@ -37,6 +33,15 @@ def run_one(model: str, n: int) -> float:
     elapsed = time.perf_counter() - start
 
     print(f"Build time for {n} split(s): {elapsed:.2f}s")
+    return elapsed
+
+
+def run_one(model: str, n: int) -> float:
+    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
+    subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
+    prepare(model, n)
+
+    elapsed = build_only(n)
 
     clear_cache()
     return elapsed
