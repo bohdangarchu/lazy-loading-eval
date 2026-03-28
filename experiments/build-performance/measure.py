@@ -57,7 +57,8 @@ def save_csv(
 ) -> None:
     os.makedirs(RESULTS_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
-    output_path = os.path.join(RESULTS_DIR, f"{model_slug}_splits_{len(splits)}.csv")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    output_path = os.path.join(RESULTS_DIR, f"{model_slug}_splits_{len(splits)}_{ts}.csv")
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["splits", "2dfs_s", "2dfs_stargz_s", "stargz_s", "base_s"])
@@ -88,7 +89,8 @@ def plot(
     ax.grid(True, linestyle="--", alpha=0.5)
     os.makedirs(CHARTS_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
-    output_path = os.path.join(CHARTS_DIR, f"{model_slug}_splits_{len(splits)}.png")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    output_path = os.path.join(CHARTS_DIR, f"{model_slug}_splits_{len(splits)}_{ts}.png")
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     print(f"Chart saved to {output_path}")
