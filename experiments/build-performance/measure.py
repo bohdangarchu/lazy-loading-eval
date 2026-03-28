@@ -2,9 +2,11 @@ import csv
 import os
 import threading
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
+import numpy as np
 import psutil
 
 import build_2dfs as b2
@@ -20,8 +22,8 @@ CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts")
 CHARTS_BUILD_DIR = os.path.join(CHARTS_DIR, "build")
 CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 
-# MODEL = "openai-community/gpt2"  # ~500 MB safetensors
-MODEL = "openai-community/gpt2-medium"  # ~1.5 GB safetensors
+MODEL = "openai-community/gpt2"  # ~500 MB safetensors
+# MODEL = "openai-community/gpt2-medium"  # ~1.5 GB safetensors
 MAX_SPLITS = 1
 IS_LOCAL = False
 WITH_RESOURCE = True
@@ -204,46 +206,69 @@ def plot_resource(
     if not samples:
         return
 
-    # Collect all non-idle modes that appear in the data
-    seen_modes = []
-    for _, _, _, m in samples:
-        if m != "idle" and m not in seen_modes:
-            seen_modes.append(m)
+    modes_order = ["2dfs", "2dfs_stargz", "stargz", "base"]
+    colors = {"2dfs": "#1f77b4", "2dfs_stargz": "#ff7f0e", "stargz": "#2ca02c", "base": "#d62728"}
+    labels = {"2dfs": "2dfs", "2dfs_stargz": "2dfs+stargz", "stargz": "stargz", "base": "base"}
 
-    base_colors = {"2dfs": "#1f77b4", "2dfs_stargz": "#ff7f0e", "stargz": "#2ca02c", "base": "#d62728"}
-    base_labels = {"2dfs": "2dfs", "2dfs_stargz": "2dfs+stargz", "stargz": "stargz", "base": "base"}
+    # Compute mean CPU and MEM per (base_mode, n_splits), skipping idle
+    cpu_by_split: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    mem_by_split: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
 
-    t0 = samples[0][0]
-
-    fig, (ax_cpu, ax_mem) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
-
-    for mode in seen_modes:
-        mode_samples = [(ts, cpu, mem) for ts, cpu, mem, m in samples if m == mode]
-        if not mode_samples:
+    for _, cpu, mem, mode in samples:
+        if mode == "idle":
             continue
-
-        # Parse base tool name and split count from e.g. "2dfs_stargz_splits_3"
         parts = mode.rsplit("_splits_", 1)
+        if len(parts) != 2 or not parts[1].isdigit():
+            continue
         base = parts[0]
-        n_splits = parts[1] if len(parts) == 2 else "?"
-        color = base_colors.get(base, "#888888")
-        label = f"{base_labels.get(base, base)} ({n_splits} splits)"
+        n = int(parts[1])
+        cpu_by_split[n][base].append(cpu)
+        mem_by_split[n][base].append(mem)
 
-        elapsed = [(ts - t0) / 1000 for ts, _, _ in mode_samples]
-        cpus = [cpu for _, cpu, _ in mode_samples]
-        mems = [mem for _, _, mem in mode_samples]
-        ax_cpu.plot(elapsed, cpus, label=label, color=color, alpha=0.4 + 0.6 * int(n_splits) / 10 if n_splits.isdigit() else 1, linewidth=1)
-        ax_mem.plot(elapsed, mems, label=label, color=color, alpha=0.4 + 0.6 * int(n_splits) / 10 if n_splits.isdigit() else 1, linewidth=1)
+    split_counts = sorted(cpu_by_split.keys())
+    if not split_counts:
+        return
 
+    x_labels = [str(n) for n in split_counts]
+    x = range(len(split_counts))
+    n_modes = len(modes_order)
+    bar_width = 0.8 / n_modes
+
+    fig, (ax_cpu, ax_mem) = plt.subplots(2, 1, figsize=(max(8, len(split_counts) * 2), 8))
+
+    for i, mode in enumerate(modes_order):
+        cpu_means = []
+        mem_means = []
+        cpu_stds = []
+        mem_stds = []
+        for n in split_counts:
+            cpu_vals = cpu_by_split[n].get(mode, [])
+            mem_vals = mem_by_split[n].get(mode, [])
+            cpu_means.append(np.mean(cpu_vals) if cpu_vals else 0)
+            mem_means.append(np.mean(mem_vals) if mem_vals else 0)
+            cpu_stds.append(np.std(cpu_vals) if cpu_vals else 0)
+            mem_stds.append(np.std(mem_vals) if mem_vals else 0)
+
+        offsets = [pos + i * bar_width for pos in x]
+        ax_cpu.bar(offsets, cpu_means, bar_width, yerr=cpu_stds, label=labels[mode],
+                   color=colors[mode], edgecolor="black", linewidth=0.5, capsize=3)
+        ax_mem.bar(offsets, mem_means, bar_width, yerr=mem_stds, label=labels[mode],
+                   color=colors[mode], edgecolor="black", linewidth=0.5, capsize=3)
+
+    center_offset = (n_modes - 1) * bar_width / 2
+    ax_cpu.set_xticks([pos + center_offset for pos in x])
+    ax_cpu.set_xticklabels(x_labels)
     ax_cpu.set_ylabel("CPU Usage (%)")
     ax_cpu.set_title(f"Resource usage during builds — {model}")
-    ax_cpu.legend(fontsize="small", ncol=2)
-    ax_cpu.grid(True, linestyle="--", alpha=0.5)
+    ax_cpu.legend(fontsize="small")
+    ax_cpu.grid(True, linestyle="--", alpha=0.5, axis="y")
 
-    ax_mem.set_xlabel("Elapsed time (s)")
+    ax_mem.set_xticks([pos + center_offset for pos in x])
+    ax_mem.set_xticklabels(x_labels)
+    ax_mem.set_xlabel("Number of splits")
     ax_mem.set_ylabel("Memory Usage (%)")
-    ax_mem.legend(fontsize="small", ncol=2)
-    ax_mem.grid(True, linestyle="--", alpha=0.5)
+    ax_mem.legend(fontsize="small")
+    ax_mem.grid(True, linestyle="--", alpha=0.5, axis="y")
 
     os.makedirs(CHARTS_RESOURCE_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
