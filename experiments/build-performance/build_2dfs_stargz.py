@@ -4,7 +4,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 
-from prepare import BASE_IMAGE, prepare
+from prepare import _base_image, prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
@@ -25,7 +25,7 @@ def run_one(model: str, n: int, is_local: bool = True) -> float:
 
     print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
     subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
-    prepare(model, n)
+    prepare(model, n, is_local)
 
     target = f"{REGISTRY}/build-perf-stargz:{n}"
     cmd = tdfs_cmd + [
@@ -34,7 +34,7 @@ def run_one(model: str, n: int, is_local: bool = True) -> float:
         "--enable-stargz",
         "--force-http",
         "-f", "2dfs.json",
-        BASE_IMAGE,
+        _base_image(is_local),
         target,
     ]
 

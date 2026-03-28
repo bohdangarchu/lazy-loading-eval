@@ -5,8 +5,8 @@ from huggingface_hub import hf_hub_download, list_repo_files
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BUFFER_SIZE = 8 * 1024 * 1024  # 8 MB
-# BASE_IMAGE = "ghcr.io/bohdangarchu/python:3.10-esgz"
-BASE_IMAGE = "10.10.1.2:5000/python:3.10-esgz"
+BASE_IMAGE_LOCAL = "ghcr.io/bohdangarchu/python:3.10-esgz"
+BASE_IMAGE_REMOTE = "10.10.1.2:5000/python:3.10-esgz"
 
 
 def _model_slug(model_name: str) -> str:
@@ -95,8 +95,12 @@ def _write_2dfs_json(chunk_paths: list[str]) -> None:
         json.dump(data, f, indent=4)
 
 
-def create_dockerfile(chunk_paths: list[str]) -> None:
-    lines = [f"FROM {BASE_IMAGE}"]
+def _base_image(is_local: bool) -> str:
+    return BASE_IMAGE_LOCAL if is_local else BASE_IMAGE_REMOTE
+
+
+def create_dockerfile(chunk_paths: list[str], is_local: bool = True) -> None:
+    lines = [f"FROM {_base_image(is_local)}"]
     for p in chunk_paths:
         rel = os.path.relpath(p, SCRIPT_DIR)
         name = os.path.basename(p)
@@ -106,8 +110,8 @@ def create_dockerfile(chunk_paths: list[str]) -> None:
         f.write("\n".join(lines) + "\n")
 
 
-def create_base_dockerfile(chunk_paths: list[str]) -> None:
-    lines = [f"FROM {BASE_IMAGE}"]
+def create_base_dockerfile(chunk_paths: list[str], is_local: bool = True) -> None:
+    lines = [f"FROM {_base_image(is_local)}"]
     for p in chunk_paths:
         rel = os.path.relpath(p, SCRIPT_DIR)
         name = os.path.basename(p)
@@ -117,10 +121,10 @@ def create_base_dockerfile(chunk_paths: list[str]) -> None:
         f.write("\n".join(lines) + "\n")
 
 
-def prepare(model_name: str, num_splits: int) -> list[str]:
+def prepare(model_name: str, num_splits: int, is_local: bool = True) -> list[str]:
     shard_paths = _download_model(model_name)
     chunk_paths = _split_model(shard_paths, num_splits)
     _write_2dfs_json(chunk_paths)
-    create_dockerfile(chunk_paths)
-    create_base_dockerfile(chunk_paths)
+    create_dockerfile(chunk_paths, is_local)
+    create_base_dockerfile(chunk_paths, is_local)
     return chunk_paths
