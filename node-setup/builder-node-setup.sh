@@ -155,15 +155,15 @@ nerdctl tag "$BASE_IMAGE" "$LOCAL_BASE_IMAGE_2DFS"
 nerdctl push --insecure-registry "$LOCAL_BASE_IMAGE"
 nerdctl push --insecure-registry "$LOCAL_BASE_IMAGE_2DFS"
 
-BASE_IMAGE="ghcr.io/bohdangarchu/python:3.12-torch-esgz"
-LOCAL_BASE_IMAGE="${REGISTRY_NODE}:5000/python:3.12-torch-esgz"
-LOCAL_BASE_IMAGE_2DFS="${REGISTRY_NODE}:5000/library/python:3.12-torch-esgz"
+# BASE_IMAGE="ghcr.io/bohdangarchu/python:3.12-torch-esgz"
+# LOCAL_BASE_IMAGE="${REGISTRY_NODE}:5000/python:3.12-torch-esgz"
+# LOCAL_BASE_IMAGE_2DFS="${REGISTRY_NODE}:5000/library/python:3.12-torch-esgz"
 
-nerdctl pull "$BASE_IMAGE"
-nerdctl tag "$BASE_IMAGE" "$LOCAL_BASE_IMAGE"
-nerdctl tag "$BASE_IMAGE" "$LOCAL_BASE_IMAGE_2DFS"
-nerdctl push --insecure-registry "$LOCAL_BASE_IMAGE"
-nerdctl push --insecure-registry "$LOCAL_BASE_IMAGE_2DFS"
+# nerdctl pull "$BASE_IMAGE"
+# nerdctl tag "$BASE_IMAGE" "$LOCAL_BASE_IMAGE"
+# nerdctl tag "$BASE_IMAGE" "$LOCAL_BASE_IMAGE_2DFS"
+# nerdctl push --insecure-registry "$LOCAL_BASE_IMAGE"
+# nerdctl push --insecure-registry "$LOCAL_BASE_IMAGE_2DFS"
 
 # -------------------------------------------------------------------
 # Step 9: Install Go (required for 2dfs builder)
