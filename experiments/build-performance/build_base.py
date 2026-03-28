@@ -2,6 +2,7 @@ import argparse
 import os
 import subprocess
 import time
+from datetime import datetime, timezone
 
 from prepare import prepare
 
@@ -13,8 +14,11 @@ REGISTRY = "localhost:5000"
 def run(model: str, max_splits: int) -> list[tuple[int, float]]:
     results = []
 
+    print("=== Pruning buildkit cache ===")
+    subprocess.run(["sudo", "buildctl", "prune", "--all"], check=True)
+
     for n in range(1, max_splits + 1):
-        print(f"\n=== Preparing {n} split(s) ===")
+        print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
         subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
         prepare(model, n)
 

@@ -2,6 +2,7 @@ import argparse
 import os
 import subprocess
 import time
+from datetime import datetime, timezone
 
 from prepare import BASE_IMAGE, prepare
 
@@ -19,8 +20,11 @@ def run(model: str, max_splits: int, is_local: bool = True) -> list[tuple[int, f
     clear_cache = CLEAR_CACHE_LOCAL if is_local else CLEAR_CACHE_REMOTE
     run_kwargs: dict = {"cwd": SCRIPT_DIR}
 
+    print("=== Clearing 2dfs cache ===")
+    subprocess.run(clear_cache, shell=True, check=True)
+
     for n in range(1, max_splits + 1):
-        print(f"\n=== Preparing {n} split(s) ===")
+        print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
         subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
         prepare(model, n)
 

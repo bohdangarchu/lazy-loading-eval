@@ -23,25 +23,25 @@ IS_LOCAL = False
 def measure_builds(
     model: str, max_splits: int, is_local: bool = IS_LOCAL
 ) -> tuple[list[tuple[int, float]], list[tuple[int, float]], list[tuple[int, float]], list[tuple[int, float]]]:
-    print("=== Running 2dfs builds ===")
+    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs builds ===")
     results_2dfs = b2.run(model, max_splits, is_local)
 
-    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] Sleeping 60s before next mode...")
+    print("\nSleeping 60s before next mode...")
     time.sleep(60)
 
-    print("\n=== Running 2dfs+stargz builds ===")
+    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs+stargz builds ===")
     results_2dfs_stargz = b2s.run(model, max_splits, is_local)
 
-    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] Sleeping 60s before next mode...")
+    print("\nSleeping 60s before next mode...")
     time.sleep(60)
 
-    print("\n=== Running stargz builds ===")
+    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running stargz builds ===")
     results_stargz = bs.run(model, max_splits)
 
-    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] Sleeping 60s before next mode...")
+    print("\nSleeping 60s before next mode...")
     time.sleep(60)
 
-    print("\n=== Running base builds ===")
+    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running base builds ===")
     results_base = bb.run(model, max_splits)
 
     return results_2dfs, results_2dfs_stargz, results_stargz, results_base
