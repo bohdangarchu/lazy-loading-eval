@@ -32,7 +32,7 @@ SLEEP_SECONDS = 5
 
 class ResourceMonitor:
     def __init__(self):
-        self._samples: list[tuple[int, float, float, str]] = []  # (timestamp_ms, cpu%, mem%, mode)
+        self._samples: list[tuple[int, float, float, str]] = []  # (timestamp_ms, cpu%, mem_mb, mode)
         self._mode = "idle"
         self._stop = threading.Event()
 
@@ -52,7 +52,7 @@ class ResourceMonitor:
     def _poll(self) -> None:
         while not self._stop.is_set():
             cpu = psutil.cpu_percent(interval=1)
-            mem = psutil.virtual_memory().percent
+            mem = psutil.virtual_memory().used / (1024 * 1024)  # MB
             ts = int(time.time() * 1000)
             self._samples.append((ts, cpu, mem, self._mode))
 
@@ -194,7 +194,7 @@ def save_resource_csv(
     output_path = os.path.join(RESULTS_RESOURCE_DIR, f"{model_slug}_resource_splits_{max_splits}_{ts}.csv")
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["timestamp_ms", "cpu_percent", "mem_percent", "mode"])
+        writer.writerow(["timestamp_ms", "cpu_percent", "mem_mb", "mode"])
         for row in samples:
             writer.writerow(row)
     print(f"Resource CSV saved to {output_path}")
@@ -266,7 +266,7 @@ def plot_resource(
     ax_mem.set_xticks([pos + center_offset for pos in x])
     ax_mem.set_xticklabels(x_labels)
     ax_mem.set_xlabel("Number of splits")
-    ax_mem.set_ylabel("Memory Usage (%)")
+    ax_mem.set_ylabel("Memory Usage (MB)")
     ax_mem.legend(fontsize="small")
     ax_mem.grid(True, linestyle="--", alpha=0.5, axis="y")
 
