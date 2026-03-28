@@ -25,6 +25,7 @@ MODEL = "openai-community/gpt2-medium"  # ~1.5 GB safetensors
 MAX_SPLITS = 1
 IS_LOCAL = False
 WITH_RESOURCE = True
+SLEEP_SECONDS = 5
 
 
 class ResourceMonitor:
@@ -75,8 +76,8 @@ def measure_builds(
             results_2dfs.append((n, elapsed))
 
             monitor.set_mode("idle")
-            print("\nSleeping 60s before next mode...")
-            time.sleep(60)
+            print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+            time.sleep(SLEEP_SECONDS)
 
             monitor.set_mode(f"2dfs_stargz_splits_{n}")
             print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === 2dfs+stargz: {n} split(s) ===")
@@ -84,8 +85,8 @@ def measure_builds(
             results_2dfs_stargz.append((n, elapsed))
 
             monitor.set_mode("idle")
-            print("\nSleeping 60s before next mode...")
-            time.sleep(60)
+            print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+            time.sleep(SLEEP_SECONDS)
 
             monitor.set_mode(f"stargz_splits_{n}")
             print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === stargz: {n} split(s) ===")
@@ -93,8 +94,8 @@ def measure_builds(
             results_stargz.append((n, elapsed))
 
             monitor.set_mode("idle")
-            print("\nSleeping 60s before next mode...")
-            time.sleep(60)
+            print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+            time.sleep(SLEEP_SECONDS)
 
             monitor.set_mode(f"base_splits_{n}")
             print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === base: {n} split(s) ===")
@@ -103,8 +104,8 @@ def measure_builds(
 
             if n < max_splits:
                 monitor.set_mode("idle")
-                print("\nSleeping 60s before next split count...")
-                time.sleep(60)
+                print(f"\nSleeping {SLEEP_SECONDS}s before next split count...")
+                time.sleep(SLEEP_SECONDS)
 
         return results_2dfs, results_2dfs_stargz, results_stargz, results_base
 
@@ -112,20 +113,20 @@ def measure_builds(
     print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs builds ===")
     results_2dfs = b2.run(model, max_splits, is_local)
 
-    print("\nSleeping 60s before next mode...")
-    time.sleep(60)
+    print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+    time.sleep(SLEEP_SECONDS)
 
     print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs+stargz builds ===")
     results_2dfs_stargz = b2s.run(model, max_splits, is_local)
 
-    print("\nSleeping 60s before next mode...")
-    time.sleep(60)
+    print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+    time.sleep(SLEEP_SECONDS)
 
     print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running stargz builds ===")
     results_stargz = bs.run(model, max_splits)
 
-    print("\nSleeping 60s before next mode...")
-    time.sleep(60)
+    print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+    time.sleep(SLEEP_SECONDS)
 
     print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running base builds ===")
     results_base = bb.run(model, max_splits)
