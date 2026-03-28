@@ -9,7 +9,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
 REGISTRY = "localhost:5000"
 CLEAR_CACHE_LOCAL = "rm -rf ~/.2dfs/blobs/* ~/.2dfs/uncompressed-keys/* ~/.2dfs/index/*"
-CLEAR_CACHE_REMOTE = "rm -rf /mydata/.2dfs/blobs/* /mydata/.2dfs/uncompressed-keys/* /mydata/.2dfs/index/*"
+CLEAR_CACHE_REMOTE = "sudo rm -rf /mydata/.2dfs/blobs/* /mydata/.2dfs/uncompressed-keys/* /mydata/.2dfs/index/*"
 
 
 def run(model: str, max_splits: int, is_local: bool = True) -> list[tuple[int, float]]:
