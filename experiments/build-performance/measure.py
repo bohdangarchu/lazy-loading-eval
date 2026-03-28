@@ -1,5 +1,7 @@
 import csv
 import os
+import time
+from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
 
@@ -24,11 +26,20 @@ def measure_builds(
     print("=== Running 2dfs builds ===")
     results_2dfs = b2.run(model, max_splits, is_local)
 
+    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] Sleeping 60s before next mode...")
+    time.sleep(60)
+
     print("\n=== Running 2dfs+stargz builds ===")
     results_2dfs_stargz = b2s.run(model, max_splits, is_local)
 
+    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] Sleeping 60s before next mode...")
+    time.sleep(60)
+
     print("\n=== Running stargz builds ===")
     results_stargz = bs.run(model, max_splits)
+
+    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] Sleeping 60s before next mode...")
+    time.sleep(60)
 
     print("\n=== Running base builds ===")
     results_base = bb.run(model, max_splits)
