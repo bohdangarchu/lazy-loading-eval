@@ -4,6 +4,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 
+import log
 from prepare import _base_image, prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -15,8 +16,8 @@ CLEAR_CACHE_REMOTE = "sudo rm -rf /mydata/.2dfs/blobs/* /mydata/.2dfs/uncompress
 
 def clear_cache(is_local: bool = True) -> None:
     cache_cmd = CLEAR_CACHE_LOCAL if is_local else CLEAR_CACHE_REMOTE
-    print("=== Clearing 2dfs cache ===")
-    subprocess.run(cache_cmd, shell=True, check=True)
+    log.info("=== Clearing 2dfs cache ===")
+    subprocess.run(cache_cmd, shell=True, check=True, capture_output=not log.VERBOSE)
 
 
 def build_only(n: int, is_local: bool = True) -> float:
@@ -32,18 +33,18 @@ def build_only(n: int, is_local: bool = True) -> float:
         target,
     ]
 
-    print(f"=== Building with {n} split(s) (2dfs) ===")
+    log.info(f"=== Building with {n} split(s) (2dfs) ===")
     start = time.perf_counter()
-    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR)
+    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     elapsed = time.perf_counter() - start
 
-    print(f"Build time for {n} split(s): {elapsed:.2f}s")
+    log.result(f"Build time for {n} split(s): {elapsed:.2f}s")
     return elapsed
 
 
 def run_one(model: str, n: int, is_local: bool = True) -> float:
-    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
-    subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True)
+    log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
+    subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
     prepare(model, n, is_local)
 
     elapsed = build_only(n, is_local)
@@ -70,11 +71,11 @@ def main():
 
     results = run(args.model, args.max_splits, args.is_local)
 
-    print("\n=== Results ===")
-    print(f"{'splits':>8}  {'seconds':>10}")
-    print("-" * 22)
+    log.result("\n=== Results ===")
+    log.result(f"{'splits':>8}  {'seconds':>10}")
+    log.result("-" * 22)
     for n, t in results:
-        print(f"{n:>8}  {t:>10.2f}")
+        log.result(f"{n:>8}  {t:>10.2f}")
 
 
 if __name__ == "__main__":

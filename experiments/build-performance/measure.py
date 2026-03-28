@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import psutil
 
+import log
 import build_2dfs as b2
 import build_2dfs_stargz as b2s
 import build_stargz as bs
@@ -27,6 +28,7 @@ MODEL = "openai-community/gpt2"  # ~500 MB safetensors
 MAX_SPLITS = 1
 IS_LOCAL = True
 WITH_RESOURCE = False
+VERBOSE = False
 SLEEP_SECONDS = 5
 
 
@@ -73,64 +75,64 @@ def measure_builds(
 
         for n in range(1, max_splits + 1):
             monitor.set_mode(f"2dfs_splits_{n}")
-            print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === 2dfs: {n} split(s) ===")
+            log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === 2dfs: {n} split(s) ===")
             elapsed = b2.run_one(model, n, is_local)
             results_2dfs.append((n, elapsed))
 
             monitor.set_mode("idle")
-            print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+            log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
             time.sleep(SLEEP_SECONDS)
 
             monitor.set_mode(f"2dfs_stargz_splits_{n}")
-            print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === 2dfs+stargz: {n} split(s) ===")
+            log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === 2dfs+stargz: {n} split(s) ===")
             elapsed = b2s.run_one(model, n, is_local)
             results_2dfs_stargz.append((n, elapsed))
 
             monitor.set_mode("idle")
-            print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+            log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
             time.sleep(SLEEP_SECONDS)
 
             monitor.set_mode(f"stargz_splits_{n}")
-            print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === stargz: {n} split(s) ===")
+            log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === stargz: {n} split(s) ===")
             elapsed = bs.run_one(model, n)
             results_stargz.append((n, elapsed))
 
             monitor.set_mode("idle")
-            print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+            log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
             time.sleep(SLEEP_SECONDS)
 
             monitor.set_mode(f"base_splits_{n}")
-            print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === base: {n} split(s) ===")
+            log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === base: {n} split(s) ===")
             elapsed = bb.run_one(model, n)
             results_base.append((n, elapsed))
 
             if n < max_splits:
                 monitor.set_mode("idle")
-                print(f"\nSleeping {SLEEP_SECONDS}s before next split count...")
+                log.info(f"\nSleeping {SLEEP_SECONDS}s before next split count...")
                 time.sleep(SLEEP_SECONDS)
 
         return results_2dfs, results_2dfs_stargz, results_stargz, results_base
 
     # Non-monitored path: original sequential mode-by-mode execution
-    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs builds ===")
+    log.info(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs builds ===")
     results_2dfs = b2.run(model, max_splits, is_local)
 
-    print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+    log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
     time.sleep(SLEEP_SECONDS)
 
-    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs+stargz builds ===")
+    log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs+stargz builds ===")
     results_2dfs_stargz = b2s.run(model, max_splits, is_local)
 
-    print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+    log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
     time.sleep(SLEEP_SECONDS)
 
-    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running stargz builds ===")
+    log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running stargz builds ===")
     results_stargz = bs.run(model, max_splits)
 
-    print(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+    log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
     time.sleep(SLEEP_SECONDS)
 
-    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running base builds ===")
+    log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running base builds ===")
     results_base = bb.run(model, max_splits)
 
     return results_2dfs, results_2dfs_stargz, results_stargz, results_base
@@ -153,7 +155,7 @@ def save_csv(
         writer.writerow(["splits", "2dfs_s", "2dfs_stargz_s", "stargz_s", "base_s"])
         for row in zip(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base):
             writer.writerow([row[0], f"{row[1]:.4f}", f"{row[2]:.4f}", f"{row[3]:.4f}", f"{row[4]:.4f}"])
-    print(f"Results saved to {output_path}")
+    log.result(f"Results saved to {output_path}")
 
 
 def plot(
@@ -182,7 +184,7 @@ def plot(
     output_path = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_splits_{len(splits)}_{ts}.png")
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
-    print(f"Chart saved to {output_path}")
+    log.result(f"Chart saved to {output_path}")
 
 
 def save_resource_csv(
@@ -197,7 +199,7 @@ def save_resource_csv(
         writer.writerow(["timestamp_ms", "cpu_percent", "mem_mb", "mode"])
         for row in samples:
             writer.writerow(row)
-    print(f"Resource CSV saved to {output_path}")
+    log.result(f"Resource CSV saved to {output_path}")
 
 
 def plot_resource(
@@ -276,10 +278,11 @@ def plot_resource(
     output_path = os.path.join(CHARTS_RESOURCE_DIR, f"{model_slug}_resource_splits_{max_splits}_{ts}.png")
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
-    print(f"Resource chart saved to {output_path}")
+    log.result(f"Resource chart saved to {output_path}")
 
 
 def main():
+    log.set_verbose(VERBOSE)
     monitor = None
     if WITH_RESOURCE:
         monitor = ResourceMonitor()
@@ -300,11 +303,11 @@ def main():
     times_stargz = [t for _, t in results_stargz]
     times_base = [t for _, t in results_base]
 
-    print("\n=== Comparison ===")
-    print(f"{'splits':>8}  {'2dfs (s)':>12}  {'2dfs+stargz (s)':>16}  {'stargz (s)':>12}  {'base (s)':>10}")
-    print("-" * 68)
+    log.result("\n=== Comparison ===")
+    log.result(f"{'splits':>8}  {'2dfs (s)':>12}  {'2dfs+stargz (s)':>16}  {'stargz (s)':>12}  {'base (s)':>10}")
+    log.result("-" * 68)
     for n, t1, t2, t3, t4 in zip(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base):
-        print(f"{n:>8}  {t1:>12.2f}  {t2:>16.2f}  {t3:>12.2f}  {t4:>10.2f}")
+        log.result(f"{n:>8}  {t1:>12.2f}  {t2:>16.2f}  {t3:>12.2f}  {t4:>10.2f}")
 
     save_csv(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base, MODEL)
     plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL)

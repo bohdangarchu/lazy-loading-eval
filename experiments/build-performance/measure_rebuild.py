@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
 
+import log
 import build_2dfs as b2
 import build_2dfs_stargz as b2s
 import build_base as bb
@@ -19,9 +20,10 @@ CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "rebuild")
 MODEL = "openai-community/gpt2"
 N_SPLITS = 10
 IS_LOCAL = True
+VERBOSE = False
 SLEEP_SECONDS = 5
 DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
-R_VALUES = [1, 2, 4, 6, 8, 10]
+R_VALUES = [1]
 
 METHODS = [
     ("2dfs", lambda n: b2.build_only(n, IS_LOCAL), lambda: b2.clear_cache(IS_LOCAL)),
@@ -54,8 +56,8 @@ def measure_rebuilds(chunk_paths: list[str]) -> list[dict]:
             targets = get_chunks_to_mutate(chunk_paths, r, direction)
 
             for method_name, build_fn, clear_fn in METHODS:
-                print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
-                      f"=== r={r}, {direction}, {method_name} ===")
+                log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
+                     f"=== r={r}, {direction}, {method_name} ===")
 
                 # clean slate: clear cache, build v1
                 clear_fn()
@@ -79,7 +81,7 @@ def measure_rebuilds(chunk_paths: list[str]) -> list[dict]:
                     "rebuild_s": elapsed,
                 })
 
-                print(f"Rebuild time: {elapsed:.2f}s")
+                log.result(f"Rebuild time: {elapsed:.2f}s")
                 time.sleep(SLEEP_SECONDS)
 
     return results
@@ -95,7 +97,7 @@ def save_csv(results: list[dict], model: str, n: int) -> None:
         writer.writeheader()
         for row in results:
             writer.writerow({**row, "rebuild_s": f"{row['rebuild_s']:.4f}"})
-    print(f"Results saved to {path}")
+    log.result(f"Results saved to {path}")
 
 
 def plot(results: list[dict], model: str, n: int) -> None:
@@ -130,11 +132,12 @@ def plot(results: list[dict], model: str, n: int) -> None:
 
     path = os.path.join(CHARTS_DIR, f"{slug}_rebuild_n{n}_{ts}.png")
     fig.savefig(path, dpi=150)
-    print(f"Chart saved to {path}")
+    log.result(f"Chart saved to {path}")
 
 
 def main():
-    print(f"Preparing model with {N_SPLITS} splits...")
+    log.set_verbose(VERBOSE)
+    log.info(f"Preparing model with {N_SPLITS} splits...")
     chunk_paths = prepare(MODEL, N_SPLITS, IS_LOCAL)
 
     results = measure_rebuilds(chunk_paths)
@@ -142,10 +145,10 @@ def main():
     save_csv(results, MODEL, N_SPLITS)
     plot(results, MODEL, N_SPLITS)
 
-    print(f"\n{'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild_s':>10}")
-    print("-" * 50)
+    log.result(f"\n{'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild_s':>10}")
+    log.result("-" * 50)
     for row in results:
-        print(f"{row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  {row['rebuild_s']:>10.2f}")
+        log.result(f"{row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  {row['rebuild_s']:>10.2f}")
 
 
 if __name__ == "__main__":

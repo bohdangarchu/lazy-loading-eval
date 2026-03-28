@@ -3,6 +3,8 @@ import os
 
 from huggingface_hub import hf_hub_download, list_repo_files
 
+import log
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BUFFER_SIZE = 8 * 1024 * 1024  # 8 MB
 BASE_IMAGE_LOCAL = "localhost:5000/python:3.10-esgz"
@@ -26,9 +28,9 @@ def _download_model(model_name: str) -> list[str]:
     for filename in shards:
         dest = os.path.join(local_dir, os.path.basename(filename))
         if os.path.exists(dest):
-            print(f"Skipping {filename} (already exists)")
+            log.info(f"Skipping {filename} (already exists)")
         else:
-            print(f"Downloading {filename}...")
+            log.info(f"Downloading {filename}...")
             hf_hub_download(
                 repo_id=model_name,
                 filename=filename,
@@ -47,7 +49,7 @@ def _split_model(shard_paths: list[str], num_splits: int) -> list[str]:
 
     total_size = sum(os.path.getsize(p) for p in shard_paths)
     chunk_size = total_size // num_splits
-    print(f"Splitting {total_size / 1e9:.2f} GB into {num_splits} chunks (~{chunk_size / 1e9:.2f} GB each)...")
+    log.info(f"Splitting {total_size / 1e9:.2f} GB into {num_splits} chunks (~{chunk_size / 1e9:.2f} GB each)...")
 
     chunk_idx = 0
     bytes_written = 0
@@ -75,7 +77,7 @@ def _split_model(shard_paths: list[str], num_splits: int) -> list[str]:
                     out = open(chunk_paths[chunk_idx], "wb")
 
     out.close()
-    print("Split complete.")
+    log.info("Split complete.")
     return chunk_paths
 
 
