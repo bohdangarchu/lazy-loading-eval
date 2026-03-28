@@ -14,10 +14,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
 CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts")
 
-MODEL = "openai-community/gpt2"  # ~500 MB safetensors
-# MODEL = "openai-community/gpt2-medium"  # ~1.5 GB safetensors
+# MODEL = "openai-community/gpt2"  # ~500 MB safetensors
+MODEL = "openai-community/gpt2-medium"  # ~1.5 GB safetensors
 MAX_SPLITS = 10
-IS_LOCAL = True
+IS_LOCAL = False
 
 
 def measure_builds(
