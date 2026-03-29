@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import matplotlib.pyplot as plt
 
 from shared import log
+from shared.registry import prepare_local_registry, registry
 from pull_performance.prepare import prepare
 from pull_performance.images import (
     pull_name_2dfs, pull_name_2dfs_stargz,
@@ -16,6 +17,8 @@ from pull_performance.images import (
 
 # MODEL = "openai-community/gpt2"  # ~500 MB safetensors
 MODEL = "openai-community/gpt2-medium"
+# BASE_IMAGE = "docker.io/library/python:3.12-slim"
+BASE_IMAGE = "docker.io/tensorflow/tensorflow"
 NUM_SPLITS = 10
 BASE_SPLITS = [2, 4, 6]
 IS_LOCAL = True
@@ -215,18 +218,26 @@ def print_results(
         log.result(f"{n:>8}  {fmt(results_2dfs, i):>18}  {fmt(results_2dfs_stargz, i):>18}  {fmt(results_stargz, i):>18}  {fmt(results_base, i):>18}")
 
 
+def _base_image_slug(base_image: str) -> str:
+    """'docker.io/library/python:3.12-slim' -> 'python-3.12-slim'"""
+    name = base_image.rsplit("/", 1)[-1]
+    return name.replace(":", "-")
+
+
 def save_csv(
     results_2dfs: list[tuple[int, float, float]],
     results_2dfs_stargz: list[tuple[int, float, float]],
     results_stargz: list[tuple[int, float, float]],
     results_base: list[tuple[int, float, float]],
     model: str,
+    base_image: str,
 ) -> None:
     os.makedirs(RESULTS_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
+    img_slug = _base_image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     splits = [n for n, _, _ in results_base]
-    output_path = os.path.join(RESULTS_DIR, f"{model_slug}_pull_{len(splits)}_{ts}.csv")
+    output_path = os.path.join(RESULTS_DIR, f"{model_slug}_{img_slug}_pull_{len(splits)}_{ts}.csv")
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -256,6 +267,7 @@ def plot(
     results_stargz: list[tuple[int, float, float]],
     results_base: list[tuple[int, float, float]],
     model: str,
+    base_image: str,
 ) -> None:
     splits = [n for n, _, _ in results_base]
 
@@ -266,15 +278,18 @@ def plot(
     ax.plot(splits, [p + r for _, p, r in results_base], marker="o", label="base")
     ax.set_xlabel("Number of splits pulled")
     ax.set_ylabel("Pull + run time (s)")
-    ax.set_title(f"Pull + run performance — {model}")
+    ax.set_title("Pull + run performance")
     ax.set_xticks(splits)
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
+    fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
+             fontsize=8, verticalalignment="bottom", family="monospace")
 
     os.makedirs(CHARTS_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
+    img_slug = _base_image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(CHARTS_DIR, f"{model_slug}_pull_{len(splits)}_{ts}.png")
+    output_path = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_pull_{len(splits)}_{ts}.png")
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     log.result(f"Chart saved to {output_path}")
@@ -289,6 +304,8 @@ def main():
     log.info(f"Splits (2dfs/stargz): {NUM_SPLITS}")
     log.info(f"Splits (base): {BASE_SPLITS}")
 
+    prepare_local_registry(BASE_IMAGE, registry(IS_LOCAL))
+
     prepare(MODEL, NUM_SPLITS, BASE_SPLITS, IS_LOCAL)
 
     results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure(
@@ -296,8 +313,8 @@ def main():
     )
 
     print_results(results_2dfs, results_2dfs_stargz, results_stargz, results_base)
-    save_csv(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL)
-    plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL)
+    save_csv(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL, BASE_IMAGE)
+    plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL, BASE_IMAGE)
 
 
 if __name__ == "__main__":

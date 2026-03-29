@@ -10,6 +10,7 @@ import numpy as np
 import psutil
 
 from shared import log
+from shared.registry import prepare_local_registry, registry
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_stargz as bs
@@ -25,6 +26,7 @@ CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 
 MODEL = "openai-community/gpt2"  # ~500 MB safetensors
 # MODEL = "openai-community/gpt2-medium"  # ~1.5 GB safetensors
+BASE_IMAGE = "docker.io/library/python:3.12-slim"
 MAX_SPLITS = 2
 IS_LOCAL = True
 WITH_RESOURCE = False
@@ -138,6 +140,16 @@ def measure_builds(
     return results_2dfs, results_2dfs_stargz, results_stargz, results_base
 
 
+def _base_image_slug(base_image: str) -> str:
+    """'docker.io/library/python:3.12-slim' -> 'python-3.12-slim'
+    'docker.io/tensorflow/tensorflow'      -> 'tensorflow-latest'
+    """
+    name = base_image.rsplit("/", 1)[-1]
+    if ":" not in name:
+        name += ":latest"
+    return name.replace(":", "-")
+
+
 def save_csv(
     splits: list[int],
     times_2dfs: list[float],
@@ -145,11 +157,13 @@ def save_csv(
     times_stargz: list[float],
     times_base: list[float],
     model: str,
+    base_image: str,
 ) -> None:
     os.makedirs(RESULTS_BUILD_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
+    img_slug = _base_image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(RESULTS_BUILD_DIR, f"{model_slug}_splits_{len(splits)}_{ts}.csv")
+    output_path = os.path.join(RESULTS_BUILD_DIR, f"{model_slug}_{img_slug}_splits_{len(splits)}_{ts}.csv")
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["splits", "2dfs_s", "2dfs_stargz_s", "stargz_s", "base_s"])
@@ -164,6 +178,7 @@ def plot(
     results_stargz: list[tuple[int, float]],
     results_base: list[tuple[int, float]],
     model: str,
+    base_image: str,
 ) -> None:
     splits = [n for n, _ in results_2dfs]
 
@@ -174,14 +189,17 @@ def plot(
     ax.plot(splits, [t for _, t in results_base], marker="o", label="base")
     ax.set_xlabel("Number of splits")
     ax.set_ylabel("Build time (s)")
-    ax.set_title(f"tdfs build performance — {model}")
+    ax.set_title("tdfs build performance")
     ax.set_xticks(splits)
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
+    fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
+             fontsize=8, verticalalignment="bottom", family="monospace")
     os.makedirs(CHARTS_BUILD_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
+    img_slug = _base_image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_splits_{len(splits)}_{ts}.png")
+    output_path = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_{img_slug}_splits_{len(splits)}_{ts}.png")
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     log.result(f"Chart saved to {output_path}")
@@ -189,11 +207,13 @@ def plot(
 
 def save_resource_csv(
     samples: list[tuple[int, float, float, str]], model: str, max_splits: int,
+    base_image: str,
 ) -> None:
     os.makedirs(RESULTS_RESOURCE_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
+    img_slug = _base_image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(RESULTS_RESOURCE_DIR, f"{model_slug}_resource_splits_{max_splits}_{ts}.csv")
+    output_path = os.path.join(RESULTS_RESOURCE_DIR, f"{model_slug}_{img_slug}_resource_splits_{max_splits}_{ts}.csv")
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["timestamp_ms", "cpu_percent", "mem_mb", "mode"])
@@ -204,6 +224,7 @@ def save_resource_csv(
 
 def plot_resource(
     samples: list[tuple[int, float, float, str]], model: str, max_splits: int,
+    base_image: str,
 ) -> None:
     if not samples:
         return
@@ -261,7 +282,7 @@ def plot_resource(
     ax_cpu.set_xticks([pos + center_offset for pos in x])
     ax_cpu.set_xticklabels(x_labels)
     ax_cpu.set_ylabel("CPU Usage (%)")
-    ax_cpu.set_title(f"Resource usage during builds — {model}")
+    ax_cpu.set_title("Resource usage during builds")
     ax_cpu.legend(fontsize="small")
     ax_cpu.grid(True, linestyle="--", alpha=0.5, axis="y")
 
@@ -272,10 +293,14 @@ def plot_resource(
     ax_mem.legend(fontsize="small")
     ax_mem.grid(True, linestyle="--", alpha=0.5, axis="y")
 
+    fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
+             fontsize=8, verticalalignment="bottom", family="monospace")
+
     os.makedirs(CHARTS_RESOURCE_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
+    img_slug = _base_image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(CHARTS_RESOURCE_DIR, f"{model_slug}_resource_splits_{max_splits}_{ts}.png")
+    output_path = os.path.join(CHARTS_RESOURCE_DIR, f"{model_slug}_{img_slug}_resource_splits_{max_splits}_{ts}.png")
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     log.result(f"Resource chart saved to {output_path}")
@@ -283,6 +308,9 @@ def plot_resource(
 
 def main():
     log.set_verbose(VERBOSE)
+
+    prepare_local_registry(BASE_IMAGE, registry(IS_LOCAL))
+
     monitor = None
     if WITH_RESOURCE:
         monitor = ResourceMonitor()
@@ -294,8 +322,8 @@ def main():
 
     if monitor:
         samples = monitor.stop()
-        save_resource_csv(samples, MODEL, MAX_SPLITS)
-        plot_resource(samples, MODEL, MAX_SPLITS)
+        save_resource_csv(samples, MODEL, MAX_SPLITS, BASE_IMAGE)
+        plot_resource(samples, MODEL, MAX_SPLITS, BASE_IMAGE)
 
     splits = [n for n, _ in results_2dfs]
     times_2dfs = [t for _, t in results_2dfs]
@@ -309,8 +337,8 @@ def main():
     for n, t1, t2, t3, t4 in zip(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base):
         log.result(f"{n:>8}  {t1:>12.2f}  {t2:>16.2f}  {t3:>12.2f}  {t4:>10.2f}")
 
-    save_csv(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base, MODEL)
-    plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL)
+    save_csv(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base, MODEL, BASE_IMAGE)
+    plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL, BASE_IMAGE)
 
 
 if __name__ == "__main__":

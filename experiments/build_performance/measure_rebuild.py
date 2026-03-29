@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import matplotlib.pyplot as plt
 
 from shared import log
+from shared.registry import prepare_local_registry, registry
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_base as bb
@@ -18,6 +19,7 @@ RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "rebuild")
 CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "rebuild")
 
 MODEL = "openai-community/gpt2"
+BASE_IMAGE = "docker.io/library/python:3.12-slim"
 N_SPLITS = 10
 IS_LOCAL = True
 VERBOSE = False
@@ -87,11 +89,22 @@ def measure_rebuilds(chunk_paths: list[str]) -> list[dict]:
     return results
 
 
-def save_csv(results: list[dict], model: str, n: int) -> None:
+def _base_image_slug(base_image: str) -> str:
+    """'docker.io/library/python:3.12-slim' -> 'python-3.12-slim'
+    'docker.io/tensorflow/tensorflow'      -> 'tensorflow-latest'
+    """
+    name = base_image.rsplit("/", 1)[-1]
+    if ":" not in name:
+        name += ":latest"
+    return name.replace(":", "-")
+
+
+def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
     os.makedirs(RESULTS_DIR, exist_ok=True)
     slug = model.replace("/", "--")
+    img_slug = _base_image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(RESULTS_DIR, f"{slug}_rebuild_n{n}_{ts}.csv")
+    path = os.path.join(RESULTS_DIR, f"{slug}_{img_slug}_rebuild_n{n}_{ts}.csv")
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["r", "direction", "method", "rebuild_s"])
         writer.writeheader()
@@ -100,9 +113,10 @@ def save_csv(results: list[dict], model: str, n: int) -> None:
     log.result(f"Results saved to {path}")
 
 
-def plot(results: list[dict], model: str, n: int) -> None:
+def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
     os.makedirs(CHARTS_DIR, exist_ok=True)
     slug = model.replace("/", "--")
+    img_slug = _base_image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     colors = {"2dfs": "#1f77b4", "2dfs_stargz": "#ff7f0e", "stargz": "#2ca02c", "base": "#d62728"}
@@ -127,23 +141,28 @@ def plot(results: list[dict], model: str, n: int) -> None:
         ax.grid(True, linestyle="--", alpha=0.5)
 
     ax_ttb.set_ylabel("Rebuild time (s)")
-    fig.suptitle(f"Incremental rebuild performance — {model} (n={n})")
+    fig.suptitle(f"Incremental rebuild performance (n={n})")
+    fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
+             fontsize=8, verticalalignment="bottom", family="monospace")
     fig.tight_layout()
 
-    path = os.path.join(CHARTS_DIR, f"{slug}_rebuild_n{n}_{ts}.png")
+    path = os.path.join(CHARTS_DIR, f"{slug}_{img_slug}_rebuild_n{n}_{ts}.png")
     fig.savefig(path, dpi=150)
     log.result(f"Chart saved to {path}")
 
 
 def main():
     log.set_verbose(VERBOSE)
+
+    prepare_local_registry(BASE_IMAGE, registry(IS_LOCAL))
+
     log.info(f"Preparing model with {N_SPLITS} splits...")
     chunk_paths = prepare(MODEL, N_SPLITS, IS_LOCAL)
 
     results = measure_rebuilds(chunk_paths)
 
-    save_csv(results, MODEL, N_SPLITS)
-    plot(results, MODEL, N_SPLITS)
+    save_csv(results, MODEL, N_SPLITS, BASE_IMAGE)
+    plot(results, MODEL, N_SPLITS, BASE_IMAGE)
 
     log.result(f"\n{'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild_s':>10}")
     log.result("-" * 50)
