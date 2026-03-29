@@ -2,6 +2,7 @@ import csv
 import os
 import subprocess
 import time
+import uuid
 from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
@@ -13,7 +14,8 @@ from pull_performance.images import (
     pull_name_stargz, pull_name_base,
 )
 
-MODEL = "openai-community/gpt2"  # ~500 MB safetensors
+# MODEL = "openai-community/gpt2"  # ~500 MB safetensors
+MODEL = "openai-community/gpt2-medium"
 NUM_SPLITS = 10
 BASE_SPLITS = [2, 4, 6]
 IS_LOCAL = True
@@ -31,6 +33,10 @@ STARGZ_ROOT = "/var/lib/containerd-stargz-grpc"
 
 def _run(cmd: str) -> None:
     subprocess.run(cmd, shell=True, check=True, capture_output=not log.VERBOSE)
+
+
+def _next_container_name(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
 def clear_cache(image: str | None = None) -> None:
@@ -52,6 +58,17 @@ def _timed_pull(cmd: list[str]) -> float:
     return time.perf_counter() - start
 
 
+def _timed_run(cmd: list[str]) -> float:
+    start = time.perf_counter()
+    subprocess.run(cmd, check=True, capture_output=not log.VERBOSE)
+    return time.perf_counter() - start
+
+
+def _run_cmd(n: int) -> list[str]:
+    files = " ".join(f"/chunk{i+1}.bin" for i in range(n))
+    return ["/bin/sh", "-c", f"cat {files} > /dev/null"]
+
+
 # ── pull functions ─────────────────────────────────────────────────
 
 
@@ -59,7 +76,7 @@ def pull_base(is_local: bool, num_splits: int) -> float:
     image = pull_name_base(is_local, num_splits)
     log.info(f"Pulling base image: {image}")
     elapsed = _timed_pull(["sudo", "ctr", "images", "pull", "--plain-http", image])
-    log.result(f"  base ({num_splits} splits): {elapsed:.2f}s")
+    log.result(f"  base pull ({num_splits} splits): {elapsed:.2f}s")
     return elapsed
 
 
@@ -67,7 +84,7 @@ def pull_stargz(is_local: bool) -> float:
     image = pull_name_stargz(is_local)
     log.info(f"Pulling stargz image: {image}")
     elapsed = _timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", image])
-    log.result(f"  stargz: {elapsed:.2f}s")
+    log.result(f"  stargz pull: {elapsed:.2f}s")
     return elapsed
 
 
@@ -75,7 +92,7 @@ def pull_2dfs(is_local: bool, num_allotments: int) -> float:
     image = pull_name_2dfs(is_local, num_allotments)
     log.info(f"Pulling 2dfs ({num_allotments} allotments): {image}")
     elapsed = _timed_pull(["sudo", "ctr", "images", "pull", "--plain-http", image])
-    log.result(f"  2dfs ({num_allotments} allotments): {elapsed:.2f}s")
+    log.result(f"  2dfs pull ({num_allotments} allotments): {elapsed:.2f}s")
     return elapsed
 
 
@@ -86,49 +103,93 @@ def pull_2dfs_stargz(is_local: bool, num_allotments: int) -> float:
         "sudo", "ctr-remote", "images", "rpull", "--plain-http",
         "--use-containerd-labels", image,
     ])
-    log.result(f"  2dfs-stargz ({num_allotments} allotments): {elapsed:.2f}s")
+    log.result(f"  2dfs-stargz pull ({num_allotments} allotments): {elapsed:.2f}s")
+    return elapsed
+
+
+# ── run functions ──────────────────────────────────────────────────
+
+
+def run_base(image: str, n: int) -> float:
+    name = _next_container_name("run-base")
+    log.info(f"Running base container: {name} (reading {n} chunks)")
+    elapsed = _timed_run([
+        "sudo", "ctr", "run", "--rm", image, name, *_run_cmd(n),
+    ])
+    log.result(f"  base run: {elapsed:.2f}s")
+    return elapsed
+
+
+def run_stargz(image: str, n: int) -> float:
+    name = _next_container_name("run-stargz")
+    log.info(f"Running stargz container: {name} (reading {n} chunks)")
+    elapsed = _timed_run([
+        "sudo", "ctr-remote", "run", "--rm", "--snapshotter=stargz",
+        image, name, *_run_cmd(n),
+    ])
+    log.result(f"  stargz run: {elapsed:.2f}s")
+    return elapsed
+
+
+def run_2dfs(image: str, n: int) -> float:
+    name = _next_container_name("run-2dfs")
+    log.info(f"Running 2dfs container: {name} (reading {n} chunks)")
+    elapsed = _timed_run([
+        "sudo", "ctr", "run", "--rm", image, name, *_run_cmd(n),
+    ])
+    log.result(f"  2dfs run: {elapsed:.2f}s")
+    return elapsed
+
+
+def run_2dfs_stargz(image: str, n: int) -> float:
+    name = _next_container_name("run-2dfs-stargz")
+    log.info(f"Running 2dfs-stargz container: {name} (reading {n} chunks)")
+    elapsed = _timed_run([
+        "sudo", "ctr-remote", "run", "--rm", "--snapshotter=stargz",
+        image, name, *_run_cmd(n),
+    ])
+    log.result(f"  2dfs-stargz run: {elapsed:.2f}s")
     return elapsed
 
 
 # ── orchestration ──────────────────────────────────────────────────
 
 
-def measure_pulls(
+def measure(
     base_splits: list[int], is_local: bool,
-) -> tuple[list[tuple[int, float]], list[tuple[int, float]], list[tuple[int, float]], list[tuple[int, float]]]:
-    results_2dfs: list[tuple[int, float]] = []
-    results_2dfs_stargz: list[tuple[int, float]] = []
-    results_stargz: list[tuple[int, float]] = []
-    results_base: list[tuple[int, float]] = []
-
-    prev_image: str | None = None
+) -> tuple[list[tuple[int, float, float]], list[tuple[int, float, float]],
+           list[tuple[int, float, float]], list[tuple[int, float, float]]]:
+    results_2dfs: list[tuple[int, float, float]] = []
+    results_2dfs_stargz: list[tuple[int, float, float]] = []
+    results_stargz: list[tuple[int, float, float]] = []
+    results_base: list[tuple[int, float, float]] = []
 
     for n in base_splits:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
         log.info(f"\n[{ts}] === base: {n} splits ===")
-        clear_cache(prev_image)
-        elapsed = pull_base(is_local, n)
-        prev_image = pull_name_base(is_local, n)
-        results_base.append((n, elapsed))
+        clear_cache()
+        pull_t = pull_base(is_local, n)
+        run_t = run_base(pull_name_base(is_local, n), n)
+        results_base.append((n, pull_t, run_t))
 
         log.info(f"\n[{ts}] === stargz (full image) ===")
-        clear_cache(prev_image)
-        elapsed = pull_stargz(is_local)
-        prev_image = pull_name_stargz(is_local)
-        results_stargz.append((n, elapsed))
+        clear_cache()
+        pull_t = pull_stargz(is_local)
+        run_t = run_stargz(pull_name_stargz(is_local), n)
+        results_stargz.append((n, pull_t, run_t))
 
         log.info(f"\n[{ts}] === 2dfs: {n} allotments ===")
-        clear_cache(prev_image)
-        elapsed = pull_2dfs(is_local, n)
-        prev_image = pull_name_2dfs(is_local, n)
-        results_2dfs.append((n, elapsed))
+        clear_cache()
+        pull_t = pull_2dfs(is_local, n)
+        run_t = run_2dfs(pull_name_2dfs(is_local, n), n)
+        results_2dfs.append((n, pull_t, run_t))
 
         log.info(f"\n[{ts}] === 2dfs-stargz: {n} allotments ===")
-        clear_cache(prev_image)
-        elapsed = pull_2dfs_stargz(is_local, n)
-        prev_image = pull_name_2dfs_stargz(is_local, n)
-        results_2dfs_stargz.append((n, elapsed))
+        clear_cache()
+        pull_t = pull_2dfs_stargz(is_local, n)
+        run_t = run_2dfs_stargz(pull_name_2dfs_stargz(is_local, n), n)
+        results_2dfs_stargz.append((n, pull_t, run_t))
 
     return results_2dfs, results_2dfs_stargz, results_stargz, results_base
 
@@ -137,66 +198,75 @@ def measure_pulls(
 
 
 def print_results(
-    results_2dfs: list[tuple[int, float]],
-    results_2dfs_stargz: list[tuple[int, float]],
-    results_stargz: list[tuple[int, float]],
-    results_base: list[tuple[int, float]],
+    results_2dfs: list[tuple[int, float, float]],
+    results_2dfs_stargz: list[tuple[int, float, float]],
+    results_stargz: list[tuple[int, float, float]],
+    results_base: list[tuple[int, float, float]],
 ) -> None:
-    splits = [n for n, _ in results_base]
-    log.result("\n=== Pull Performance Results ===")
-    log.result(f"{'splits':>8}  {'2dfs (s)':>12}  {'2dfs+stargz (s)':>16}  {'stargz (s)':>12}  {'base (s)':>10}")
-    log.result("-" * 68)
+    splits = [n for n, _, _ in results_base]
+    log.result("\n=== Pull + Run Performance Results ===")
+    log.result(f"{'splits':>8}  {'2dfs':>18}  {'2dfs+stargz':>18}  {'stargz':>18}  {'base':>18}")
+    log.result(f"{'':>8}  {'pull/run/total':>18}  {'pull/run/total':>18}  {'pull/run/total':>18}  {'pull/run/total':>18}")
+    log.result("-" * 90)
     for i, n in enumerate(splits):
-        t1 = results_2dfs[i][1]
-        t2 = results_2dfs_stargz[i][1]
-        t3 = results_stargz[i][1]
-        t4 = results_base[i][1]
-        log.result(f"{n:>8}  {t1:>12.2f}  {t2:>16.2f}  {t3:>12.2f}  {t4:>10.2f}")
+        def fmt(r: list[tuple[int, float, float]], idx: int) -> str:
+            _, p, r_t = r[idx]
+            return f"{p:.1f}/{r_t:.1f}/{p+r_t:.1f}"
+        log.result(f"{n:>8}  {fmt(results_2dfs, i):>18}  {fmt(results_2dfs_stargz, i):>18}  {fmt(results_stargz, i):>18}  {fmt(results_base, i):>18}")
 
 
 def save_csv(
-    results_2dfs: list[tuple[int, float]],
-    results_2dfs_stargz: list[tuple[int, float]],
-    results_stargz: list[tuple[int, float]],
-    results_base: list[tuple[int, float]],
+    results_2dfs: list[tuple[int, float, float]],
+    results_2dfs_stargz: list[tuple[int, float, float]],
+    results_stargz: list[tuple[int, float, float]],
+    results_base: list[tuple[int, float, float]],
     model: str,
 ) -> None:
     os.makedirs(RESULTS_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    splits = [n for n, _ in results_base]
+    splits = [n for n, _, _ in results_base]
     output_path = os.path.join(RESULTS_DIR, f"{model_slug}_pull_{len(splits)}_{ts}.csv")
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["splits", "2dfs_s", "2dfs_stargz_s", "stargz_s", "base_s"])
+        writer.writerow([
+            "splits",
+            "2dfs_pull_s", "2dfs_run_s", "2dfs_total_s",
+            "2dfs_stargz_pull_s", "2dfs_stargz_run_s", "2dfs_stargz_total_s",
+            "stargz_pull_s", "stargz_run_s", "stargz_total_s",
+            "base_pull_s", "base_run_s", "base_total_s",
+        ])
         for i in range(len(splits)):
+            def row(r: list[tuple[int, float, float]], idx: int) -> list[str]:
+                _, p, r_t = r[idx]
+                return [f"{p:.4f}", f"{r_t:.4f}", f"{p+r_t:.4f}"]
             writer.writerow([
                 splits[i],
-                f"{results_2dfs[i][1]:.4f}",
-                f"{results_2dfs_stargz[i][1]:.4f}",
-                f"{results_stargz[i][1]:.4f}",
-                f"{results_base[i][1]:.4f}",
+                *row(results_2dfs, i),
+                *row(results_2dfs_stargz, i),
+                *row(results_stargz, i),
+                *row(results_base, i),
             ])
     log.result(f"Results saved to {output_path}")
 
 
 def plot(
-    results_2dfs: list[tuple[int, float]],
-    results_2dfs_stargz: list[tuple[int, float]],
-    results_stargz: list[tuple[int, float]],
-    results_base: list[tuple[int, float]],
+    results_2dfs: list[tuple[int, float, float]],
+    results_2dfs_stargz: list[tuple[int, float, float]],
+    results_stargz: list[tuple[int, float, float]],
+    results_base: list[tuple[int, float, float]],
     model: str,
 ) -> None:
-    splits = [n for n, _ in results_base]
+    splits = [n for n, _, _ in results_base]
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(splits, [t for _, t in results_2dfs], marker="o", label="2dfs")
-    ax.plot(splits, [t for _, t in results_2dfs_stargz], marker="o", label="2dfs+stargz")
-    ax.plot(splits, [t for _, t in results_stargz], marker="o", label="stargz")
-    ax.plot(splits, [t for _, t in results_base], marker="o", label="base")
+    ax.plot(splits, [p + r for _, p, r in results_2dfs], marker="o", label="2dfs")
+    ax.plot(splits, [p + r for _, p, r in results_2dfs_stargz], marker="o", label="2dfs+stargz")
+    ax.plot(splits, [p + r for _, p, r in results_stargz], marker="o", label="stargz")
+    ax.plot(splits, [p + r for _, p, r in results_base], marker="o", label="base")
     ax.set_xlabel("Number of splits pulled")
-    ax.set_ylabel("Pull time (s)")
-    ax.set_title(f"Pull performance — {model}")
+    ax.set_ylabel("Pull + run time (s)")
+    ax.set_title(f"Pull + run performance — {model}")
     ax.set_xticks(splits)
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
@@ -221,7 +291,7 @@ def main():
 
     prepare(MODEL, NUM_SPLITS, BASE_SPLITS, IS_LOCAL)
 
-    results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure_pulls(
+    results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure(
         BASE_SPLITS, IS_LOCAL,
     )
 
