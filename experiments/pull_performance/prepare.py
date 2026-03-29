@@ -4,17 +4,13 @@ import subprocess
 from shared import log
 from shared.model import download_model, split_model
 from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_base_dockerfile
-from shared.registry import base_image, registry, image_slug, tdfs_cmd
+from shared.registry import base_image, tdfs_cmd
+from pull_performance.images import (
+    build_name_2dfs, build_name_2dfs_stargz,
+    build_name_stargz, build_name_base,
+)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-def _image_name(is_local: bool, mode: str, num_splits: int | None = None) -> str:
-    slug = image_slug(base_image(is_local))
-    reg = registry(is_local)
-    if num_splits is not None:
-        return f"{reg}/{slug}-{mode}-{num_splits}-splits:latest"
-    return f"{reg}/{slug}-{mode}:latest"
 
 
 # ── build + push per mode ───────────────────────────────────────────
@@ -22,7 +18,7 @@ def _image_name(is_local: bool, mode: str, num_splits: int | None = None) -> str
 
 def _build_and_push_2dfs(chunk_paths: list[str], is_local: bool) -> None:
     write_2dfs_json(chunk_paths, SCRIPT_DIR)
-    target = _image_name(is_local, "2dfs")
+    target = build_name_2dfs(is_local)
 
     cmd = tdfs_cmd(is_local, SCRIPT_DIR) + [
         "build",
@@ -44,7 +40,7 @@ def _build_and_push_2dfs(chunk_paths: list[str], is_local: bool) -> None:
 
 def _build_and_push_2dfs_stargz(chunk_paths: list[str], is_local: bool) -> None:
     write_2dfs_json(chunk_paths, SCRIPT_DIR)
-    target = _image_name(is_local, "2dfs-stargz")
+    target = build_name_2dfs_stargz(is_local)
 
     cmd = tdfs_cmd(is_local, SCRIPT_DIR) + [
         "build",
@@ -67,7 +63,7 @@ def _build_and_push_2dfs_stargz(chunk_paths: list[str], is_local: bool) -> None:
 
 def _build_and_push_stargz(chunk_paths: list[str], is_local: bool) -> None:
     create_stargz_dockerfile(chunk_paths, base_image(is_local), SCRIPT_DIR)
-    target = _image_name(is_local, "stargz")
+    target = build_name_stargz(is_local)
 
     cmd = [
         "sudo", "buildctl", "build",
@@ -86,7 +82,7 @@ def _build_and_push_base(shard_paths: list[str], base_splits: list[int], is_loca
     for r in base_splits:
         chunk_paths = split_model(shard_paths, r, SCRIPT_DIR)
         create_base_dockerfile(chunk_paths, base_image(is_local), SCRIPT_DIR)
-        target = _image_name(is_local, "base", num_splits=r)
+        target = build_name_base(is_local, r)
 
         cmd = [
             "sudo", "buildctl", "build",

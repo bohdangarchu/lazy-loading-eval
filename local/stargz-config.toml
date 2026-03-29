@@ -1,5 +1,5 @@
 noprefetch = true
-no_background_fetch = false
+no_background_fetch = true
 disable_verification = true
 # prefetch_async_size = 1
 # prefetch_chunk_size = 33554432   # 32MB — small enough to complete well within timeout
