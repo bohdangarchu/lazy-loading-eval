@@ -5,12 +5,12 @@ from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
 
-import log
-import build_2dfs as b2
-import build_2dfs_stargz as b2s
-import build_base as bb
-import build_stargz as bs
-from prepare import prepare
+from shared import log
+from build_performance import build_2dfs as b2
+from build_performance import build_2dfs_stargz as b2s
+from build_performance import build_base as bb
+from build_performance import build_stargz as bs
+from build_performance.prepare import prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")

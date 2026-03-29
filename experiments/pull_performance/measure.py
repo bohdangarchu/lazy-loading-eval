@@ -1,5 +1,5 @@
-import log
-from prepare import prepare
+from shared import log
+from pull_performance.prepare import prepare
 
 MODEL = "openai-community/gpt2"  # ~500 MB safetensors
 NUM_SPLITS = 10

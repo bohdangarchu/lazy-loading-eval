@@ -1,0 +1,40 @@
+import json
+import os
+
+
+def write_2dfs_json(chunk_paths: list[str], work_dir: str) -> None:
+    allotments = [
+        {
+            "src": os.path.relpath(p, work_dir),
+            "dst": f"/chunk{i + 1}.bin",
+            "row": 0,
+            "col": i,
+        }
+        for i, p in enumerate(chunk_paths)
+    ]
+    data = {"allotments": allotments}
+    out_path = os.path.join(work_dir, "2dfs.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+
+
+def create_stargz_dockerfile(chunk_paths: list[str], base_image: str, work_dir: str) -> None:
+    lines = [f"FROM {base_image}"]
+    for p in chunk_paths:
+        rel = os.path.relpath(p, work_dir)
+        name = os.path.basename(p)
+        lines.append(f"COPY {rel} /{name}")
+    out_path = os.path.join(work_dir, "Dockerfile.stargz")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def create_base_dockerfile(chunk_paths: list[str], base_image: str, work_dir: str) -> None:
+    lines = [f"FROM {base_image}"]
+    for p in chunk_paths:
+        rel = os.path.relpath(p, work_dir)
+        name = os.path.basename(p)
+        lines.append(f"COPY {rel} /{name}")
+    out_path = os.path.join(work_dir, "Dockerfile.base")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")

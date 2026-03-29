@@ -4,8 +4,9 @@ import subprocess
 import time
 from datetime import datetime, timezone
 
-import log
-from prepare import _base_image, prepare
+from shared import log
+from shared.registry import base_image, tdfs_cmd
+from build_performance.prepare import prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
@@ -21,15 +22,13 @@ def clear_cache(is_local: bool = True) -> None:
 
 
 def build_only(n: int, is_local: bool = True) -> float:
-    tdfs_cmd = [os.path.join(SCRIPT_DIR, "tdfs")] if is_local else ["sudo", "tdfs", "--home-dir", "/mydata/.2dfs"]
-
     target = f"{REGISTRY}/build-perf:{n}"
-    cmd = tdfs_cmd + [
+    cmd = tdfs_cmd(is_local, SCRIPT_DIR) + [
         "build",
         "--platforms", "linux/amd64",
         "--force-http",
         "-f", "2dfs.json",
-        _base_image(is_local),
+        base_image(is_local),
         target,
     ]
 

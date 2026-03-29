@@ -4,8 +4,8 @@ import subprocess
 import time
 from datetime import datetime, timezone
 
-import log
-from prepare import prepare
+from shared import log
+from build_performance.prepare import prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
@@ -18,17 +18,17 @@ def clear_cache() -> None:
 
 
 def build_only(n: int) -> float:
-    target = f"{REGISTRY}/build-perf-base:{n}"
+    target = f"{REGISTRY}/build-perf-stargz-only:{n}"
     cmd = [
         "sudo", "buildctl", "build",
         "--frontend", "dockerfile.v0",
-        "--opt", "filename=Dockerfile.base",
+        "--opt", "filename=Dockerfile.stargz",
         "--local", f"context={SCRIPT_DIR}",
         "--local", f"dockerfile={SCRIPT_DIR}",
-        "--output", f"type=image,name={target},push=false,registry.insecure=true",
+        "--output", f"type=image,name={target},push=false,compression=estargz,oci-mediatypes=true,registry.insecure=true",
     ]
 
-    log.info(f"=== Building with {n} split(s) (base) ===")
+    log.info(f"=== Building with {n} split(s) (stargz) ===")
     start = time.perf_counter()
     subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     elapsed = time.perf_counter() - start
@@ -58,7 +58,7 @@ def run(model: str, max_splits: int) -> list[tuple[int, float]]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark base (plain) build across split counts")
+    parser = argparse.ArgumentParser(description="Benchmark stargz build across split counts")
     parser.add_argument("--model", required=True, help="HuggingFace model name")
     parser.add_argument("--max-splits", type=int, required=True, help="Maximum number of splits")
     args = parser.parse_args()

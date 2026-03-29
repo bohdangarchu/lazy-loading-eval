@@ -9,11 +9,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import psutil
 
-import log
-import build_2dfs as b2
-import build_2dfs_stargz as b2s
-import build_stargz as bs
-import build_base as bb
+from shared import log
+from build_performance import build_2dfs as b2
+from build_performance import build_2dfs_stargz as b2s
+from build_performance import build_stargz as bs
+from build_performance import build_base as bb
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
@@ -25,7 +25,7 @@ CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 
 MODEL = "openai-community/gpt2"  # ~500 MB safetensors
 # MODEL = "openai-community/gpt2-medium"  # ~1.5 GB safetensors
-MAX_SPLITS = 1
+MAX_SPLITS = 2
 IS_LOCAL = True
 WITH_RESOURCE = False
 VERBOSE = False
