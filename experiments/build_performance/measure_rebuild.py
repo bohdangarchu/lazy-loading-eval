@@ -63,7 +63,9 @@ def measure_rebuilds(chunk_paths: list[str]) -> list[dict]:
                      f"=== r={r}, {direction}, {method_name} ===")
 
                 # clean slate: clear cache, build v1
+                t0 = time.time()
                 clear_fn()
+                log.info(f"Cache clear took {time.time() - t0:.2f}s")
                 build_fn(N_SPLITS)
 
                 # mutate r chunks

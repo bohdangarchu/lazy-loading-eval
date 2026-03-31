@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import numpy as np
 
 from shared import log
 from shared.registry import prepare_local_registry, registry, image_slug
@@ -42,7 +44,7 @@ def _next_container_name(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
-def clear_cache(image: str | None = None) -> None:
+def clear_cache(is_local: bool = True) -> None:
     log.info("Clearing stargz cache...")
     # Remove all images except the registry container
     _run("sudo ctr -n default images ls -q | grep -v 'tdfs-registry' | xargs -r sudo ctr -n default images rm 2>/dev/null")
@@ -52,6 +54,8 @@ def clear_cache(image: str | None = None) -> None:
     _run("sudo systemctl stop stargz-snapshotter")
     _run(f"sudo rm -rf {STARGZ_ROOT}/snapshotter")
     _run(f"sudo rm -rf {STARGZ_ROOT}/stargz")
+    if not is_local:
+        _run("sudo ctr content rm $(sudo ctr content ls -q) 2>/dev/null || true")
     _run("sudo systemctl start stargz-snapshotter")
 
 
@@ -102,10 +106,7 @@ def pull_2dfs(source_image: str, is_local: bool, num_allotments: int) -> float:
 def pull_2dfs_stargz(source_image: str, is_local: bool, num_allotments: int) -> float:
     image = pull_name_2dfs_stargz(source_image, is_local, num_allotments)
     log.info(f"Pulling 2dfs-stargz ({num_allotments} allotments): {image}")
-    elapsed = _timed_pull([
-        "sudo", "ctr-remote", "images", "rpull", "--plain-http",
-        "--use-containerd-labels", image,
-    ])
+    elapsed = _timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", image])
     log.result(f"  2dfs-stargz pull ({num_allotments} allotments): {elapsed:.2f}s")
     return elapsed
 
@@ -171,25 +172,25 @@ def measure(
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
         log.info(f"\n[{ts}] === base: {n} splits ===")
-        clear_cache()
+        clear_cache(is_local)
         pull_t = pull_base(source_image, is_local, n)
         run_t = run_base(pull_name_base(source_image, is_local, n), n)
         results_base.append((n, pull_t, run_t))
 
         log.info(f"\n[{ts}] === stargz (full image) ===")
-        clear_cache()
+        clear_cache(is_local)
         pull_t = pull_stargz(source_image, is_local)
         run_t = run_stargz(pull_name_stargz(source_image, is_local), n)
         results_stargz.append((n, pull_t, run_t))
 
         log.info(f"\n[{ts}] === 2dfs: {n} allotments ===")
-        clear_cache()
+        clear_cache(is_local)
         pull_t = pull_2dfs(source_image, is_local, n)
         run_t = run_2dfs(pull_name_2dfs(source_image, is_local, n), n)
         results_2dfs.append((n, pull_t, run_t))
 
         log.info(f"\n[{ts}] === 2dfs-stargz: {n} allotments ===")
-        clear_cache()
+        clear_cache(is_local)
         pull_t = pull_2dfs_stargz(source_image, is_local, n)
         run_t = run_2dfs_stargz(pull_name_2dfs_stargz(source_image, is_local, n), n)
         results_2dfs_stargz.append((n, pull_t, run_t))
@@ -264,18 +265,44 @@ def plot(
     base_image: str,
 ) -> None:
     splits = [n for n, _, _ in results_base]
+    x = np.arange(len(splits))
+    width = 0.18
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(splits, [p + r for _, p, r in results_2dfs], marker="o", label="2dfs")
-    ax.plot(splits, [p + r for _, p, r in results_2dfs_stargz], marker="o", label="2dfs+stargz")
-    ax.plot(splits, [p + r for _, p, r in results_stargz], marker="o", label="stargz")
-    ax.plot(splits, [p + r for _, p, r in results_base], marker="o", label="base")
+    methods = [
+        ("2dfs", results_2dfs, "#1f77b4"),
+        ("2dfs+stargz", results_2dfs_stargz, "#ff7f0e"),
+        ("stargz", results_stargz, "#2ca02c"),
+        ("base", results_base, "#d62728"),
+    ]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for i, (label, results, color) in enumerate(methods):
+        pulls = [p for _, p, _ in results]
+        runs = [r for _, _, r in results]
+        offset = (i - 1.5) * width
+        # Pull portion (bottom, hatched)
+        ax.bar(x + offset, pulls, width, color=color, alpha=0.5,
+               hatch="//", edgecolor=color, linewidth=0.5)
+        # Run portion (top, solid)
+        ax.bar(x + offset, runs, width, bottom=pulls, color=color,
+               edgecolor=color, linewidth=0.5, label=label)
+
     ax.set_xlabel("Number of splits pulled")
-    ax.set_ylabel("Pull + run time (s)")
-    ax.set_title("Pull + run performance")
-    ax.set_xticks(splits)
-    ax.legend()
-    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.set_ylabel("Time (s)")
+    ax.set_title("Pull + Run Performance")
+    ax.set_xticks(x)
+    ax.set_xticklabels(splits)
+    ax.grid(True, linestyle="--", alpha=0.3, axis="y")
+
+    # Legend: method colors + pull/run distinction
+    method_handles = [mpatches.Patch(facecolor=c, edgecolor=c, label=l)
+                      for l, _, c in methods]
+    pull_patch = mpatches.Patch(facecolor="gray", alpha=0.5, hatch="//",
+                                edgecolor="gray", label="pull")
+    run_patch = mpatches.Patch(facecolor="gray", edgecolor="gray", label="run")
+    ax.legend(handles=method_handles + [pull_patch, run_patch], loc="upper left")
+
     fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
              fontsize=8, verticalalignment="bottom", family="monospace")
 
