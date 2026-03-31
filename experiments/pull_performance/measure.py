@@ -1,3 +1,4 @@
+import argparse
 import csv
 import os
 import subprocess
@@ -326,22 +327,30 @@ def plot(
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Measure pull + run performance")
+    parser.add_argument("--base-image", default=BASE_IMAGE,
+                        help=f"Base container image (default: {BASE_IMAGE})")
+    args = parser.parse_args()
+
+    base_image = args.base_image
+
     log.set_verbose(VERBOSE)
     log.info(f"Model: {MODEL}")
+    log.info(f"Base image: {base_image}")
     log.info(f"Splits (2dfs/stargz): {NUM_SPLITS}")
     log.info(f"Splits (base): {BASE_SPLITS}")
 
-    prepare_local_registry(BASE_IMAGE, registry(IS_LOCAL))
+    prepare_local_registry(base_image, registry(IS_LOCAL))
 
-    prepare(MODEL, NUM_SPLITS, BASE_SPLITS, BASE_IMAGE, IS_LOCAL)
+    prepare(MODEL, NUM_SPLITS, BASE_SPLITS, base_image, IS_LOCAL)
 
     results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure(
-        BASE_SPLITS, BASE_IMAGE, IS_LOCAL,
+        BASE_SPLITS, base_image, IS_LOCAL,
     )
 
     print_results(results_2dfs, results_2dfs_stargz, results_stargz, results_base)
-    save_csv(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL, BASE_IMAGE)
-    plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL, BASE_IMAGE)
+    save_csv(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL, base_image)
+    plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL, base_image)
 
 
 if __name__ == "__main__":
