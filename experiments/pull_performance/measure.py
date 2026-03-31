@@ -17,10 +17,10 @@ from pull_performance.images import (
 
 # MODEL = "openai-community/gpt2"  # ~500 MB safetensors
 MODEL = "openai-community/gpt2-medium"
-# BASE_IMAGE = "docker.io/library/python:3.12-slim"
-BASE_IMAGE = "docker.io/tensorflow/tensorflow"
+# BASE_IMAGE = "docker.io/library/python:3.12-slim" # 41 MB compressed
+BASE_IMAGE = "docker.io/tensorflow/tensorflow" # 588 MB compressed
 NUM_SPLITS = 10
-BASE_SPLITS = [2, 4]
+BASE_SPLITS = [2, 4, 6]
 IS_LOCAL = True
 VERBOSE = True
 
