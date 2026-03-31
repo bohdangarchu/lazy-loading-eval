@@ -46,17 +46,22 @@ def _next_container_name(prefix: str) -> str:
 
 def clear_cache(is_local: bool = True) -> None:
     log.info("Clearing stargz cache...")
-    # Remove all images except the registry container
-    _run("sudo ctr -n default images ls -q | grep -v 'tdfs-registry' | xargs -r sudo ctr -n default images rm 2>/dev/null")
-    # Unmount FUSE mounts while stargz-snapshotter is still running
-    _run(f'grep "{STARGZ_ROOT}/snapshotter/snapshots" /proc/mounts | awk \'{{print $2}}\' | xargs -r sudo umount')
-    _run("sudo systemctl daemon-reload")
-    _run("sudo systemctl stop stargz-snapshotter")
-    _run(f"sudo rm -rf {STARGZ_ROOT}/snapshotter")
-    _run(f"sudo rm -rf {STARGZ_ROOT}/stargz")
-    if not is_local:
+    # if is_local True then we have a local registry which means we have to be careful with clearing cache
+    if is_local:
+        _run("sudo ctr -n default images ls -q | grep -v 'tdfs-registry' | xargs -r sudo ctr -n default images rm 2>/dev/null")
+        _run(f'grep "{STARGZ_ROOT}/snapshotter/snapshots" /proc/mounts | awk \'{{print $2}}\' | xargs -r sudo umount')
+        _run("sudo systemctl daemon-reload")
+        _run("sudo systemctl stop stargz-snapshotter")
+        _run(f"sudo rm -rf {STARGZ_ROOT}/snapshotter")
+        _run(f"sudo rm -rf {STARGZ_ROOT}/stargz")
+        _run("sudo systemctl start stargz-snapshotter")
+    else:
+        _run("sudo systemctl stop stargz-snapshotter")
+        _run(f"sudo rm -rf {STARGZ_ROOT}/*")
+        _run("sudo nerdctl image rm -f $(sudo nerdctl images -q) 2>/dev/null || true")
         _run("sudo ctr content rm $(sudo ctr content ls -q) 2>/dev/null || true")
-    _run("sudo systemctl start stargz-snapshotter")
+        _run("sudo systemctl start stargz-snapshotter")
+        _run("sudo systemctl restart containerd")
 
 
 def _timed_pull(cmd: list[str]) -> float:
