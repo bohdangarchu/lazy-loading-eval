@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 from shared import log
 from shared.registry import prepare_local_registry, registry, image_slug
@@ -38,11 +39,10 @@ METHODS = [
 
 def mutate_chunk(path: str) -> None:
     with open(path, "r+b") as f:
-        data = bytearray(f.read())
-        for j in range(len(data)):
-            data[j] ^= 0xFF
+        data = np.fromfile(f, dtype=np.uint8)
+        np.bitwise_not(data, out=data)
         f.seek(0)
-        f.write(data)
+        data.tofile(f)
 
 
 def get_chunks_to_mutate(chunk_paths: list[str], r: int, direction: str) -> list[str]:
