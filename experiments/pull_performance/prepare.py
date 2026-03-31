@@ -71,7 +71,7 @@ def _build_and_push_stargz(chunk_paths: list[str], source_image: str, is_local: 
         "--opt", "filename=Dockerfile.stargz",
         "--local", f"context={SCRIPT_DIR}",
         "--local", f"dockerfile={SCRIPT_DIR}",
-        "--output", f"type=image,name={target},push=true,compression=estargz,oci-mediatypes=true,registry.insecure=true",
+        "--output", f"type=image,name={target},push=true,compression=estargz,force-compression=true,oci-mediatypes=true,registry.insecure=true",
     ]
     log.info(f"Building and pushing stargz image: {target}")
     subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
