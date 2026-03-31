@@ -78,10 +78,9 @@ def _build_and_push_stargz(chunk_paths: list[str], source_image: str, is_local: 
     log.result(f"Built and pushed {target}")
 
 
-def _build_and_push_base(shard_paths: list[str], base_splits: list[int], source_image: str, is_local: bool) -> None:
+def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_image: str, is_local: bool) -> None:
     for r in base_splits:
-        chunk_paths = split_model(shard_paths, r, SCRIPT_DIR)
-        create_base_dockerfile(chunk_paths, base_image(source_image, is_local), SCRIPT_DIR)
+        create_base_dockerfile(chunk_paths[:r], base_image(source_image, is_local), SCRIPT_DIR)
         target = build_name_base(source_image, is_local, r)
 
         cmd = [
@@ -111,6 +110,6 @@ def prepare(model_name: str, num_splits: int, base_splits: list[int], source_ima
     _build_and_push_stargz(chunk_paths, source_image, is_local)
 
     log.info(f"\n=== Building base images for split counts: {base_splits} ===")
-    _build_and_push_base(shard_paths, base_splits, source_image, is_local)
+    _build_and_push_base(chunk_paths, base_splits, source_image, is_local)
 
     log.result("\nAll images built and pushed.")
