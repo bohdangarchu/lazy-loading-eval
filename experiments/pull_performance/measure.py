@@ -57,6 +57,7 @@ def clear_cache(is_local: bool = True) -> None:
         _run("sudo systemctl start stargz-snapshotter")
     else:
         _run("sudo systemctl stop stargz-snapshotter")
+        _run(f"sudo umount -Rl {STARGZ_ROOT}/snapshotter 2>/dev/null || true")
         _run(f"sudo rm -rf {STARGZ_ROOT}/*")
         _run("sudo nerdctl image rm -f $(sudo nerdctl images -q) 2>/dev/null || true")
         _run("sudo ctr content rm $(sudo ctr content ls -q) 2>/dev/null || true")
