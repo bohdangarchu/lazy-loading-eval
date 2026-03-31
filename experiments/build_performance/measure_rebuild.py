@@ -18,14 +18,15 @@ CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "rebuild")
 CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "rebuild")
 
-MODEL = "openai-community/gpt2"
+# MODEL = "openai-community/gpt2"
+MODEL = "openai-community/gpt2-medium"
 BASE_IMAGE = "docker.io/library/python:3.12-slim"
 N_SPLITS = 10
-IS_LOCAL = True
+IS_LOCAL = False
 VERBOSE = False
 SLEEP_SECONDS = 5
 DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
-R_VALUES = [1]
+R_VALUES = [2, 4, 6, 8, 10]
 
 METHODS = [
     ("2dfs", lambda n: b2.build_only(n, IS_LOCAL, BASE_IMAGE), lambda: b2.clear_cache(IS_LOCAL)),
