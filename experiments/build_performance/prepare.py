@@ -7,10 +7,10 @@ from shared.registry import base_image
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def prepare(model_name: str, num_splits: int, is_local: bool = True) -> list[str]:
+def prepare(model_name: str, num_splits: int, source_image: str = "", is_local: bool = True) -> list[str]:
     shard_paths = download_model(model_name, SCRIPT_DIR)
     chunk_paths = split_model(shard_paths, num_splits, SCRIPT_DIR)
     write_2dfs_json(chunk_paths, SCRIPT_DIR)
-    create_stargz_dockerfile(chunk_paths, base_image(is_local), SCRIPT_DIR)
-    create_base_dockerfile(chunk_paths, base_image(is_local), SCRIPT_DIR)
+    create_stargz_dockerfile(chunk_paths, base_image(source_image, is_local), SCRIPT_DIR)
+    create_base_dockerfile(chunk_paths, base_image(source_image, is_local), SCRIPT_DIR)
     return chunk_paths

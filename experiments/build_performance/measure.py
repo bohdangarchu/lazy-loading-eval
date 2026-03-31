@@ -10,7 +10,7 @@ import numpy as np
 import psutil
 
 from shared import log
-from shared.registry import prepare_local_registry, registry
+from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_stargz as bs
@@ -62,7 +62,8 @@ class ResourceMonitor:
 
 
 def measure_builds(
-    model: str, max_splits: int, is_local: bool = IS_LOCAL, monitor: ResourceMonitor | None = None,
+    model: str, max_splits: int, source_image: str, is_local: bool = IS_LOCAL,
+    monitor: ResourceMonitor | None = None,
 ) -> tuple[list[tuple[int, float]], list[tuple[int, float]], list[tuple[int, float]], list[tuple[int, float]]]:
     if monitor:
         results_2dfs = []
@@ -78,7 +79,7 @@ def measure_builds(
         for n in range(1, max_splits + 1):
             monitor.set_mode(f"2dfs_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === 2dfs: {n} split(s) ===")
-            elapsed = b2.run_one(model, n, is_local)
+            elapsed = b2.run_one(model, n, is_local, source_image)
             results_2dfs.append((n, elapsed))
 
             monitor.set_mode("idle")
@@ -87,7 +88,7 @@ def measure_builds(
 
             monitor.set_mode(f"2dfs_stargz_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === 2dfs+stargz: {n} split(s) ===")
-            elapsed = b2s.run_one(model, n, is_local)
+            elapsed = b2s.run_one(model, n, is_local, source_image)
             results_2dfs_stargz.append((n, elapsed))
 
             monitor.set_mode("idle")
@@ -96,7 +97,7 @@ def measure_builds(
 
             monitor.set_mode(f"stargz_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === stargz: {n} split(s) ===")
-            elapsed = bs.run_one(model, n)
+            elapsed = bs.run_one(model, n, source_image)
             results_stargz.append((n, elapsed))
 
             monitor.set_mode("idle")
@@ -105,7 +106,7 @@ def measure_builds(
 
             monitor.set_mode(f"base_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === base: {n} split(s) ===")
-            elapsed = bb.run_one(model, n)
+            elapsed = bb.run_one(model, n, source_image)
             results_base.append((n, elapsed))
 
             if n < max_splits:
@@ -117,37 +118,28 @@ def measure_builds(
 
     # Non-monitored path: original sequential mode-by-mode execution
     log.info(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs builds ===")
-    results_2dfs = b2.run(model, max_splits, is_local)
+    results_2dfs = b2.run(model, max_splits, is_local, source_image)
 
     log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
     time.sleep(SLEEP_SECONDS)
 
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs+stargz builds ===")
-    results_2dfs_stargz = b2s.run(model, max_splits, is_local)
+    results_2dfs_stargz = b2s.run(model, max_splits, is_local, source_image)
 
     log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
     time.sleep(SLEEP_SECONDS)
 
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running stargz builds ===")
-    results_stargz = bs.run(model, max_splits)
+    results_stargz = bs.run(model, max_splits, source_image)
 
     log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
     time.sleep(SLEEP_SECONDS)
 
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running base builds ===")
-    results_base = bb.run(model, max_splits)
+    results_base = bb.run(model, max_splits, source_image)
 
     return results_2dfs, results_2dfs_stargz, results_stargz, results_base
 
-
-def _base_image_slug(base_image: str) -> str:
-    """'docker.io/library/python:3.12-slim' -> 'python-3.12-slim'
-    'docker.io/tensorflow/tensorflow'      -> 'tensorflow-latest'
-    """
-    name = base_image.rsplit("/", 1)[-1]
-    if ":" not in name:
-        name += ":latest"
-    return name.replace(":", "-")
 
 
 def save_csv(
@@ -161,7 +153,7 @@ def save_csv(
 ) -> None:
     os.makedirs(RESULTS_BUILD_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
-    img_slug = _base_image_slug(base_image)
+    img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(RESULTS_BUILD_DIR, f"{model_slug}_{img_slug}_splits_{len(splits)}_{ts}.csv")
     with open(output_path, "w", newline="") as f:
@@ -197,7 +189,7 @@ def plot(
              fontsize=8, verticalalignment="bottom", family="monospace")
     os.makedirs(CHARTS_BUILD_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
-    img_slug = _base_image_slug(base_image)
+    img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_{img_slug}_splits_{len(splits)}_{ts}.png")
     fig.tight_layout()
@@ -211,7 +203,7 @@ def save_resource_csv(
 ) -> None:
     os.makedirs(RESULTS_RESOURCE_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
-    img_slug = _base_image_slug(base_image)
+    img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(RESULTS_RESOURCE_DIR, f"{model_slug}_{img_slug}_resource_splits_{max_splits}_{ts}.csv")
     with open(output_path, "w", newline="") as f:
@@ -298,7 +290,7 @@ def plot_resource(
 
     os.makedirs(CHARTS_RESOURCE_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
-    img_slug = _base_image_slug(base_image)
+    img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(CHARTS_RESOURCE_DIR, f"{model_slug}_{img_slug}_resource_splits_{max_splits}_{ts}.png")
     fig.tight_layout()
@@ -317,7 +309,7 @@ def main():
         monitor.start()
 
     results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure_builds(
-        MODEL, MAX_SPLITS, IS_LOCAL, monitor=monitor,
+        MODEL, MAX_SPLITS, BASE_IMAGE, IS_LOCAL, monitor=monitor,
     )
 
     if monitor:

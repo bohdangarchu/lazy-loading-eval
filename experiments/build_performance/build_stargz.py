@@ -37,10 +37,10 @@ def build_only(n: int) -> float:
     return elapsed
 
 
-def run_one(model: str, n: int) -> float:
+def run_one(model: str, n: int, source_image: str = "") -> float:
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
     subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
-    prepare(model, n)
+    prepare(model, n, source_image)
 
     elapsed = build_only(n)
 
@@ -48,11 +48,11 @@ def run_one(model: str, n: int) -> float:
     return elapsed
 
 
-def run(model: str, max_splits: int) -> list[tuple[int, float]]:
+def run(model: str, max_splits: int, source_image: str = "") -> list[tuple[int, float]]:
     clear_cache()
     results = []
     for n in range(1, max_splits + 1):
-        elapsed = run_one(model, n)
+        elapsed = run_one(model, n, source_image)
         results.append((n, elapsed))
     return results
 

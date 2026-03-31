@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import matplotlib.pyplot as plt
 
 from shared import log
-from shared.registry import prepare_local_registry, registry
+from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_base as bb
@@ -28,8 +28,8 @@ DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
 R_VALUES = [1]
 
 METHODS = [
-    ("2dfs", lambda n: b2.build_only(n, IS_LOCAL), lambda: b2.clear_cache(IS_LOCAL)),
-    ("2dfs_stargz", lambda n: b2s.build_only(n, IS_LOCAL), lambda: b2s.clear_cache(IS_LOCAL)),
+    ("2dfs", lambda n: b2.build_only(n, IS_LOCAL, BASE_IMAGE), lambda: b2.clear_cache(IS_LOCAL)),
+    ("2dfs_stargz", lambda n: b2s.build_only(n, IS_LOCAL, BASE_IMAGE), lambda: b2s.clear_cache(IS_LOCAL)),
     ("stargz", lambda n: bs.build_only(n), lambda: bs.clear_cache()),
     ("base", lambda n: bb.build_only(n), lambda: bb.clear_cache()),
 ]
@@ -89,20 +89,11 @@ def measure_rebuilds(chunk_paths: list[str]) -> list[dict]:
     return results
 
 
-def _base_image_slug(base_image: str) -> str:
-    """'docker.io/library/python:3.12-slim' -> 'python-3.12-slim'
-    'docker.io/tensorflow/tensorflow'      -> 'tensorflow-latest'
-    """
-    name = base_image.rsplit("/", 1)[-1]
-    if ":" not in name:
-        name += ":latest"
-    return name.replace(":", "-")
-
 
 def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
     os.makedirs(RESULTS_DIR, exist_ok=True)
     slug = model.replace("/", "--")
-    img_slug = _base_image_slug(base_image)
+    img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     path = os.path.join(RESULTS_DIR, f"{slug}_{img_slug}_rebuild_n{n}_{ts}.csv")
     with open(path, "w", newline="") as f:
@@ -116,7 +107,7 @@ def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
 def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
     os.makedirs(CHARTS_DIR, exist_ok=True)
     slug = model.replace("/", "--")
-    img_slug = _base_image_slug(base_image)
+    img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     colors = {"2dfs": "#1f77b4", "2dfs_stargz": "#ff7f0e", "stargz": "#2ca02c", "base": "#d62728"}
@@ -157,7 +148,7 @@ def main():
     prepare_local_registry(BASE_IMAGE, registry(IS_LOCAL))
 
     log.info(f"Preparing model with {N_SPLITS} splits...")
-    chunk_paths = prepare(MODEL, N_SPLITS, IS_LOCAL)
+    chunk_paths = prepare(MODEL, N_SPLITS, BASE_IMAGE, IS_LOCAL)
 
     results = measure_rebuilds(chunk_paths)
 

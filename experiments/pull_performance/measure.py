@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import matplotlib.pyplot as plt
 
 from shared import log
-from shared.registry import prepare_local_registry, registry
+from shared.registry import prepare_local_registry, registry, image_slug
 from pull_performance.prepare import prepare
 from pull_performance.images import (
     pull_name_2dfs, pull_name_2dfs_stargz,
@@ -20,7 +20,7 @@ MODEL = "openai-community/gpt2-medium"
 # BASE_IMAGE = "docker.io/library/python:3.12-slim"
 BASE_IMAGE = "docker.io/tensorflow/tensorflow"
 NUM_SPLITS = 10
-BASE_SPLITS = [2, 4, 6]
+BASE_SPLITS = [2, 4]
 IS_LOCAL = True
 VERBOSE = True
 
@@ -75,32 +75,32 @@ def _run_cmd(n: int) -> list[str]:
 # ── pull functions ─────────────────────────────────────────────────
 
 
-def pull_base(is_local: bool, num_splits: int) -> float:
-    image = pull_name_base(is_local, num_splits)
+def pull_base(source_image: str, is_local: bool, num_splits: int) -> float:
+    image = pull_name_base(source_image, is_local, num_splits)
     log.info(f"Pulling base image: {image}")
     elapsed = _timed_pull(["sudo", "ctr", "images", "pull", "--plain-http", image])
     log.result(f"  base pull ({num_splits} splits): {elapsed:.2f}s")
     return elapsed
 
 
-def pull_stargz(is_local: bool) -> float:
-    image = pull_name_stargz(is_local)
+def pull_stargz(source_image: str, is_local: bool) -> float:
+    image = pull_name_stargz(source_image, is_local)
     log.info(f"Pulling stargz image: {image}")
     elapsed = _timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", image])
     log.result(f"  stargz pull: {elapsed:.2f}s")
     return elapsed
 
 
-def pull_2dfs(is_local: bool, num_allotments: int) -> float:
-    image = pull_name_2dfs(is_local, num_allotments)
+def pull_2dfs(source_image: str, is_local: bool, num_allotments: int) -> float:
+    image = pull_name_2dfs(source_image, is_local, num_allotments)
     log.info(f"Pulling 2dfs ({num_allotments} allotments): {image}")
     elapsed = _timed_pull(["sudo", "ctr", "images", "pull", "--plain-http", image])
     log.result(f"  2dfs pull ({num_allotments} allotments): {elapsed:.2f}s")
     return elapsed
 
 
-def pull_2dfs_stargz(is_local: bool, num_allotments: int) -> float:
-    image = pull_name_2dfs_stargz(is_local, num_allotments)
+def pull_2dfs_stargz(source_image: str, is_local: bool, num_allotments: int) -> float:
+    image = pull_name_2dfs_stargz(source_image, is_local, num_allotments)
     log.info(f"Pulling 2dfs-stargz ({num_allotments} allotments): {image}")
     elapsed = _timed_pull([
         "sudo", "ctr-remote", "images", "rpull", "--plain-http",
@@ -159,7 +159,7 @@ def run_2dfs_stargz(image: str, n: int) -> float:
 
 
 def measure(
-    base_splits: list[int], is_local: bool,
+    base_splits: list[int], source_image: str, is_local: bool,
 ) -> tuple[list[tuple[int, float, float]], list[tuple[int, float, float]],
            list[tuple[int, float, float]], list[tuple[int, float, float]]]:
     results_2dfs: list[tuple[int, float, float]] = []
@@ -172,26 +172,26 @@ def measure(
 
         log.info(f"\n[{ts}] === base: {n} splits ===")
         clear_cache()
-        pull_t = pull_base(is_local, n)
-        run_t = run_base(pull_name_base(is_local, n), n)
+        pull_t = pull_base(source_image, is_local, n)
+        run_t = run_base(pull_name_base(source_image, is_local, n), n)
         results_base.append((n, pull_t, run_t))
 
         log.info(f"\n[{ts}] === stargz (full image) ===")
         clear_cache()
-        pull_t = pull_stargz(is_local)
-        run_t = run_stargz(pull_name_stargz(is_local), n)
+        pull_t = pull_stargz(source_image, is_local)
+        run_t = run_stargz(pull_name_stargz(source_image, is_local), n)
         results_stargz.append((n, pull_t, run_t))
 
         log.info(f"\n[{ts}] === 2dfs: {n} allotments ===")
         clear_cache()
-        pull_t = pull_2dfs(is_local, n)
-        run_t = run_2dfs(pull_name_2dfs(is_local, n), n)
+        pull_t = pull_2dfs(source_image, is_local, n)
+        run_t = run_2dfs(pull_name_2dfs(source_image, is_local, n), n)
         results_2dfs.append((n, pull_t, run_t))
 
         log.info(f"\n[{ts}] === 2dfs-stargz: {n} allotments ===")
         clear_cache()
-        pull_t = pull_2dfs_stargz(is_local, n)
-        run_t = run_2dfs_stargz(pull_name_2dfs_stargz(is_local, n), n)
+        pull_t = pull_2dfs_stargz(source_image, is_local, n)
+        run_t = run_2dfs_stargz(pull_name_2dfs_stargz(source_image, is_local, n), n)
         results_2dfs_stargz.append((n, pull_t, run_t))
 
     return results_2dfs, results_2dfs_stargz, results_stargz, results_base
@@ -218,12 +218,6 @@ def print_results(
         log.result(f"{n:>8}  {fmt(results_2dfs, i):>18}  {fmt(results_2dfs_stargz, i):>18}  {fmt(results_stargz, i):>18}  {fmt(results_base, i):>18}")
 
 
-def _base_image_slug(base_image: str) -> str:
-    """'docker.io/library/python:3.12-slim' -> 'python-3.12-slim'"""
-    name = base_image.rsplit("/", 1)[-1]
-    return name.replace(":", "-")
-
-
 def save_csv(
     results_2dfs: list[tuple[int, float, float]],
     results_2dfs_stargz: list[tuple[int, float, float]],
@@ -234,7 +228,7 @@ def save_csv(
 ) -> None:
     os.makedirs(RESULTS_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
-    img_slug = _base_image_slug(base_image)
+    img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     splits = [n for n, _, _ in results_base]
     output_path = os.path.join(RESULTS_DIR, f"{model_slug}_{img_slug}_pull_{len(splits)}_{ts}.csv")
@@ -287,7 +281,7 @@ def plot(
 
     os.makedirs(CHARTS_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
-    img_slug = _base_image_slug(base_image)
+    img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_pull_{len(splits)}_{ts}.png")
     fig.tight_layout()
@@ -306,10 +300,10 @@ def main():
 
     prepare_local_registry(BASE_IMAGE, registry(IS_LOCAL))
 
-    prepare(MODEL, NUM_SPLITS, BASE_SPLITS, IS_LOCAL)
+    prepare(MODEL, NUM_SPLITS, BASE_SPLITS, BASE_IMAGE, IS_LOCAL)
 
     results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure(
-        BASE_SPLITS, IS_LOCAL,
+        BASE_SPLITS, BASE_IMAGE, IS_LOCAL,
     )
 
     print_results(results_2dfs, results_2dfs_stargz, results_stargz, results_base)

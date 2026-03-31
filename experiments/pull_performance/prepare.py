@@ -16,16 +16,16 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # ── build + push per mode ───────────────────────────────────────────
 
 
-def _build_and_push_2dfs(chunk_paths: list[str], is_local: bool) -> None:
+def _build_and_push_2dfs(chunk_paths: list[str], source_image: str, is_local: bool) -> None:
     write_2dfs_json(chunk_paths, SCRIPT_DIR)
-    target = build_name_2dfs(is_local)
+    target = build_name_2dfs(source_image, is_local)
 
     cmd = tdfs_cmd(is_local, SCRIPT_DIR) + [
         "build",
         "--platforms", "linux/amd64",
         "--force-http",
         "-f", "2dfs.json",
-        base_image(is_local),
+        base_image(source_image, is_local),
         target,
     ]
     log.info(f"Building 2dfs image: {target}")
@@ -38,9 +38,9 @@ def _build_and_push_2dfs(chunk_paths: list[str], is_local: bool) -> None:
     log.result(f"Pushed {target}")
 
 
-def _build_and_push_2dfs_stargz(chunk_paths: list[str], is_local: bool) -> None:
+def _build_and_push_2dfs_stargz(chunk_paths: list[str], source_image: str, is_local: bool) -> None:
     write_2dfs_json(chunk_paths, SCRIPT_DIR)
-    target = build_name_2dfs_stargz(is_local)
+    target = build_name_2dfs_stargz(source_image, is_local)
 
     cmd = tdfs_cmd(is_local, SCRIPT_DIR) + [
         "build",
@@ -48,7 +48,7 @@ def _build_and_push_2dfs_stargz(chunk_paths: list[str], is_local: bool) -> None:
         "--enable-stargz",
         "--force-http",
         "-f", "2dfs.json",
-        base_image(is_local),
+        base_image(source_image, is_local),
         target,
     ]
     log.info(f"Building 2dfs-stargz image: {target}")
@@ -61,9 +61,9 @@ def _build_and_push_2dfs_stargz(chunk_paths: list[str], is_local: bool) -> None:
     log.result(f"Pushed {target}")
 
 
-def _build_and_push_stargz(chunk_paths: list[str], is_local: bool) -> None:
-    create_stargz_dockerfile(chunk_paths, base_image(is_local), SCRIPT_DIR)
-    target = build_name_stargz(is_local)
+def _build_and_push_stargz(chunk_paths: list[str], source_image: str, is_local: bool) -> None:
+    create_stargz_dockerfile(chunk_paths, base_image(source_image, is_local), SCRIPT_DIR)
+    target = build_name_stargz(source_image, is_local)
 
     cmd = [
         "sudo", "buildctl", "build",
@@ -78,11 +78,11 @@ def _build_and_push_stargz(chunk_paths: list[str], is_local: bool) -> None:
     log.result(f"Built and pushed {target}")
 
 
-def _build_and_push_base(shard_paths: list[str], base_splits: list[int], is_local: bool) -> None:
+def _build_and_push_base(shard_paths: list[str], base_splits: list[int], source_image: str, is_local: bool) -> None:
     for r in base_splits:
         chunk_paths = split_model(shard_paths, r, SCRIPT_DIR)
-        create_base_dockerfile(chunk_paths, base_image(is_local), SCRIPT_DIR)
-        target = build_name_base(is_local, r)
+        create_base_dockerfile(chunk_paths, base_image(source_image, is_local), SCRIPT_DIR)
+        target = build_name_base(source_image, is_local, r)
 
         cmd = [
             "sudo", "buildctl", "build",
@@ -100,17 +100,17 @@ def _build_and_push_base(shard_paths: list[str], base_splits: list[int], is_loca
 # ── main entry point ────────────────────────────────────────────────
 
 
-def prepare(model_name: str, num_splits: int, base_splits: list[int], is_local: bool = True) -> None:
+def prepare(model_name: str, num_splits: int, base_splits: list[int], source_image: str, is_local: bool = True) -> None:
     shard_paths = download_model(model_name, SCRIPT_DIR)
 
     log.info(f"\n=== Preparing {num_splits} splits for 2dfs / 2dfs-stargz / stargz ===")
     chunk_paths = split_model(shard_paths, num_splits, SCRIPT_DIR)
 
-    _build_and_push_2dfs(chunk_paths, is_local)
-    _build_and_push_2dfs_stargz(chunk_paths, is_local)
-    _build_and_push_stargz(chunk_paths, is_local)
+    _build_and_push_2dfs(chunk_paths, source_image, is_local)
+    _build_and_push_2dfs_stargz(chunk_paths, source_image, is_local)
+    _build_and_push_stargz(chunk_paths, source_image, is_local)
 
     log.info(f"\n=== Building base images for split counts: {base_splits} ===")
-    _build_and_push_base(shard_paths, base_splits, is_local)
+    _build_and_push_base(shard_paths, base_splits, source_image, is_local)
 
     log.result("\nAll images built and pushed.")

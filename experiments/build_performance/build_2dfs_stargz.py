@@ -21,7 +21,7 @@ def clear_cache(is_local: bool = True) -> None:
     subprocess.run(cache_cmd, shell=True, check=True, capture_output=not log.VERBOSE)
 
 
-def build_only(n: int, is_local: bool = True) -> float:
+def build_only(n: int, is_local: bool = True, source_image: str = "") -> float:
     target = f"{REGISTRY}/build-perf-stargz:{n}"
     cmd = tdfs_cmd(is_local, SCRIPT_DIR) + [
         "build",
@@ -29,7 +29,7 @@ def build_only(n: int, is_local: bool = True) -> float:
         "--enable-stargz",
         "--force-http",
         "-f", "2dfs.json",
-        base_image(is_local),
+        base_image(source_image, is_local),
         target,
     ]
 
@@ -42,22 +42,22 @@ def build_only(n: int, is_local: bool = True) -> float:
     return elapsed
 
 
-def run_one(model: str, n: int, is_local: bool = True) -> float:
+def run_one(model: str, n: int, is_local: bool = True, source_image: str = "") -> float:
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
     subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
-    prepare(model, n, is_local)
+    prepare(model, n, source_image, is_local)
 
-    elapsed = build_only(n, is_local)
+    elapsed = build_only(n, is_local, source_image)
 
     clear_cache(is_local)
     return elapsed
 
 
-def run(model: str, max_splits: int, is_local: bool = True) -> list[tuple[int, float]]:
+def run(model: str, max_splits: int, is_local: bool = True, source_image: str = "") -> list[tuple[int, float]]:
     clear_cache(is_local)
     results = []
     for n in range(1, max_splits + 1):
-        elapsed = run_one(model, n, is_local)
+        elapsed = run_one(model, n, is_local, source_image)
         results.append((n, elapsed))
     return results
 
