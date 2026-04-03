@@ -190,7 +190,12 @@ def plot(
     base_image: str,
 ) -> None:
     splits = [n for n, _ in results_2dfs]
+    os.makedirs(CHARTS_BUILD_DIR, exist_ok=True)
+    model_slug = model.replace("/", "--")
+    img_slug = image_slug(base_image)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
+    # Chart 1: line chart, total - pull
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(splits, [br.total_s - br.pull_s for _, br in results_2dfs], marker="o", label="2dfs")
     ax.plot(splits, [br.total_s - br.pull_s for _, br in results_2dfs_stargz], marker="o", label="2dfs+stargz")
@@ -198,20 +203,69 @@ def plot(
     ax.plot(splits, [br.total_s - br.pull_s for _, br in results_base], marker="o", label="base")
     ax.set_xlabel("Number of splits")
     ax.set_ylabel("Build time (s)")
-    ax.set_title("tdfs build performance")
+    ax.set_title("Build performance (excluding pull)")
     ax.set_xticks(splits)
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
     fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
              fontsize=8, verticalalignment="bottom", family="monospace")
-    os.makedirs(CHARTS_BUILD_DIR, exist_ok=True)
-    model_slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_{img_slug}_splits_{len(splits)}_{ts}.png")
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
-    log.result(f"Chart saved to {output_path}")
+    path1 = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_{img_slug}_splits_{len(splits)}_{ts}.png")
+    fig.savefig(path1, dpi=150)
+    plt.close(fig)
+    log.result(f"Chart saved to {path1}")
+
+    # Chart 2: stacked bar chart, all stages (total wall clock)
+    all_results = [
+        ("2dfs", results_2dfs),
+        ("2dfs+stargz", results_2dfs_stargz),
+        ("stargz", results_stargz),
+        ("base", results_base),
+    ]
+    methods = [name for name, _ in all_results]
+    n_methods = len(methods)
+    n_splits = len(splits)
+    bar_width = 0.8 / n_methods
+    stage_colors = {"pull": "#4e79a7", "context": "#f28e2b", "build": "#e15759", "export": "#76b7b2"}
+
+    fig, ax = plt.subplots(figsize=(max(8, n_splits * 3), 5))
+    for i, (method_name, result_list) in enumerate(all_results):
+        for j, (n, br) in enumerate(result_list):
+            x = j + i * bar_width
+            bottom = 0.0
+            for stage, val in [("pull", br.pull_s), ("context", br.context_transfer_s),
+                               ("build", br.build_s), ("export", br.export_s)]:
+                label = stage if (i == 0 and j == 0) else None
+                ax.bar(x, val, bar_width, bottom=bottom, color=stage_colors[stage], label=label,
+                       edgecolor="white", linewidth=0.5)
+                bottom += val
+            # total wall clock line on top
+            ax.plot(x + bar_width / 2, br.total_s, marker="_", color="black", markersize=8, markeredgewidth=1.5)
+
+    center_offset = (n_methods - 1) * bar_width / 2
+    ax.set_xticks([j + center_offset for j in range(n_splits)])
+    ax.set_xticklabels([str(n) for n in splits])
+    ax.set_xlabel("Number of splits")
+    ax.set_ylabel("Time (s)")
+    ax.set_title("Build stages breakdown (total wall clock)")
+
+    # Method labels below x-axis
+    for j in range(n_splits):
+        for i, name in enumerate(methods):
+            x = j + i * bar_width + bar_width / 2
+            ax.text(x, -0.02, name, ha="center", va="top", fontsize=6, rotation=45,
+                    transform=ax.get_xaxis_transform())
+
+    ax.legend(loc="upper right", fontsize="small")
+    ax.grid(True, linestyle="--", alpha=0.5, axis="y")
+    fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
+             fontsize=8, verticalalignment="bottom", family="monospace")
+    fig.tight_layout()
+    fig.subplots_adjust(bottom=0.18)
+    path2 = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_{img_slug}_stages_{len(splits)}_{ts}.png")
+    fig.savefig(path2, dpi=150)
+    plt.close(fig)
+    log.result(f"Chart saved to {path2}")
 
 
 def save_resource_csv(
