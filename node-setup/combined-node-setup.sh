@@ -158,6 +158,7 @@ EOF
 # Step 11: /mydata directories
 # -------------------------------------------------------------------
 mkdir -p /mydata/tmp /mydata/buildkit
+chown -R bgarchu:"$(id -gn bgarchu)" /mydata
 
 echo 'export TMPDIR=/mydata/tmp' >> /root/.bashrc
 export TMPDIR=/mydata/tmp

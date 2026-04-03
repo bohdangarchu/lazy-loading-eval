@@ -302,6 +302,7 @@ rm -rf "$TMP_DIR"
 # Set TMPDIR to /mydata for large temp files (e.g. stargz builds)
 # -------------------------------------------------------------------
 mkdir -p /mydata/tmp /mydata/buildkit
+chown -R bgarchu:"$(id -gn bgarchu)" /mydata
 echo 'export TMPDIR=/mydata/tmp' >> /root/.bashrc
 # TODO: dooesn't influence current session if run with sudo
 export TMPDIR=/mydata/tmp
