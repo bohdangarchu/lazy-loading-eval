@@ -33,8 +33,12 @@ def build_only(n: int) -> BuildResult:
 
     log.info(f"=== Building with {n} split(s) (stargz) ===")
     start = time.perf_counter()
-    result = subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=SCRIPT_DIR, capture_output=True, text=True)
     elapsed = time.perf_counter() - start
+
+    if result.returncode != 0:
+        log.info(result.stderr)
+        result.check_returncode()
 
     if log.VERBOSE:
         log.info(result.stderr)
