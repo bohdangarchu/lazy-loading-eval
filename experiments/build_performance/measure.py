@@ -31,7 +31,7 @@ EXPERIMENTS = [
     ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
-MAX_SPLITS = 2
+MAX_SPLITS = 10
 IS_LOCAL = False
 WITH_RESOURCE = False
 VERBOSE = True
