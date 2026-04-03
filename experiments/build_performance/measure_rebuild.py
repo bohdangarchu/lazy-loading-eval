@@ -22,8 +22,8 @@ CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "rebuild")
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.4 GB     ~700 MB
-    ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
+    ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),     # ~1.4 GB     ~700 MB
+    ("facebook/opt-1.3b", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
 N_SPLITS = 10

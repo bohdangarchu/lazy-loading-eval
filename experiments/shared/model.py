@@ -19,6 +19,8 @@ def download_model(model_name: str, work_dir: str) -> list[str]:
     token = os.environ.get("HF_TOKEN")
     files = list_repo_files(model_name, token=token)
     shards = sorted(f for f in files if f.endswith(".safetensors"))
+    if not shards:
+        shards = sorted(f for f in files if f.endswith(".bin") and "pytorch_model" in f)
 
     local_paths = []
     for filename in shards:
