@@ -7,11 +7,11 @@ from datetime import datetime, timezone
 from shared import log
 from shared.build_result import BuildResult
 from shared.buildctl_parser import parse_buildctl_plain
+from shared.registry import registry
 from build_performance.prepare import prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
-REGISTRY = "localhost:5000"
 
 
 def clear_cache() -> None:
@@ -19,8 +19,8 @@ def clear_cache() -> None:
     subprocess.run(["sudo", "buildctl", "prune", "--all"], check=True, capture_output=not log.VERBOSE)
 
 
-def build_only(n: int) -> BuildResult:
-    target = f"{REGISTRY}/build-perf-stargz-only:{n}"
+def build_only(n: int, is_local: bool = True) -> BuildResult:
+    target = f"{registry(is_local)}/build-perf-stargz-only:{n}"
     cmd = [
         "sudo", "buildctl", "build",
         "--progress=plain",
@@ -50,22 +50,22 @@ def build_only(n: int) -> BuildResult:
     return br
 
 
-def run_one(model: str, n: int, source_image: str = "") -> BuildResult:
+def run_one(model: str, n: int, is_local: bool = True, source_image: str = "") -> BuildResult:
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
     subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
-    prepare(model, n, source_image)
+    prepare(model, n, source_image, is_local)
 
-    br = build_only(n)
+    br = build_only(n, is_local)
 
     clear_cache()
     return br
 
 
-def run(model: str, max_splits: int, source_image: str = "") -> list[tuple[int, BuildResult]]:
+def run(model: str, max_splits: int, is_local: bool = True, source_image: str = "") -> list[tuple[int, BuildResult]]:
     clear_cache()
     results = []
     for n in range(1, max_splits + 1):
-        br = run_one(model, n, source_image)
+        br = run_one(model, n, is_local, source_image)
         results.append((n, br))
     return results
 

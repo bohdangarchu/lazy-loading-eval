@@ -101,7 +101,7 @@ def measure_builds(
 
             monitor.set_mode(f"stargz_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === stargz: {n} split(s) ===")
-            br = bs.run_one(model, n, source_image)
+            br = bs.run_one(model, n, is_local, source_image)
             results_stargz.append((n, br))
 
             monitor.set_mode("idle")
@@ -110,7 +110,7 @@ def measure_builds(
 
             monitor.set_mode(f"base_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === base: {n} split(s) ===")
-            br = bb.run_one(model, n, source_image)
+            br = bb.run_one(model, n, is_local, source_image)
             results_base.append((n, br))
 
             if n < max_splits:
@@ -134,13 +134,13 @@ def measure_builds(
     time.sleep(SLEEP_SECONDS)
 
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running stargz builds ===")
-    results_stargz = bs.run(model, max_splits, source_image)
+    results_stargz = bs.run(model, max_splits, is_local, source_image)
 
     log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
     time.sleep(SLEEP_SECONDS)
 
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running base builds ===")
-    results_base = bb.run(model, max_splits, source_image)
+    results_base = bb.run(model, max_splits, is_local, source_image)
 
     return results_2dfs, results_2dfs_stargz, results_stargz, results_base
 

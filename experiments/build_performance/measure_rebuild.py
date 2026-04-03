@@ -33,8 +33,8 @@ R_VALUES = [2, 4, 6, 8, 10]
 METHODS = [
     ("2dfs", lambda n: b2.build_only(n, IS_LOCAL, BASE_IMAGE), lambda: b2.clear_cache(IS_LOCAL)),
     ("2dfs_stargz", lambda n: b2s.build_only(n, IS_LOCAL, BASE_IMAGE), lambda: b2s.clear_cache(IS_LOCAL)),
-    ("stargz", lambda n: bs.build_only(n), lambda: bs.clear_cache()),
-    ("base", lambda n: bb.build_only(n), lambda: bb.clear_cache()),
+    ("stargz", lambda n: bs.build_only(n, IS_LOCAL), lambda: bs.clear_cache()),
+    ("base", lambda n: bb.build_only(n, IS_LOCAL), lambda: bb.clear_cache()),
 ]
 
 
