@@ -95,20 +95,20 @@ def prepare_local_registry(
     log.info(f"Image not found. Pulling {source_image}...")
     subprocess.run(
         ["sudo", "nerdctl", "pull", source_image],
-        check=True, capture_output=not log.VERBOSE,
+        check=True, capture_output=True,
     )
 
     log.info(f"Converting to estargz: {source_image} -> {local_tag}...")
     subprocess.run(
         ["sudo", "ctr-remote", "images", "convert", "--estargz", "--oci",
          source_image, local_tag],
-        check=True, capture_output=not log.VERBOSE,
+        check=True, capture_output=True,
     )
 
     log.info(f"Pushing {local_tag} to registry...")
     subprocess.run(
         ["sudo", "nerdctl", "push", "--insecure-registry", local_tag],
-        check=True, capture_output=not log.VERBOSE,
+        check=True, capture_output=True,
     )
 
     # Also push library/ variant
@@ -116,11 +116,11 @@ def prepare_local_registry(
     log.info(f"Tagging and pushing library variant: {library_tag}...")
     subprocess.run(
         ["sudo", "nerdctl", "tag", local_tag, library_tag],
-        check=True, capture_output=not log.VERBOSE,
+        check=True, capture_output=True,
     )
     subprocess.run(
         ["sudo", "nerdctl", "push", "--insecure-registry", library_tag],
-        check=True, capture_output=not log.VERBOSE,
+        check=True, capture_output=True,
     )
 
     # Verify
