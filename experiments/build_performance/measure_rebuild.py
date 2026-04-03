@@ -20,9 +20,12 @@ CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "rebuild")
 CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "rebuild")
 
-# MODEL = "openai-community/gpt2"
-MODEL = "openai-community/gpt2-medium"
-BASE_IMAGE = "docker.io/library/python:3.12-slim"
+EXPERIMENTS = [
+    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.4 GB     ~700 MB
+    ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
+    # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
+]
 N_SPLITS = 10
 IS_LOCAL = False
 VERBOSE = True
@@ -30,12 +33,13 @@ SLEEP_SECONDS = 5
 DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
 R_VALUES = [2, 4, 6, 8, 10]
 
-METHODS = [
-    ("2dfs", lambda n: b2.build_only(n, IS_LOCAL, BASE_IMAGE), lambda: b2.clear_cache(IS_LOCAL)),
-    ("2dfs_stargz", lambda n: b2s.build_only(n, IS_LOCAL, BASE_IMAGE), lambda: b2s.clear_cache(IS_LOCAL)),
-    ("stargz", lambda n: bs.build_only(n, IS_LOCAL), lambda: bs.clear_cache()),
-    ("base", lambda n: bb.build_only(n, IS_LOCAL), lambda: bb.clear_cache()),
-]
+def make_methods(base_image: str):
+    return [
+        ("2dfs", lambda n, bi=base_image: b2.build_only(n, IS_LOCAL, bi), lambda: b2.clear_cache(IS_LOCAL)),
+        ("2dfs_stargz", lambda n, bi=base_image: b2s.build_only(n, IS_LOCAL, bi), lambda: b2s.clear_cache(IS_LOCAL)),
+        ("stargz", lambda n: bs.build_only(n, IS_LOCAL), lambda: bs.clear_cache()),
+        ("base", lambda n: bb.build_only(n, IS_LOCAL), lambda: bb.clear_cache()),
+    ]
 
 
 def mutate_chunk(path: str) -> None:
@@ -52,14 +56,14 @@ def get_chunks_to_mutate(chunk_paths: list[str], r: int, direction: str) -> list
     return chunk_paths[:r]
 
 
-def measure_rebuilds(chunk_paths: list[str]) -> list[dict]:
+def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
     results = []
 
     for r in R_VALUES:
         for direction in DIRECTIONS:
             targets = get_chunks_to_mutate(chunk_paths, r, direction)
 
-            for method_name, build_fn, clear_fn in METHODS:
+            for method_name, build_fn, clear_fn in methods:
                 log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
                      f"=== r={r}, {direction}, {method_name} ===")
 
@@ -162,22 +166,26 @@ def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
 def main():
     log.set_verbose(VERBOSE)
 
-    prepare_local_registry(BASE_IMAGE, registry(IS_LOCAL))
+    for model, base_image in EXPERIMENTS:
+        log.result(f"\n===== Experiment: {model} / {base_image} =====")
+        prepare_local_registry(base_image, registry(IS_LOCAL))
 
-    log.info(f"Preparing model with {N_SPLITS} splits...")
-    chunk_paths = prepare(MODEL, N_SPLITS, BASE_IMAGE, IS_LOCAL)
+        methods = make_methods(base_image)
 
-    results = measure_rebuilds(chunk_paths)
+        log.info(f"Preparing model with {N_SPLITS} splits...")
+        chunk_paths = prepare(model, N_SPLITS, base_image, IS_LOCAL)
 
-    save_csv(results, MODEL, N_SPLITS, BASE_IMAGE)
-    plot(results, MODEL, N_SPLITS, BASE_IMAGE)
+        results = measure_rebuilds(chunk_paths, methods)
 
-    log.result(f"\n{'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild':>8}  {'pull':>6}  {'ctx':>6}  {'build':>6}  {'export':>6}")
-    log.result("-" * 76)
-    for row in results:
-        log.result(f"{row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  "
-                   f"{row['rebuild_s']:>8.2f}  {row['pull_s']:>6.2f}  {row['context_transfer_s']:>6.2f}  "
-                   f"{row['build_s']:>6.2f}  {row['export_s']:>6.2f}")
+        save_csv(results, model, N_SPLITS, base_image)
+        plot(results, model, N_SPLITS, base_image)
+
+        log.result(f"\n{'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild':>8}  {'pull':>6}  {'ctx':>6}  {'build':>6}  {'export':>6}")
+        log.result("-" * 76)
+        for row in results:
+            log.result(f"{row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  "
+                       f"{row['rebuild_s']:>8.2f}  {row['pull_s']:>6.2f}  {row['context_transfer_s']:>6.2f}  "
+                       f"{row['build_s']:>6.2f}  {row['export_s']:>6.2f}")
 
 
 if __name__ == "__main__":

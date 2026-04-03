@@ -25,9 +25,12 @@ CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts")
 CHARTS_BUILD_DIR = os.path.join(CHARTS_DIR, "build")
 CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 
-MODEL = "openai-community/gpt2"  # ~500 MB safetensors
-# MODEL = "openai-community/gpt2-medium"  # ~1.5 GB safetensors
-BASE_IMAGE = "docker.io/library/python:3.12-slim"
+EXPERIMENTS = [
+    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.4 GB     ~700 MB
+    ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
+    # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
+]
 MAX_SPLITS = 2
 IS_LOCAL = False
 WITH_RESOURCE = False
@@ -315,36 +318,38 @@ def plot_resource(
 def main():
     log.set_verbose(VERBOSE)
 
-    prepare_local_registry(BASE_IMAGE, registry(IS_LOCAL))
+    for model, base_image in EXPERIMENTS:
+        log.result(f"\n===== Experiment: {model} / {base_image} =====")
+        prepare_local_registry(base_image, registry(IS_LOCAL))
 
-    monitor = None
-    if WITH_RESOURCE:
-        monitor = ResourceMonitor()
-        monitor.start()
+        monitor = None
+        if WITH_RESOURCE:
+            monitor = ResourceMonitor()
+            monitor.start()
 
-    results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure_builds(
-        MODEL, MAX_SPLITS, BASE_IMAGE, IS_LOCAL, monitor=monitor,
-    )
+        results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure_builds(
+            model, MAX_SPLITS, base_image, IS_LOCAL, monitor=monitor,
+        )
 
-    if monitor:
-        samples = monitor.stop()
-        save_resource_csv(samples, MODEL, MAX_SPLITS, BASE_IMAGE)
-        plot_resource(samples, MODEL, MAX_SPLITS, BASE_IMAGE)
+        if monitor:
+            samples = monitor.stop()
+            save_resource_csv(samples, model, MAX_SPLITS, base_image)
+            plot_resource(samples, model, MAX_SPLITS, base_image)
 
-    splits = [n for n, _ in results_2dfs]
-    brs_2dfs = [br for _, br in results_2dfs]
-    brs_2dfs_stargz = [br for _, br in results_2dfs_stargz]
-    brs_stargz = [br for _, br in results_stargz]
-    brs_base = [br for _, br in results_base]
+        splits = [n for n, _ in results_2dfs]
+        brs_2dfs = [br for _, br in results_2dfs]
+        brs_2dfs_stargz = [br for _, br in results_2dfs_stargz]
+        brs_stargz = [br for _, br in results_stargz]
+        brs_base = [br for _, br in results_base]
 
-    log.result("\n=== Comparison ===")
-    log.result(f"{'splits':>8}  {'2dfs (s)':>12}  {'2dfs+stargz (s)':>16}  {'stargz (s)':>12}  {'base (s)':>10}")
-    log.result("-" * 68)
-    for n, b1, b2r, b3, b4 in zip(splits, brs_2dfs, brs_2dfs_stargz, brs_stargz, brs_base):
-        log.result(f"{n:>8}  {b1.total_s:>12.2f}  {b2r.total_s:>16.2f}  {b3.total_s:>12.2f}  {b4.total_s:>10.2f}")
+        log.result("\n=== Comparison ===")
+        log.result(f"{'splits':>8}  {'2dfs (s)':>12}  {'2dfs+stargz (s)':>16}  {'stargz (s)':>12}  {'base (s)':>10}")
+        log.result("-" * 68)
+        for n, b1, b2r, b3, b4 in zip(splits, brs_2dfs, brs_2dfs_stargz, brs_stargz, brs_base):
+            log.result(f"{n:>8}  {b1.total_s:>12.2f}  {b2r.total_s:>16.2f}  {b3.total_s:>12.2f}  {b4.total_s:>10.2f}")
 
-    save_csv(splits, brs_2dfs, brs_2dfs_stargz, brs_stargz, brs_base, MODEL, BASE_IMAGE)
-    plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL, BASE_IMAGE)
+        save_csv(splits, brs_2dfs, brs_2dfs_stargz, brs_stargz, brs_base, model, base_image)
+        plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, model, base_image)
 
 
 if __name__ == "__main__":
