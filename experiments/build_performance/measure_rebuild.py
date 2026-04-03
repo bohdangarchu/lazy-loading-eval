@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from shared import log
+from shared.build_result import BuildResult
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -73,7 +74,7 @@ def measure_rebuilds(chunk_paths: list[str]) -> list[dict]:
                     mutate_chunk(path)
 
                 # rebuild v2 (timed)
-                elapsed = build_fn(N_SPLITS)
+                br: BuildResult = build_fn(N_SPLITS)
 
                 # restore chunks
                 for path in targets:
@@ -83,10 +84,14 @@ def measure_rebuilds(chunk_paths: list[str]) -> list[dict]:
                     "r": r,
                     "direction": direction,
                     "method": method_name,
-                    "rebuild_s": elapsed,
+                    "rebuild_s": br.total_s,
+                    "pull_s": br.pull_s,
+                    "context_transfer_s": br.context_transfer_s,
+                    "build_s": br.build_s,
+                    "export_s": br.export_s,
                 })
 
-                log.result(f"Rebuild time: {elapsed:.2f}s")
+                log.result(f"Rebuild time: {br.total_s:.2f}s")
                 time.sleep(SLEEP_SECONDS)
 
     return results
@@ -99,11 +104,20 @@ def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
     img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     path = os.path.join(RESULTS_DIR, f"{slug}_{img_slug}_rebuild_n{n}_{ts}.csv")
+    fieldnames = ["r", "direction", "method", "rebuild_s",
+                  "pull_s", "context_transfer_s", "build_s", "export_s"]
     with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["r", "direction", "method", "rebuild_s"])
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in results:
-            writer.writerow({**row, "rebuild_s": f"{row['rebuild_s']:.4f}"})
+            writer.writerow({
+                **row,
+                "rebuild_s": f"{row['rebuild_s']:.4f}",
+                "pull_s": f"{row['pull_s']:.4f}",
+                "context_transfer_s": f"{row['context_transfer_s']:.4f}",
+                "build_s": f"{row['build_s']:.4f}",
+                "export_s": f"{row['export_s']:.4f}",
+            })
     log.result(f"Results saved to {path}")
 
 
@@ -125,7 +139,7 @@ def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
         for method_name in ["2dfs", "2dfs_stargz", "stargz", "base"]:
             subset = [row for row in results if row["direction"] == direction and row["method"] == method_name]
             rs = [row["r"] for row in subset]
-            times = [row["rebuild_s"] for row in subset]
+            times = [row["rebuild_s"] - row["pull_s"] for row in subset]
             ax.plot(rs, times, marker="o", label=labels[method_name], color=colors[method_name])
 
         ax.set_xlabel("Chunks mutated (r)")
@@ -158,10 +172,12 @@ def main():
     save_csv(results, MODEL, N_SPLITS, BASE_IMAGE)
     plot(results, MODEL, N_SPLITS, BASE_IMAGE)
 
-    log.result(f"\n{'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild_s':>10}")
-    log.result("-" * 50)
+    log.result(f"\n{'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild':>8}  {'pull':>6}  {'ctx':>6}  {'build':>6}  {'export':>6}")
+    log.result("-" * 76)
     for row in results:
-        log.result(f"{row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  {row['rebuild_s']:>10.2f}")
+        log.result(f"{row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  "
+                   f"{row['rebuild_s']:>8.2f}  {row['pull_s']:>6.2f}  {row['context_transfer_s']:>6.2f}  "
+                   f"{row['build_s']:>6.2f}  {row['export_s']:>6.2f}")
 
 
 if __name__ == "__main__":

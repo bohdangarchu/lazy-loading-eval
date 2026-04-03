@@ -10,6 +10,7 @@ import numpy as np
 import psutil
 
 from shared import log
+from shared.build_result import BuildResult
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -61,15 +62,18 @@ class ResourceMonitor:
             self._samples.append((ts, cpu, mem, self._mode))
 
 
+ResultList = list[tuple[int, BuildResult]]
+
+
 def measure_builds(
     model: str, max_splits: int, source_image: str, is_local: bool = IS_LOCAL,
     monitor: ResourceMonitor | None = None,
-) -> tuple[list[tuple[int, float]], list[tuple[int, float]], list[tuple[int, float]], list[tuple[int, float]]]:
+) -> tuple[ResultList, ResultList, ResultList, ResultList]:
     if monitor:
-        results_2dfs = []
-        results_2dfs_stargz = []
-        results_stargz = []
-        results_base = []
+        results_2dfs: ResultList = []
+        results_2dfs_stargz: ResultList = []
+        results_stargz: ResultList = []
+        results_base: ResultList = []
 
         b2.clear_cache(is_local)
         b2s.clear_cache(is_local)
@@ -79,8 +83,8 @@ def measure_builds(
         for n in range(1, max_splits + 1):
             monitor.set_mode(f"2dfs_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === 2dfs: {n} split(s) ===")
-            elapsed = b2.run_one(model, n, is_local, source_image)
-            results_2dfs.append((n, elapsed))
+            br = b2.run_one(model, n, is_local, source_image)
+            results_2dfs.append((n, br))
 
             monitor.set_mode("idle")
             log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
@@ -88,8 +92,8 @@ def measure_builds(
 
             monitor.set_mode(f"2dfs_stargz_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === 2dfs+stargz: {n} split(s) ===")
-            elapsed = b2s.run_one(model, n, is_local, source_image)
-            results_2dfs_stargz.append((n, elapsed))
+            br = b2s.run_one(model, n, is_local, source_image)
+            results_2dfs_stargz.append((n, br))
 
             monitor.set_mode("idle")
             log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
@@ -97,8 +101,8 @@ def measure_builds(
 
             monitor.set_mode(f"stargz_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === stargz: {n} split(s) ===")
-            elapsed = bs.run_one(model, n, source_image)
-            results_stargz.append((n, elapsed))
+            br = bs.run_one(model, n, source_image)
+            results_stargz.append((n, br))
 
             monitor.set_mode("idle")
             log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
@@ -106,8 +110,8 @@ def measure_builds(
 
             monitor.set_mode(f"base_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === base: {n} split(s) ===")
-            elapsed = bb.run_one(model, n, source_image)
-            results_base.append((n, elapsed))
+            br = bb.run_one(model, n, source_image)
+            results_base.append((n, br))
 
             if n < max_splits:
                 monitor.set_mode("idle")
@@ -144,10 +148,10 @@ def measure_builds(
 
 def save_csv(
     splits: list[int],
-    times_2dfs: list[float],
-    times_2dfs_stargz: list[float],
-    times_stargz: list[float],
-    times_base: list[float],
+    brs_2dfs: list[BuildResult],
+    brs_2dfs_stargz: list[BuildResult],
+    brs_stargz: list[BuildResult],
+    brs_base: list[BuildResult],
     model: str,
     base_image: str,
 ) -> None:
@@ -156,29 +160,39 @@ def save_csv(
     img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(RESULTS_BUILD_DIR, f"{model_slug}_{img_slug}_splits_{len(splits)}_{ts}.csv")
+
+    methods = ["2dfs", "2dfs_stargz", "stargz", "base"]
+    header = ["splits"]
+    for m in methods:
+        header.extend([f"{m}_total_s", f"{m}_pull_s", f"{m}_ctx_s", f"{m}_build_s", f"{m}_export_s"])
+
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["splits", "2dfs_s", "2dfs_stargz_s", "stargz_s", "base_s"])
-        for row in zip(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base):
-            writer.writerow([row[0], f"{row[1]:.4f}", f"{row[2]:.4f}", f"{row[3]:.4f}", f"{row[4]:.4f}"])
+        writer.writerow(header)
+        for i, n in enumerate(splits):
+            row: list = [n]
+            for br in [brs_2dfs[i], brs_2dfs_stargz[i], brs_stargz[i], brs_base[i]]:
+                row.extend([f"{br.total_s:.4f}", f"{br.pull_s:.4f}", f"{br.context_transfer_s:.4f}",
+                            f"{br.build_s:.4f}", f"{br.export_s:.4f}"])
+            writer.writerow(row)
     log.result(f"Results saved to {output_path}")
 
 
 def plot(
-    results_2dfs: list[tuple[int, float]],
-    results_2dfs_stargz: list[tuple[int, float]],
-    results_stargz: list[tuple[int, float]],
-    results_base: list[tuple[int, float]],
+    results_2dfs: ResultList,
+    results_2dfs_stargz: ResultList,
+    results_stargz: ResultList,
+    results_base: ResultList,
     model: str,
     base_image: str,
 ) -> None:
     splits = [n for n, _ in results_2dfs]
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(splits, [t for _, t in results_2dfs], marker="o", label="2dfs")
-    ax.plot(splits, [t for _, t in results_2dfs_stargz], marker="o", label="2dfs+stargz")
-    ax.plot(splits, [t for _, t in results_stargz], marker="o", label="stargz")
-    ax.plot(splits, [t for _, t in results_base], marker="o", label="base")
+    ax.plot(splits, [br.total_s - br.pull_s for _, br in results_2dfs], marker="o", label="2dfs")
+    ax.plot(splits, [br.total_s - br.pull_s for _, br in results_2dfs_stargz], marker="o", label="2dfs+stargz")
+    ax.plot(splits, [br.total_s - br.pull_s for _, br in results_stargz], marker="o", label="stargz")
+    ax.plot(splits, [br.total_s - br.pull_s for _, br in results_base], marker="o", label="base")
     ax.set_xlabel("Number of splits")
     ax.set_ylabel("Build time (s)")
     ax.set_title("tdfs build performance")
@@ -318,18 +332,18 @@ def main():
         plot_resource(samples, MODEL, MAX_SPLITS, BASE_IMAGE)
 
     splits = [n for n, _ in results_2dfs]
-    times_2dfs = [t for _, t in results_2dfs]
-    times_2dfs_stargz = [t for _, t in results_2dfs_stargz]
-    times_stargz = [t for _, t in results_stargz]
-    times_base = [t for _, t in results_base]
+    brs_2dfs = [br for _, br in results_2dfs]
+    brs_2dfs_stargz = [br for _, br in results_2dfs_stargz]
+    brs_stargz = [br for _, br in results_stargz]
+    brs_base = [br for _, br in results_base]
 
     log.result("\n=== Comparison ===")
     log.result(f"{'splits':>8}  {'2dfs (s)':>12}  {'2dfs+stargz (s)':>16}  {'stargz (s)':>12}  {'base (s)':>10}")
     log.result("-" * 68)
-    for n, t1, t2, t3, t4 in zip(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base):
-        log.result(f"{n:>8}  {t1:>12.2f}  {t2:>16.2f}  {t3:>12.2f}  {t4:>10.2f}")
+    for n, b1, b2r, b3, b4 in zip(splits, brs_2dfs, brs_2dfs_stargz, brs_stargz, brs_base):
+        log.result(f"{n:>8}  {b1.total_s:>12.2f}  {b2r.total_s:>16.2f}  {b3.total_s:>12.2f}  {b4.total_s:>10.2f}")
 
-    save_csv(splits, times_2dfs, times_2dfs_stargz, times_stargz, times_base, MODEL, BASE_IMAGE)
+    save_csv(splits, brs_2dfs, brs_2dfs_stargz, brs_stargz, brs_base, MODEL, BASE_IMAGE)
     plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL, BASE_IMAGE)
 
 

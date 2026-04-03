@@ -5,6 +5,8 @@ import time
 from datetime import datetime, timezone
 
 from shared import log
+from shared.build_result import BuildResult
+from shared.buildctl_parser import parse_buildctl_plain
 from build_performance.prepare import prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,10 +19,11 @@ def clear_cache() -> None:
     subprocess.run(["sudo", "buildctl", "prune", "--all"], check=True, capture_output=not log.VERBOSE)
 
 
-def build_only(n: int) -> float:
+def build_only(n: int) -> BuildResult:
     target = f"{REGISTRY}/build-perf-stargz-only:{n}"
     cmd = [
         "sudo", "buildctl", "build",
+        "--progress=plain",
         "--frontend", "dockerfile.v0",
         "--opt", "filename=Dockerfile.stargz",
         "--local", f"context={SCRIPT_DIR}",
@@ -30,30 +33,36 @@ def build_only(n: int) -> float:
 
     log.info(f"=== Building with {n} split(s) (stargz) ===")
     start = time.perf_counter()
-    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
+    result = subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=True, text=True)
     elapsed = time.perf_counter() - start
 
-    log.result(f"Build time for {n} split(s): {elapsed:.2f}s")
-    return elapsed
+    if log.VERBOSE:
+        log.info(result.stderr)
+
+    br = parse_buildctl_plain(result.stderr, elapsed)
+    log.result(f"Build time for {n} split(s): {elapsed:.2f}s "
+               f"(pull={br.pull_s:.2f} ctx={br.context_transfer_s:.2f} "
+               f"build={br.build_s:.2f} export={br.export_s:.2f})")
+    return br
 
 
-def run_one(model: str, n: int, source_image: str = "") -> float:
+def run_one(model: str, n: int, source_image: str = "") -> BuildResult:
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
     subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
     prepare(model, n, source_image)
 
-    elapsed = build_only(n)
+    br = build_only(n)
 
     clear_cache()
-    return elapsed
+    return br
 
 
-def run(model: str, max_splits: int, source_image: str = "") -> list[tuple[int, float]]:
+def run(model: str, max_splits: int, source_image: str = "") -> list[tuple[int, BuildResult]]:
     clear_cache()
     results = []
     for n in range(1, max_splits + 1):
-        elapsed = run_one(model, n, source_image)
-        results.append((n, elapsed))
+        br = run_one(model, n, source_image)
+        results.append((n, br))
     return results
 
 

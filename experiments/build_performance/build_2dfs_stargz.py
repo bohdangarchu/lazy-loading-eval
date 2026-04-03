@@ -5,7 +5,9 @@ import time
 from datetime import datetime, timezone
 
 from shared import log
+from shared.build_result import BuildResult
 from shared.registry import base_image, tdfs_cmd
+from shared.tdfs_parser import parse_tdfs_output
 from build_performance.prepare import prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,7 +23,7 @@ def clear_cache(is_local: bool = True) -> None:
     subprocess.run(cache_cmd, shell=True, check=True, capture_output=not log.VERBOSE)
 
 
-def build_only(n: int, is_local: bool = True, source_image: str = "") -> float:
+def build_only(n: int, is_local: bool = True, source_image: str = "") -> BuildResult:
     target = f"{REGISTRY}/build-perf-stargz:{n}"
     cmd = tdfs_cmd(is_local, SCRIPT_DIR) + [
         "build",
@@ -36,30 +38,36 @@ def build_only(n: int, is_local: bool = True, source_image: str = "") -> float:
     log.info(f"=== Building with {n} split(s) (2dfs-stargz) ===")
     start = time.perf_counter()
     env = {**os.environ, "TMPDIR": "/mydata/tmp"} if not is_local else None
-    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE, env=env)
+    result = subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=True, text=True, env=env)
     elapsed = time.perf_counter() - start
 
-    log.result(f"Build time for {n} split(s): {elapsed:.2f}s")
-    return elapsed
+    output = result.stdout + result.stderr
+    if log.VERBOSE:
+        log.info(output)
+
+    br = parse_tdfs_output(output, elapsed)
+    log.result(f"Build time for {n} split(s): {elapsed:.2f}s "
+               f"(pull={br.pull_s:.2f} build={br.build_s:.2f} export={br.export_s:.2f})")
+    return br
 
 
-def run_one(model: str, n: int, is_local: bool = True, source_image: str = "") -> float:
+def run_one(model: str, n: int, is_local: bool = True, source_image: str = "") -> BuildResult:
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
     subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
     prepare(model, n, source_image, is_local)
 
-    elapsed = build_only(n, is_local, source_image)
+    br = build_only(n, is_local, source_image)
 
     clear_cache(is_local)
-    return elapsed
+    return br
 
 
-def run(model: str, max_splits: int, is_local: bool = True, source_image: str = "") -> list[tuple[int, float]]:
+def run(model: str, max_splits: int, is_local: bool = True, source_image: str = "") -> list[tuple[int, BuildResult]]:
     clear_cache(is_local)
     results = []
     for n in range(1, max_splits + 1):
-        elapsed = run_one(model, n, is_local, source_image)
-        results.append((n, elapsed))
+        br = run_one(model, n, is_local, source_image)
+        results.append((n, br))
     return results
 
 
