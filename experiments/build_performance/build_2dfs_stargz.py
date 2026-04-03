@@ -35,7 +35,8 @@ def build_only(n: int, is_local: bool = True, source_image: str = "") -> float:
 
     log.info(f"=== Building with {n} split(s) (2dfs-stargz) ===")
     start = time.perf_counter()
-    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
+    env = {**os.environ, "TMPDIR": "/mydata/tmp"} if not is_local else None
+    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE, env=env)
     elapsed = time.perf_counter() - start
 
     log.result(f"Build time for {n} split(s): {elapsed:.2f}s")
