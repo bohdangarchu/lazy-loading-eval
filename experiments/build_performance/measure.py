@@ -31,7 +31,7 @@ BASE_IMAGE = "docker.io/library/python:3.12-slim"
 MAX_SPLITS = 2
 IS_LOCAL = False
 WITH_RESOURCE = False
-VERBOSE = False
+VERBOSE = True
 SLEEP_SECONDS = 5
 
 
