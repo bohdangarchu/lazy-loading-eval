@@ -37,7 +37,7 @@ def image_slug(source_image: str) -> str:
 def tdfs_cmd(is_local: bool, work_dir: str) -> list[str]:
     if is_local:
         return [os.path.join(work_dir, "tdfs")]
-    return ["sudo", "--preserve-env=TMPDIR", "tdfs", "--home-dir", "/mydata/.2dfs"]
+    return ["sudo", "env", "TMPDIR=/mydata/tmp", "tdfs", "--home-dir", "/mydata/.2dfs"]
 
 
 def _local_esgz_tag(source_image: str, registry_url: str) -> str:
