@@ -22,7 +22,7 @@ CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "compression")
 
 MODEL = "openai-community/gpt2-medium"
 SOURCE_IMAGE = "docker.io/library/python:3.12-slim"
-MAX_SPLITS = 10
+MAX_SPLITS = 2
 IS_LOCAL = False
 
 CLEAR_CACHE_CMD = "sudo rm -rf /mydata/.2dfs/blobs/* /mydata/.2dfs/uncompressed-keys/* /mydata/.2dfs/index/*"
