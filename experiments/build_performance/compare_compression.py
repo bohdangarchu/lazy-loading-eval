@@ -80,10 +80,14 @@ def get_image_size() -> str:
     result = subprocess.run(cmd, cwd=SCRIPT_DIR, capture_output=True, text=True)
     log.info(result.stdout)
     for line in result.stdout.splitlines():
-        cols = [c.strip() for c in line.split("|")]
-        # cols: ['', '#', 'Url', 'Tag', 'Type', 'Size', 'Reference', '']
-        if len(cols) >= 7 and cols[4] == "OCI+2DFS":
-            return cols[5]
+        if "OCI+2DFS" not in line:
+            continue
+        # Line looks like:
+        #  1  10.10.1.2:5000/...  tag  OCI+2DFS  1.3 GB  <hash>
+        # Size is the token matching \d+\.\d+ [KMGTPE]?B before the 64-char hex hash
+        m = re.search(r"([\d.]+\s+[KMGTPE]?B)\s+[0-9a-f]{64}", line)
+        if m:
+            return m.group(1).strip()
     return "unknown"
 
 
