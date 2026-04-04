@@ -75,14 +75,14 @@ def build_one(n: int, level: str) -> BuildResult:
 
 
 def get_image_size() -> str:
-    """Run tdfs image ls and parse the Size column from the last image row."""
+    """Run tdfs image ls and parse the Size column from the OCI+2DFS row."""
     cmd = tdfs_cmd(IS_LOCAL, SCRIPT_DIR) + ["image", "ls"]
     result = subprocess.run(cmd, cwd=SCRIPT_DIR, capture_output=True, text=True)
     log.info(result.stdout)
     for line in result.stdout.splitlines():
         cols = [c.strip() for c in line.split("|")]
         # cols: ['', '#', 'Url', 'Tag', 'Type', 'Size', 'Reference', '']
-        if len(cols) >= 7 and re.match(r"^\d+$", cols[1]):
+        if len(cols) >= 7 and cols[4] == "OCI+2DFS":
             return cols[5]
     return "unknown"
 
@@ -137,25 +137,6 @@ def plot(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> Non
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     splits = [n for n, _ in all_results[0][2]]
 
-    # Chart 1: build time (excl. pull) vs splits
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for _, label, results in all_results:
-        ax.plot(splits, [rr.build.total_s - rr.build.pull_s for _, rr in results], marker="o", label=label)
-    ax.set_xlabel("Number of splits")
-    ax.set_ylabel("Build time (s)")
-    ax.set_title("2dfs build time by compression level (excl. pull)")
-    ax.set_xticks(splits)
-    ax.legend()
-    ax.grid(True, linestyle="--", alpha=0.5)
-    fig.text(0.01, 0.01, f"model: {MODEL}\nbase image: {SOURCE_IMAGE}",
-             fontsize=8, verticalalignment="bottom", family="monospace")
-    fig.tight_layout()
-    path1 = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_splits_{MAX_SPLITS}_{ts}.png")
-    fig.savefig(path1, dpi=150)
-    plt.close(fig)
-    log.result(f"Chart saved to {path1}")
-
-    # Chart 2: image size vs splits (parse size string to MB for plotting)
     def to_mb(size_str: str) -> float:
         m = re.match(r"([\d.]+)\s*([KMGTPE]?)B", size_str)
         if not m:
@@ -164,22 +145,33 @@ def plot(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> Non
         multipliers = {"": 1/1024/1024, "K": 1/1024, "M": 1.0, "G": 1024.0, "T": 1024.0**2}
         return val * multipliers.get(unit, 1.0)
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
     for _, label, results in all_results:
-        ax.plot(splits, [to_mb(rr.image_size) for _, rr in results], marker="o", label=label)
-    ax.set_xlabel("Number of splits")
-    ax.set_ylabel("Image size (MB)")
-    ax.set_title("2dfs image size by compression level")
-    ax.set_xticks(splits)
-    ax.legend()
-    ax.grid(True, linestyle="--", alpha=0.5)
+        ax1.plot(splits, [rr.build.total_s - rr.build.pull_s for _, rr in results], marker="o", label=label)
+    ax1.set_xlabel("Number of splits")
+    ax1.set_ylabel("Build time (s)")
+    ax1.set_title("Build time by compression level (excl. pull)")
+    ax1.set_xticks(splits)
+    ax1.legend()
+    ax1.grid(True, linestyle="--", alpha=0.5)
+
+    for _, label, results in all_results:
+        ax2.plot(splits, [to_mb(rr.image_size) for _, rr in results], marker="o", label=label)
+    ax2.set_xlabel("Number of splits")
+    ax2.set_ylabel("Image size (MB)")
+    ax2.set_title("Image size by compression level")
+    ax2.set_xticks(splits)
+    ax2.legend()
+    ax2.grid(True, linestyle="--", alpha=0.5)
+
     fig.text(0.01, 0.01, f"model: {MODEL}\nbase image: {SOURCE_IMAGE}",
              fontsize=8, verticalalignment="bottom", family="monospace")
     fig.tight_layout()
-    path2 = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_size_{MAX_SPLITS}_{ts}.png")
-    fig.savefig(path2, dpi=150)
+    path1 = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_splits_{MAX_SPLITS}_{ts}.png")
+    fig.savefig(path1, dpi=150)
     plt.close(fig)
-    log.result(f"Chart saved to {path2}")
+    log.result(f"Chart saved to {path1}")
 
 
 def main():
