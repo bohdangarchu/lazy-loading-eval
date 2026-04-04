@@ -20,15 +20,15 @@ from pull_performance.images import (
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
     ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB    ~700 MB
-    # ("openai-community/gpt2-large", "docker.io/ollama/ollama"),            # ~3.25 GB    ~3.4 GB
+    ("openai-community/gpt2-large", "docker.io/ollama/ollama"),            # ~3.25 GB    ~3.4 GB
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
 NUM_SPLITS = 10
 BASE_SPLITS = [2, 4, 6, 8, 10]
 IS_LOCAL = False
 VERBOSE = True
-# MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
-MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
+MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
+# MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
 
 _MODE_COLORS = {
     "2dfs":             "#1f77b4",
