@@ -13,6 +13,10 @@ def build_name_2dfs_stargz(source_image: str, is_local: bool) -> str:
     return f"{registry(is_local)}/{image_slug(source_image)}-2dfs-stargz:latest"
 
 
+def build_name_2dfs_stargz_zstd(source_image: str, is_local: bool) -> str:
+    return f"{registry(is_local)}/{image_slug(source_image)}-2dfs-stargz-zstd:latest"
+
+
 def build_name_stargz(source_image: str, is_local: bool) -> str:
     return f"{registry(is_local)}/{image_slug(source_image)}-stargz:latest"
 
@@ -34,6 +38,11 @@ def pull_name_2dfs(source_image: str, is_local: bool, num_allotments: int) -> st
 def pull_name_2dfs_stargz(source_image: str, is_local: bool, num_allotments: int) -> str:
     end_col = num_allotments - 1
     return f"{registry(is_local)}/library/{image_slug(source_image)}-2dfs-stargz:latest--0.0.0.{end_col}"
+
+
+def pull_name_2dfs_stargz_zstd(source_image: str, is_local: bool, num_allotments: int) -> str:
+    end_col = num_allotments - 1
+    return f"{registry(is_local)}/library/{image_slug(source_image)}-2dfs-stargz-zstd:latest--0.0.0.{end_col}"
 
 
 def pull_name_stargz(source_image: str, is_local: bool) -> str:

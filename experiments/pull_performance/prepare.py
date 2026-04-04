@@ -6,7 +6,7 @@ from shared.model import download_model, split_model
 from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_base_dockerfile
 from shared.registry import base_image, tdfs_cmd
 from pull_performance.images import (
-    build_name_2dfs, build_name_2dfs_stargz,
+    build_name_2dfs, build_name_2dfs_stargz, build_name_2dfs_stargz_zstd,
     build_name_stargz, build_name_base,
 )
 
@@ -52,6 +52,30 @@ def _build_and_push_2dfs_stargz(chunk_paths: list[str], source_image: str, is_lo
         target,
     ]
     log.info(f"Building 2dfs-stargz image: {target}")
+    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
+    log.result(f"Built {target}")
+
+    push_cmd = tdfs_cmd(is_local, SCRIPT_DIR) + ["image", "push", "--force-http", target]
+    log.info(f"Pushing {target}")
+    subprocess.run(push_cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
+    log.result(f"Pushed {target}")
+
+
+def _build_and_push_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, is_local: bool) -> None:
+    write_2dfs_json(chunk_paths, SCRIPT_DIR)
+    target = build_name_2dfs_stargz_zstd(source_image, is_local)
+
+    cmd = tdfs_cmd(is_local, SCRIPT_DIR) + [
+        "build",
+        "--platforms", "linux/amd64",
+        "--enable-stargz",
+        "--use-zstd",
+        "--force-http",
+        "-f", "2dfs.json",
+        base_image(source_image, is_local),
+        target,
+    ]
+    log.info(f"Building 2dfs-stargz-zstd image: {target}")
     subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     log.result(f"Built {target}")
 
@@ -109,6 +133,7 @@ def prepare(model_name: str, num_splits: int, base_splits: list[int], source_ima
 
     _build_and_push_2dfs(chunk_paths, source_image, is_local)
     _build_and_push_2dfs_stargz(chunk_paths, source_image, is_local)
+    _build_and_push_2dfs_stargz_zstd(chunk_paths, source_image, is_local)
     _build_and_push_stargz(chunk_paths, source_image, is_local)
 
     log.info(f"\n=== Building base images for split counts: {base_splits} ===")

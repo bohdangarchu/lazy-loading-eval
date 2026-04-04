@@ -14,7 +14,7 @@ from shared import log
 from shared.registry import prepare_local_registry, registry, image_slug
 from pull_performance.prepare import prepare
 from pull_performance.images import (
-    pull_name_2dfs, pull_name_2dfs_stargz,
+    pull_name_2dfs, pull_name_2dfs_stargz, pull_name_2dfs_stargz_zstd,
     pull_name_stargz, pull_name_base,
 )
 
@@ -26,6 +26,16 @@ NUM_SPLITS = 10
 BASE_SPLITS = [2, 4, 6, 8, 10]
 IS_LOCAL = False
 VERBOSE = True
+# MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
+MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
+
+_MODE_COLORS = {
+    "2dfs":             "#1f77b4",
+    "2dfs-stargz":      "#ff7f0e",
+    "2dfs-stargz-zstd": "#9467bd",
+    "stargz":           "#2ca02c",
+    "base":             "#d62728",
+}
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "pull")
@@ -118,6 +128,14 @@ def pull_2dfs_stargz(source_image: str, is_local: bool, num_allotments: int) -> 
     return elapsed
 
 
+def pull_2dfs_stargz_zstd(source_image: str, is_local: bool, num_allotments: int) -> float:
+    image = pull_name_2dfs_stargz_zstd(source_image, is_local, num_allotments)
+    log.info(f"Pulling 2dfs-stargz-zstd ({num_allotments} allotments): {image}")
+    elapsed = _timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", image])
+    log.result(f"  2dfs-stargz-zstd pull ({num_allotments} allotments): {elapsed:.2f}s")
+    return elapsed
+
+
 # ── run functions ──────────────────────────────────────────────────
 
 
@@ -163,74 +181,78 @@ def run_2dfs_stargz(image: str, n: int) -> float:
     return elapsed
 
 
+def run_2dfs_stargz_zstd(image: str, n: int) -> float:
+    name = _next_container_name("run-2dfs-stargz-zstd")
+    log.info(f"Running 2dfs-stargz-zstd container: {name} (reading {n} chunks)")
+    elapsed = _timed_run([
+        "sudo", "ctr-remote", "run", "--rm", "--snapshotter=stargz",
+        image, name, *_run_cmd(n),
+    ])
+    log.result(f"  2dfs-stargz-zstd run: {elapsed:.2f}s")
+    return elapsed
+
+
 # ── orchestration ──────────────────────────────────────────────────
+
+
+def _measure_one(mode: str, n: int, source_image: str, is_local: bool) -> tuple[int, float, float]:
+    if mode == "base":
+        pull_t = pull_base(source_image, is_local, n)
+        run_t = run_base(pull_name_base(source_image, is_local, n), n)
+    elif mode == "stargz":
+        pull_t = pull_stargz(source_image, is_local)
+        run_t = run_stargz(pull_name_stargz(source_image, is_local), n)
+    elif mode == "2dfs":
+        pull_t = pull_2dfs(source_image, is_local, n)
+        run_t = run_2dfs(pull_name_2dfs(source_image, is_local, n), n)
+    elif mode == "2dfs-stargz":
+        pull_t = pull_2dfs_stargz(source_image, is_local, n)
+        run_t = run_2dfs_stargz(pull_name_2dfs_stargz(source_image, is_local, n), n)
+    elif mode == "2dfs-stargz-zstd":
+        pull_t = pull_2dfs_stargz_zstd(source_image, is_local, n)
+        run_t = run_2dfs_stargz_zstd(pull_name_2dfs_stargz_zstd(source_image, is_local, n), n)
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+    return (n, pull_t, run_t)
 
 
 def measure(
     base_splits: list[int], source_image: str, is_local: bool,
-) -> tuple[list[tuple[int, float, float]], list[tuple[int, float, float]],
-           list[tuple[int, float, float]], list[tuple[int, float, float]]]:
-    results_2dfs: list[tuple[int, float, float]] = []
-    results_2dfs_stargz: list[tuple[int, float, float]] = []
-    results_stargz: list[tuple[int, float, float]] = []
-    results_base: list[tuple[int, float, float]] = []
+) -> dict[str, list[tuple[int, float, float]]]:
+    results: dict[str, list[tuple[int, float, float]]] = {m: [] for m in MODES}
 
     for n in base_splits:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        for mode in MODES:
+            log.info(f"\n[{ts}] === {mode}: {n} ===")
+            clear_cache(is_local)
+            results[mode].append(_measure_one(mode, n, source_image, is_local))
 
-        log.info(f"\n[{ts}] === base: {n} splits ===")
-        clear_cache(is_local)
-        pull_t = pull_base(source_image, is_local, n)
-        run_t = run_base(pull_name_base(source_image, is_local, n), n)
-        results_base.append((n, pull_t, run_t))
-
-        log.info(f"\n[{ts}] === stargz (full image) ===")
-        clear_cache(is_local)
-        pull_t = pull_stargz(source_image, is_local)
-        run_t = run_stargz(pull_name_stargz(source_image, is_local), n)
-        results_stargz.append((n, pull_t, run_t))
-
-        log.info(f"\n[{ts}] === 2dfs: {n} allotments ===")
-        clear_cache(is_local)
-        pull_t = pull_2dfs(source_image, is_local, n)
-        run_t = run_2dfs(pull_name_2dfs(source_image, is_local, n), n)
-        results_2dfs.append((n, pull_t, run_t))
-
-        log.info(f"\n[{ts}] === 2dfs-stargz: {n} allotments ===")
-        clear_cache(is_local)
-        pull_t = pull_2dfs_stargz(source_image, is_local, n)
-        run_t = run_2dfs_stargz(pull_name_2dfs_stargz(source_image, is_local, n), n)
-        results_2dfs_stargz.append((n, pull_t, run_t))
-
-    return results_2dfs, results_2dfs_stargz, results_stargz, results_base
+    return results
 
 
 # ── output ─────────────────────────────────────────────────────────
 
 
-def print_results(
-    results_2dfs: list[tuple[int, float, float]],
-    results_2dfs_stargz: list[tuple[int, float, float]],
-    results_stargz: list[tuple[int, float, float]],
-    results_base: list[tuple[int, float, float]],
-) -> None:
-    splits = [n for n, _, _ in results_base]
+def print_results(results: dict[str, list[tuple[int, float, float]]]) -> None:
+    splits = [n for n, _, _ in next(iter(results.values()))]
+    col = 18
+    header_modes = "  ".join(f"{m:>{col}}" for m in results)
+    subheader = "  ".join(f"{'pull/run/total':>{col}}" for _ in results)
     log.result("\n=== Pull + Run Performance Results ===")
-    log.result(f"{'splits':>8}  {'2dfs':>18}  {'2dfs+stargz':>18}  {'stargz':>18}  {'base':>18}")
-    log.result(f"{'':>8}  {'pull/run/total':>18}  {'pull/run/total':>18}  {'pull/run/total':>18}  {'pull/run/total':>18}")
-    log.result("-" * 90)
+    log.result(f"{'splits':>8}  {header_modes}")
+    log.result(f"{'':>8}  {subheader}")
+    log.result("-" * (10 + (col + 2) * len(results)))
     for i, n in enumerate(splits):
         def fmt(r: list[tuple[int, float, float]], idx: int) -> str:
             _, p, r_t = r[idx]
             return f"{p:.1f}/{r_t:.1f}/{p+r_t:.1f}"
-        log.result(f"{n:>8}  {fmt(results_2dfs, i):>18}  {fmt(results_2dfs_stargz, i):>18}  {fmt(results_stargz, i):>18}  {fmt(results_base, i):>18}")
+        row = "  ".join(f"{fmt(r, i):>{col}}" for r in results.values())
+        log.result(f"{n:>8}  {row}")
 
 
 def save_csv(
-    results_2dfs: list[tuple[int, float, float]],
-    results_2dfs_stargz: list[tuple[int, float, float]],
-    results_stargz: list[tuple[int, float, float]],
-    results_base: list[tuple[int, float, float]],
+    results: dict[str, list[tuple[int, float, float]]],
     model: str,
     base_image: str,
 ) -> None:
@@ -238,62 +260,44 @@ def save_csv(
     model_slug = model.replace("/", "--")
     img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    splits = [n for n, _, _ in results_base]
+    splits = [n for n, _, _ in next(iter(results.values()))]
     output_path = os.path.join(RESULTS_DIR, f"{model_slug}_{img_slug}_pull_{len(splits)}_{ts}.csv")
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "splits",
-            "2dfs_pull_s", "2dfs_run_s", "2dfs_total_s",
-            "2dfs_stargz_pull_s", "2dfs_stargz_run_s", "2dfs_stargz_total_s",
-            "stargz_pull_s", "stargz_run_s", "stargz_total_s",
-            "base_pull_s", "base_run_s", "base_total_s",
-        ])
+        header = ["splits"]
+        for mode in results:
+            slug = mode.replace("-", "_")
+            header += [f"{slug}_pull_s", f"{slug}_run_s", f"{slug}_total_s"]
+        writer.writerow(header)
         for i in range(len(splits)):
             def row(r: list[tuple[int, float, float]], idx: int) -> list[str]:
                 _, p, r_t = r[idx]
                 return [f"{p:.4f}", f"{r_t:.4f}", f"{p+r_t:.4f}"]
-            writer.writerow([
-                splits[i],
-                *row(results_2dfs, i),
-                *row(results_2dfs_stargz, i),
-                *row(results_stargz, i),
-                *row(results_base, i),
-            ])
+            writer.writerow([splits[i], *(v for r in results.values() for v in row(r, i))])
     log.result(f"Results saved to {output_path}")
 
 
 def plot(
-    results_2dfs: list[tuple[int, float, float]],
-    results_2dfs_stargz: list[tuple[int, float, float]],
-    results_stargz: list[tuple[int, float, float]],
-    results_base: list[tuple[int, float, float]],
+    results: dict[str, list[tuple[int, float, float]]],
     model: str,
     base_image: str,
 ) -> None:
-    splits = [n for n, _, _ in results_base]
+    splits = [n for n, _, _ in next(iter(results.values()))]
     x = np.arange(len(splits))
-    width = 0.18
+    n_modes = len(results)
+    width = min(0.8 / n_modes, 0.15)
 
-    methods = [
-        ("2dfs", results_2dfs, "#1f77b4"),
-        ("2dfs+stargz", results_2dfs_stargz, "#ff7f0e"),
-        ("stargz", results_stargz, "#2ca02c"),
-        ("base", results_base, "#d62728"),
-    ]
+    fig, ax = plt.subplots(figsize=(max(10, n_modes * 2), 6))
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    for i, (label, results, color) in enumerate(methods):
-        pulls = [p for _, p, _ in results]
-        runs = [r for _, _, r in results]
-        offset = (i - 1.5) * width
-        # Pull portion (bottom, hatched)
+    for i, (mode, mode_results) in enumerate(results.items()):
+        color = _MODE_COLORS[mode]
+        pulls = [p for _, p, _ in mode_results]
+        runs = [r for _, _, r in mode_results]
+        offset = (i - (n_modes - 1) / 2) * width
         ax.bar(x + offset, pulls, width, color=color, alpha=0.5,
                hatch="//", edgecolor=color, linewidth=0.5)
-        # Run portion (top, solid)
         ax.bar(x + offset, runs, width, bottom=pulls, color=color,
-               edgecolor=color, linewidth=0.5, label=label)
+               edgecolor=color, linewidth=0.5, label=mode)
 
     ax.set_xlabel("Number of splits pulled")
     ax.set_ylabel("Time (s)")
@@ -302,9 +306,8 @@ def plot(
     ax.set_xticklabels(splits)
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")
 
-    # Legend: method colors + pull/run distinction
-    method_handles = [mpatches.Patch(facecolor=c, edgecolor=c, label=l)
-                      for l, _, c in methods]
+    method_handles = [mpatches.Patch(facecolor=_MODE_COLORS[m], edgecolor=_MODE_COLORS[m], label=m)
+                      for m in results]
     pull_patch = mpatches.Patch(facecolor="gray", alpha=0.5, hatch="//",
                                 edgecolor="gray", label="pull")
     run_patch = mpatches.Patch(facecolor="gray", edgecolor="gray", label="run")
@@ -337,6 +340,7 @@ def main():
     log.set_verbose(VERBOSE)
     log.info(f"Model: {MODEL}")
     log.info(f"Base image: {base_image}")
+    log.info(f"Modes: {MODES}")
     log.info(f"Splits (2dfs/stargz): {NUM_SPLITS}")
     log.info(f"Splits (base): {BASE_SPLITS}")
 
@@ -344,13 +348,11 @@ def main():
 
     prepare(MODEL, NUM_SPLITS, BASE_SPLITS, base_image, IS_LOCAL)
 
-    results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure(
-        BASE_SPLITS, base_image, IS_LOCAL,
-    )
+    results = measure(BASE_SPLITS, base_image, IS_LOCAL)
 
-    print_results(results_2dfs, results_2dfs_stargz, results_stargz, results_base)
-    save_csv(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL, base_image)
-    plot(results_2dfs, results_2dfs_stargz, results_stargz, results_base, MODEL, base_image)
+    print_results(results)
+    save_csv(results, MODEL, base_image)
+    plot(results, MODEL, base_image)
 
 
 if __name__ == "__main__":
