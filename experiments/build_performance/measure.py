@@ -197,13 +197,13 @@ def plot(
 
     # Chart 1: line chart, total - pull
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(splits, [br.total_s - br.pull_s for _, br in results_2dfs], marker="o", label="2dfs")
-    ax.plot(splits, [br.total_s - br.pull_s for _, br in results_2dfs_stargz], marker="o", label="2dfs+stargz")
-    ax.plot(splits, [br.total_s - br.pull_s for _, br in results_stargz], marker="o", label="stargz")
-    ax.plot(splits, [br.total_s - br.pull_s for _, br in results_base], marker="o", label="base")
+    ax.plot(splits, [br.total_s for _, br in results_2dfs], marker="o", label="2dfs")
+    ax.plot(splits, [br.total_s for _, br in results_2dfs_stargz], marker="o", label="2dfs+stargz")
+    ax.plot(splits, [br.total_s for _, br in results_stargz], marker="o", label="stargz")
+    ax.plot(splits, [br.total_s for _, br in results_base], marker="o", label="base")
     ax.set_xlabel("Number of splits")
     ax.set_ylabel("Build time (s)")
-    ax.set_title("Build performance (excluding pull)")
+    ax.set_title("Build performance (total)")
     ax.set_xticks(splits)
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
