@@ -29,6 +29,7 @@ def build_only(n: int, is_local: bool = True, source_image: str = "") -> BuildRe
         "build",
         "--platforms", "linux/amd64",
         "--force-http",
+        "--compression-level", "1",
         "-f", "2dfs.json",
         base_image(source_image, is_local),
         target,

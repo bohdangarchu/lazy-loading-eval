@@ -29,6 +29,7 @@ def build_only(n: int, is_local: bool = True, source_image: str = "") -> BuildRe
         "build",
         "--platforms", "linux/amd64",
         "--enable-stargz",
+        "--stargz-compression-level", "1",
         "--force-http",
         "-f", "2dfs.json",
         base_image(source_image, is_local),
