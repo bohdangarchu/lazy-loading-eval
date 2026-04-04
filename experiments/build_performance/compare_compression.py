@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
+import csv
 import os
+import re
 import subprocess
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import matplotlib.pyplot as plt
+
 from shared import log
-from shared.registry import prepare_local_registry, registry, base_image, tdfs_cmd
+from shared.registry import prepare_local_registry, registry, base_image, tdfs_cmd, image_slug
 from shared.build_result import BuildResult
 from shared.tdfs_parser import parse_tdfs_output
 from build_performance.prepare import prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
+RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "compression")
+CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "compression")
 
 MODEL = "openai-community/gpt2-medium"
 SOURCE_IMAGE = "docker.io/library/python:3.12-slim"
@@ -21,9 +28,15 @@ IS_LOCAL = False
 CLEAR_CACHE_CMD = "sudo rm -rf /mydata/.2dfs/blobs/* /mydata/.2dfs/uncompressed-keys/* /mydata/.2dfs/index/*"
 
 LEVELS = [
-    ("2dfs (level -1, default)", "-1"),
-    ("2dfs (level 1, best-speed)", "1"),
+    ("level_n1", "level -1 (default)", "-1"),
+    ("level_1",  "level 1 (best-speed)", "1"),
 ]
+
+
+@dataclass
+class RunResult:
+    build: BuildResult
+    image_size: str  # e.g. "1.4 GB"
 
 
 def clear_cache() -> None:
@@ -61,13 +74,20 @@ def build_one(n: int, level: str) -> BuildResult:
     return br
 
 
-def image_ls() -> None:
-    log.result("--- tdfs image ls ---")
+def get_image_size() -> str:
+    """Run tdfs image ls and parse the Size column from the last image row."""
     cmd = tdfs_cmd(IS_LOCAL, SCRIPT_DIR) + ["image", "ls"]
-    subprocess.run(cmd, cwd=SCRIPT_DIR)
+    result = subprocess.run(cmd, cwd=SCRIPT_DIR, capture_output=True, text=True)
+    log.info(result.stdout)
+    for line in result.stdout.splitlines():
+        cols = [c.strip() for c in line.split("|")]
+        # cols: ['', '#', 'Url', 'Tag', 'Type', 'Size', 'Reference', '']
+        if len(cols) >= 7 and re.match(r"^\d+$", cols[1]):
+            return cols[5]
+    return "unknown"
 
 
-def run_level(label: str, level: str) -> list[tuple[int, BuildResult]]:
+def run_level(key: str, label: str, level: str) -> list[tuple[int, RunResult]]:
     log.result(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === {label} ===")
     clear_cache()
     results = []
@@ -76,9 +96,90 @@ def run_level(label: str, level: str) -> list[tuple[int, BuildResult]]:
         subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
         prepare(MODEL, n, SOURCE_IMAGE, IS_LOCAL)
         br = build_one(n, level)
+        size = get_image_size()
+        log.result(f"  image size: {size}")
         clear_cache()
-        results.append((n, br))
+        results.append((n, RunResult(build=br, image_size=size)))
     return results
+
+
+def save_csv(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> None:
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    model_slug = MODEL.replace("/", "--")
+    img_slug = image_slug(SOURCE_IMAGE)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(RESULTS_DIR, f"{model_slug}_{img_slug}_splits_{MAX_SPLITS}_{ts}.csv")
+
+    header = ["splits"]
+    for key, _, _ in all_results:
+        header.extend([f"{key}_total_s", f"{key}_pull_s", f"{key}_ctx_s",
+                       f"{key}_build_s", f"{key}_export_s", f"{key}_size"])
+
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        for i in range(MAX_SPLITS):
+            n = i + 1
+            row: list = [n]
+            for _, _, results in all_results:
+                _, rr = results[i]
+                br = rr.build
+                row.extend([f"{br.total_s:.4f}", f"{br.pull_s:.4f}", f"{br.context_transfer_s:.4f}",
+                             f"{br.build_s:.4f}", f"{br.export_s:.4f}", rr.image_size])
+            writer.writerow(row)
+    log.result(f"Results saved to {path}")
+
+
+def plot(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> None:
+    os.makedirs(CHARTS_DIR, exist_ok=True)
+    model_slug = MODEL.replace("/", "--")
+    img_slug = image_slug(SOURCE_IMAGE)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    splits = [n for n, _ in all_results[0][2]]
+
+    # Chart 1: build time (excl. pull) vs splits
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for _, label, results in all_results:
+        ax.plot(splits, [rr.build.total_s - rr.build.pull_s for _, rr in results], marker="o", label=label)
+    ax.set_xlabel("Number of splits")
+    ax.set_ylabel("Build time (s)")
+    ax.set_title("2dfs build time by compression level (excl. pull)")
+    ax.set_xticks(splits)
+    ax.legend()
+    ax.grid(True, linestyle="--", alpha=0.5)
+    fig.text(0.01, 0.01, f"model: {MODEL}\nbase image: {SOURCE_IMAGE}",
+             fontsize=8, verticalalignment="bottom", family="monospace")
+    fig.tight_layout()
+    path1 = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_splits_{MAX_SPLITS}_{ts}.png")
+    fig.savefig(path1, dpi=150)
+    plt.close(fig)
+    log.result(f"Chart saved to {path1}")
+
+    # Chart 2: image size vs splits (parse size string to MB for plotting)
+    def to_mb(size_str: str) -> float:
+        m = re.match(r"([\d.]+)\s*([KMGTPE]?)B", size_str)
+        if not m:
+            return 0.0
+        val, unit = float(m.group(1)), m.group(2)
+        multipliers = {"": 1/1024/1024, "K": 1/1024, "M": 1.0, "G": 1024.0, "T": 1024.0**2}
+        return val * multipliers.get(unit, 1.0)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for _, label, results in all_results:
+        ax.plot(splits, [to_mb(rr.image_size) for _, rr in results], marker="o", label=label)
+    ax.set_xlabel("Number of splits")
+    ax.set_ylabel("Image size (MB)")
+    ax.set_title("2dfs image size by compression level")
+    ax.set_xticks(splits)
+    ax.legend()
+    ax.grid(True, linestyle="--", alpha=0.5)
+    fig.text(0.01, 0.01, f"model: {MODEL}\nbase image: {SOURCE_IMAGE}",
+             fontsize=8, verticalalignment="bottom", family="monospace")
+    fig.tight_layout()
+    path2 = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_size_{MAX_SPLITS}_{ts}.png")
+    fig.savefig(path2, dpi=150)
+    plt.close(fig)
+    log.result(f"Chart saved to {path2}")
 
 
 def main():
@@ -86,23 +187,28 @@ def main():
 
     prepare_local_registry(SOURCE_IMAGE, registry(IS_LOCAL))
 
-    all_results: list[tuple[str, list[tuple[int, BuildResult]]]] = []
-    for label, level in LEVELS:
-        results = run_level(label, level)
-        image_ls()
-        all_results.append((label, results))
+    all_results: list[tuple[str, str, list[tuple[int, RunResult]]]] = []
+    for key, label, level in LEVELS:
+        results = run_level(key, label, level)
+        all_results.append((key, label, results))
 
     log.result("\n=== Summary ===")
-    header = f"{'splits':>8}" + "".join(f"  {label:>28}" for label, _ in all_results)
+    col = 20
+    header = f"{'splits':>8}"
+    for _, label, _ in all_results:
+        header += f"  {(label + ' time'):>{col}}  {(label + ' size'):>{col}}"
     log.result(header)
-    log.result("-" * (8 + 30 * len(all_results)))
+    log.result("-" * (8 + (col * 2 + 6) * len(all_results)))
     for i in range(MAX_SPLITS):
         n = i + 1
         row = f"{n:>8}"
-        for _, results in all_results:
-            _, br = results[i]
-            row += f"  {br.total_s:>28.2f}"
+        for _, _, results in all_results:
+            _, rr = results[i]
+            row += f"  {rr.build.total_s:>{col}.2f}  {rr.image_size:>{col}}"
         log.result(row)
+
+    save_csv(all_results)
+    plot(all_results)
 
 
 if __name__ == "__main__":
