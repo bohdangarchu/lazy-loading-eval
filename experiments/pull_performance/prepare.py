@@ -65,6 +65,8 @@ def _build_and_push_stargz(chunk_paths: list[str], source_image: str, is_local: 
     create_stargz_dockerfile(chunk_paths, base_image(source_image, is_local), SCRIPT_DIR)
     target = build_name_stargz(source_image, is_local)
 
+    # force-compression=true makes sure the split layers are converted to stargz
+    # otherwise cached layers are used which might not be compressed
     cmd = [
         "sudo", "buildctl", "build",
         "--frontend", "dockerfile.v0",
