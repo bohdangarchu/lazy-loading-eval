@@ -28,7 +28,7 @@ CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
     ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.4 GB     ~700 MB
-    ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
+    # ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
 MAX_SPLITS = 10
