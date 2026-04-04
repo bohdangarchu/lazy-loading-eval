@@ -1,4 +1,3 @@
-import argparse
 import csv
 import os
 import subprocess
@@ -18,10 +17,12 @@ from pull_performance.images import (
     pull_name_stargz, pull_name_base,
 )
 
-# MODEL = "openai-community/gpt2"  # ~500 MB safetensors
-MODEL = "openai-community/gpt2-medium"
-BASE_IMAGE = "docker.io/library/python:3.12-slim" # 41 MB compressed
-# BASE_IMAGE = "docker.io/tensorflow/tensorflow" # 588 MB compressed
+EXPERIMENTS = [
+    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
+    ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB    ~700 MB
+    # ("openai-community/gpt2-large", "docker.io/ollama/ollama"),            # ~3.25 GB    ~3.4 GB
+    # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
+]
 NUM_SPLITS = 10
 BASE_SPLITS = [2, 4, 6, 8, 10]
 IS_LOCAL = False
@@ -330,29 +331,22 @@ def plot(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Measure pull + run performance")
-    parser.add_argument("--base-image", default=BASE_IMAGE,
-                        help=f"Base container image (default: {BASE_IMAGE})")
-    args = parser.parse_args()
-
-    base_image = args.base_image
-
     log.set_verbose(VERBOSE)
-    log.info(f"Model: {MODEL}")
-    log.info(f"Base image: {base_image}")
     log.info(f"Modes: {MODES}")
     log.info(f"Splits (2dfs/stargz): {NUM_SPLITS}")
     log.info(f"Splits (base): {BASE_SPLITS}")
 
-    prepare_local_registry(base_image, registry(IS_LOCAL))
+    for model, base_image in EXPERIMENTS:
+        log.result(f"\n===== Experiment: {model} / {base_image} =====")
+        prepare_local_registry(base_image, registry(IS_LOCAL))
 
-    prepare(MODEL, NUM_SPLITS, BASE_SPLITS, base_image, IS_LOCAL)
+        prepare(model, NUM_SPLITS, BASE_SPLITS, base_image, IS_LOCAL)
 
-    results = measure(BASE_SPLITS, base_image, IS_LOCAL)
+        results = measure(BASE_SPLITS, base_image, IS_LOCAL)
 
-    print_results(results)
-    save_csv(results, MODEL, base_image)
-    plot(results, MODEL, base_image)
+        print_results(results)
+        save_csv(results, model, base_image)
+        plot(results, model, base_image)
 
 
 if __name__ == "__main__":
