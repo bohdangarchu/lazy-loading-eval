@@ -11,8 +11,12 @@ import numpy as np
 
 from shared import log
 from shared.config import load_config
-from shared.registry import prepare_local_registry, registry, image_slug
-from pull_performance.prepare import prepare
+from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
+from pull_performance.prepare import (
+    prepare_chunks,
+    prepare_2dfs, prepare_2dfs_stargz, prepare_2dfs_stargz_zstd,
+    prepare_stargz, prepare_base,
+)
 from pull_performance.images import (
     pull_name_2dfs, pull_name_2dfs_stargz, pull_name_2dfs_stargz_zstd,
     pull_name_stargz, pull_name_base,
@@ -20,7 +24,7 @@ from pull_performance.images import (
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
-    ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB    ~700 MB
+    # ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB    ~700 MB
     # ("openai-community/gpt2-large", "docker.io/ollama/ollama"),            # ~3.25 GB    ~3.4 GB
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
@@ -28,8 +32,8 @@ NUM_SPLITS = 10
 BASE_SPLITS = [2, 4, 6, 8]
 CFG = load_config()
 VERBOSE = True
-MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
-# MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
+# MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
+MODES = ["2dfs-stargz"]
 
 _MODE_COLORS = {
     "2dfs":             "#1f77b4",
@@ -199,6 +203,21 @@ def run_2dfs_stargz_zstd(image: str, n: int) -> float:
 # ── orchestration ──────────────────────────────────────────────────
 
 
+def _prepare_mode(mode: str, chunk_paths: list[str], base_splits: list[int], source_image: str, cfg) -> None:
+    if mode == "base":
+        prepare_base(chunk_paths, base_splits, source_image, cfg)
+    elif mode == "stargz":
+        prepare_stargz(chunk_paths, source_image, cfg)
+    elif mode == "2dfs":
+        prepare_2dfs(chunk_paths, source_image, cfg)
+    elif mode == "2dfs-stargz":
+        prepare_2dfs_stargz(chunk_paths, source_image, cfg)
+    elif mode == "2dfs-stargz-zstd":
+        prepare_2dfs_stargz_zstd(chunk_paths, source_image, cfg)
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+
 def _measure_one(mode: str, n: int, source_image: str, cfg) -> tuple[int, float, float]:
     if mode == "base":
         pull_t = pull_base(source_image, cfg, n)
@@ -221,16 +240,23 @@ def _measure_one(mode: str, n: int, source_image: str, cfg) -> tuple[int, float,
 
 
 def measure(
-    base_splits: list[int], source_image: str, cfg,
+    chunk_paths: list[str], base_splits: list[int], source_image: str, cfg,
 ) -> dict[str, list[tuple[int, float, float]]]:
     results: dict[str, list[tuple[int, float, float]]] = {m: [] for m in MODES}
 
-    for n in base_splits:
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        for mode in MODES:
+    clear_registry(cfg)
+    for mode in MODES:
+        log.info(f"\n=== Preparing mode: {mode} ===")
+        prepare_local_registry(source_image, registry(cfg))
+        _prepare_mode(mode, chunk_paths, base_splits, source_image, cfg)
+
+        for n in base_splits:
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
             log.info(f"\n[{ts}] === {mode}: {n} ===")
             clear_cache(cfg)
             results[mode].append(_measure_one(mode, n, source_image, cfg))
+
+        clear_registry(cfg)
 
     return results
 
@@ -341,11 +367,9 @@ def main():
 
     for model, base_image in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
-        prepare_local_registry(base_image, registry(CFG))
+        chunk_paths = prepare_chunks(model, NUM_SPLITS)
 
-        prepare(model, NUM_SPLITS, BASE_SPLITS, base_image, CFG)
-
-        results = measure(BASE_SPLITS, base_image, CFG)
+        results = measure(chunk_paths, BASE_SPLITS, base_image, CFG)
 
         print_results(results)
         save_csv(results, model, base_image)

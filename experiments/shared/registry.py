@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import urllib.error
@@ -72,6 +73,38 @@ def _image_exists_in_registry(registry_url: str, name: str, tag: str) -> bool:
             return resp.status == 200
     except (urllib.error.HTTPError, urllib.error.URLError):
         return False
+
+
+def clear_registry(cfg: EnvConfig) -> None:
+    """Delete all images from the registry via v2 API."""
+    reg = cfg.registry
+    log.info(f"Clearing registry {reg}...")
+    catalog_url = f"http://{reg}/v2/_catalog"
+    with urllib.request.urlopen(catalog_url) as resp:
+        repos = json.loads(resp.read())["repositories"]
+    for name in repos:
+        tags_url = f"http://{reg}/v2/{name}/tags/list"
+        with urllib.request.urlopen(tags_url) as resp:
+            tags = json.loads(resp.read()).get("tags") or []
+        for tag in tags:
+            manifest_url = f"http://{reg}/v2/{name}/manifests/{tag}"
+            req = urllib.request.Request(manifest_url, headers={
+                "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+            })
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    digest = resp.headers["Docker-Content-Digest"]
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    log.info(f"  Skipping {name}:{tag} (manifest not found)")
+                    continue
+                raise
+            delete_url = f"http://{reg}/v2/{name}/manifests/{digest}"
+            del_req = urllib.request.Request(delete_url, method="DELETE")
+            with urllib.request.urlopen(del_req):
+                pass
+            log.info(f"  Deleted {name}:{tag} ({digest[:19]}...)")
+    log.result("Registry cleared.")
 
 
 def prepare_local_registry(

@@ -14,6 +14,18 @@ from pull_performance.images import (
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+# ── chunks ─────────────────────────────────────────────────────────
+
+
+def prepare_chunks(model_name: str, num_splits: int) -> list[str]:
+    chunk_paths = [os.path.join(SCRIPT_DIR, "chunks", f"chunk{i+1}.bin") for i in range(num_splits)]
+    if all(os.path.exists(p) for p in chunk_paths):
+        log.info("Chunks already exist, skipping download and split.")
+        return chunk_paths
+    shard_paths = download_model(model_name, SCRIPT_DIR)
+    return split_model(shard_paths, num_splits, SCRIPT_DIR)
+
+
 # ── build + push per mode ───────────────────────────────────────────
 
 
@@ -123,21 +135,24 @@ def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_
         log.result(f"Built and pushed {target}")
 
 
-# ── main entry point ────────────────────────────────────────────────
+# ── per-mode public entry points ────────────────────────────────────
 
 
-def prepare(model_name: str, num_splits: int, base_splits: list[int], source_image: str, cfg: EnvConfig) -> None:
-    shard_paths = download_model(model_name, SCRIPT_DIR)
-
-    log.info(f"\n=== Preparing {num_splits} splits for 2dfs / 2dfs-stargz / stargz ===")
-    chunk_paths = split_model(shard_paths, num_splits, SCRIPT_DIR)
-
+def prepare_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
     _build_and_push_2dfs(chunk_paths, source_image, cfg)
+
+
+def prepare_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
     _build_and_push_2dfs_stargz(chunk_paths, source_image, cfg)
+
+
+def prepare_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
     _build_and_push_2dfs_stargz_zstd(chunk_paths, source_image, cfg)
+
+
+def prepare_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
     _build_and_push_stargz(chunk_paths, source_image, cfg)
 
-    log.info(f"\n=== Building base images for split counts: {base_splits} ===")
-    _build_and_push_base(chunk_paths, base_splits, source_image, cfg)
 
-    log.result("\nAll images built and pushed.")
+def prepare_base(chunk_paths: list[str], base_splits: list[int], source_image: str, cfg: EnvConfig) -> None:
+    _build_and_push_base(chunk_paths, base_splits, source_image, cfg)
