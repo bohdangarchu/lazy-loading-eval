@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euox pipefail
 
-sudo docker stop 2dfs-registry
-sudo docker rm 2dfs-registry
-sudo docker volume rm 2dfs-registry-data
+sudo docker stop 2dfs-registry || true
+sudo docker rm 2dfs-registry || true
+sudo docker volume rm 2dfs-registry-data || true
 
 WORKDIR="$HOME/2dfs-registry"
 cd "$WORKDIR"
