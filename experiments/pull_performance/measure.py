@@ -20,12 +20,12 @@ from pull_performance.images import (
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
-    # ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB    ~700 MB
+    ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB    ~700 MB
     # ("openai-community/gpt2-large", "docker.io/ollama/ollama"),            # ~3.25 GB    ~3.4 GB
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
 NUM_SPLITS = 10
-BASE_SPLITS = [2, 4]
+BASE_SPLITS = [2, 4, 6, 8]
 CFG = load_config()
 VERBOSE = True
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
@@ -93,7 +93,8 @@ def _timed_run(cmd: list[str]) -> float:
 
 def _run_cmd(n: int) -> list[str]:
     files = " ".join(f"/chunk{i+1}.bin" for i in range(n))
-    return ["/bin/sh", "-c", f"cat {files} > /dev/null"]
+    # simulate loading model files into memory
+    return ["python3", "-c", f"d=[open(f,'rb').read() for f in '{files}'.split()]"]
 
 
 # ── pull functions ─────────────────────────────────────────────────
