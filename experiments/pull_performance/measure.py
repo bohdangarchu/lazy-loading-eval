@@ -79,7 +79,7 @@ def clear_cache(is_local: bool = True) -> None:
 
 def _timed_pull(cmd: list[str]) -> float:
     start = time.perf_counter()
-    subprocess.run(cmd, check=True, capture_output=not log.VERBOSE)
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return time.perf_counter() - start
 
 
