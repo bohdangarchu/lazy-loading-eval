@@ -2,6 +2,7 @@ import os
 import subprocess
 
 from shared import log
+from shared.config import EnvConfig
 from shared.model import download_model, split_model
 from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_base_dockerfile
 from shared.registry import base_image, tdfs_cmd
@@ -16,78 +17,78 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # ── build + push per mode ───────────────────────────────────────────
 
 
-def _build_and_push_2dfs(chunk_paths: list[str], source_image: str, is_local: bool) -> None:
+def _build_and_push_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
     write_2dfs_json(chunk_paths, SCRIPT_DIR)
-    target = build_name_2dfs(source_image, is_local)
+    target = build_name_2dfs(source_image, cfg)
 
-    cmd = tdfs_cmd(is_local, SCRIPT_DIR) + [
+    cmd = tdfs_cmd(cfg, SCRIPT_DIR) + [
         "build",
         "--platforms", "linux/amd64",
         "--force-http",
         "-f", "2dfs.json",
-        base_image(source_image, is_local),
+        base_image(source_image, cfg),
         target,
     ]
     log.info(f"Building 2dfs image: {target}")
     subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     log.result(f"Built {target}")
 
-    push_cmd = tdfs_cmd(is_local, SCRIPT_DIR) + ["image", "push", "--force-http", target]
+    push_cmd = tdfs_cmd(cfg, SCRIPT_DIR) + ["image", "push", "--force-http", target]
     log.info(f"Pushing {target}")
     subprocess.run(push_cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     log.result(f"Pushed {target}")
 
 
-def _build_and_push_2dfs_stargz(chunk_paths: list[str], source_image: str, is_local: bool) -> None:
+def _build_and_push_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
     write_2dfs_json(chunk_paths, SCRIPT_DIR)
-    target = build_name_2dfs_stargz(source_image, is_local)
+    target = build_name_2dfs_stargz(source_image, cfg)
 
-    cmd = tdfs_cmd(is_local, SCRIPT_DIR) + [
+    cmd = tdfs_cmd(cfg, SCRIPT_DIR) + [
         "build",
         "--platforms", "linux/amd64",
         "--enable-stargz",
         "--force-http",
         "-f", "2dfs.json",
-        base_image(source_image, is_local),
+        base_image(source_image, cfg),
         target,
     ]
     log.info(f"Building 2dfs-stargz image: {target}")
     subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     log.result(f"Built {target}")
 
-    push_cmd = tdfs_cmd(is_local, SCRIPT_DIR) + ["image", "push", "--force-http", target]
+    push_cmd = tdfs_cmd(cfg, SCRIPT_DIR) + ["image", "push", "--force-http", target]
     log.info(f"Pushing {target}")
     subprocess.run(push_cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     log.result(f"Pushed {target}")
 
 
-def _build_and_push_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, is_local: bool) -> None:
+def _build_and_push_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
     write_2dfs_json(chunk_paths, SCRIPT_DIR)
-    target = build_name_2dfs_stargz_zstd(source_image, is_local)
+    target = build_name_2dfs_stargz_zstd(source_image, cfg)
 
-    cmd = tdfs_cmd(is_local, SCRIPT_DIR) + [
+    cmd = tdfs_cmd(cfg, SCRIPT_DIR) + [
         "build",
         "--platforms", "linux/amd64",
         "--enable-stargz",
         "--use-zstd",
         "--force-http",
         "-f", "2dfs.json",
-        base_image(source_image, is_local),
+        base_image(source_image, cfg),
         target,
     ]
     log.info(f"Building 2dfs-stargz-zstd image: {target}")
     subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     log.result(f"Built {target}")
 
-    push_cmd = tdfs_cmd(is_local, SCRIPT_DIR) + ["image", "push", "--force-http", target]
+    push_cmd = tdfs_cmd(cfg, SCRIPT_DIR) + ["image", "push", "--force-http", target]
     log.info(f"Pushing {target}")
     subprocess.run(push_cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     log.result(f"Pushed {target}")
 
 
-def _build_and_push_stargz(chunk_paths: list[str], source_image: str, is_local: bool) -> None:
-    create_stargz_dockerfile(chunk_paths, base_image(source_image, is_local), SCRIPT_DIR)
-    target = build_name_stargz(source_image, is_local)
+def _build_and_push_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+    create_stargz_dockerfile(chunk_paths, base_image(source_image, cfg), SCRIPT_DIR)
+    target = build_name_stargz(source_image, cfg)
 
     # force-compression=true makes sure the split layers are converted to stargz
     # otherwise cached layers are used which might not be compressed
@@ -104,10 +105,10 @@ def _build_and_push_stargz(chunk_paths: list[str], source_image: str, is_local: 
     log.result(f"Built and pushed {target}")
 
 
-def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_image: str, is_local: bool) -> None:
+def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_image: str, cfg: EnvConfig) -> None:
     for r in base_splits:
-        create_base_dockerfile(chunk_paths[:r], base_image(source_image, is_local), SCRIPT_DIR)
-        target = build_name_base(source_image, is_local, r)
+        create_base_dockerfile(chunk_paths[:r], base_image(source_image, cfg), SCRIPT_DIR)
+        target = build_name_base(source_image, cfg, r)
 
         cmd = [
             "sudo", "buildctl", "build",
@@ -125,18 +126,18 @@ def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_
 # ── main entry point ────────────────────────────────────────────────
 
 
-def prepare(model_name: str, num_splits: int, base_splits: list[int], source_image: str, is_local: bool = True) -> None:
+def prepare(model_name: str, num_splits: int, base_splits: list[int], source_image: str, cfg: EnvConfig) -> None:
     shard_paths = download_model(model_name, SCRIPT_DIR)
 
     log.info(f"\n=== Preparing {num_splits} splits for 2dfs / 2dfs-stargz / stargz ===")
     chunk_paths = split_model(shard_paths, num_splits, SCRIPT_DIR)
 
-    _build_and_push_2dfs(chunk_paths, source_image, is_local)
-    _build_and_push_2dfs_stargz(chunk_paths, source_image, is_local)
-    _build_and_push_2dfs_stargz_zstd(chunk_paths, source_image, is_local)
-    _build_and_push_stargz(chunk_paths, source_image, is_local)
+    _build_and_push_2dfs(chunk_paths, source_image, cfg)
+    _build_and_push_2dfs_stargz(chunk_paths, source_image, cfg)
+    _build_and_push_2dfs_stargz_zstd(chunk_paths, source_image, cfg)
+    _build_and_push_stargz(chunk_paths, source_image, cfg)
 
     log.info(f"\n=== Building base images for split counts: {base_splits} ===")
-    _build_and_push_base(chunk_paths, base_splits, source_image, is_local)
+    _build_and_push_base(chunk_paths, base_splits, source_image, cfg)
 
     log.result("\nAll images built and pushed.")

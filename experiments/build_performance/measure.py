@@ -11,6 +11,7 @@ import psutil
 
 from shared import log
 from shared.build_result import BuildResult
+from shared.config import load_config
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -27,12 +28,12 @@ CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB     ~700 MB
+    # ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB     ~700 MB
     # ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
-MAX_SPLITS = 10
-IS_LOCAL = False
+MAX_SPLITS = 3
+CFG = load_config()
 WITH_RESOURCE = False
 VERBOSE = True
 SLEEP_SECONDS = 5
@@ -69,7 +70,7 @@ ResultList = list[tuple[int, BuildResult]]
 
 
 def measure_builds(
-    model: str, max_splits: int, source_image: str, is_local: bool = IS_LOCAL,
+    model: str, max_splits: int, source_image: str, cfg=CFG,
     monitor: ResourceMonitor | None = None,
 ) -> tuple[ResultList, ResultList, ResultList, ResultList]:
     if monitor:
@@ -78,15 +79,15 @@ def measure_builds(
         results_stargz: ResultList = []
         results_base: ResultList = []
 
-        b2.clear_cache(is_local)
-        b2s.clear_cache(is_local)
+        b2.clear_cache(cfg)
+        b2s.clear_cache(cfg)
         bs.clear_cache()
         bb.clear_cache()
 
         for n in range(1, max_splits + 1):
             monitor.set_mode(f"2dfs_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === 2dfs: {n} split(s) ===")
-            br = b2.run_one(model, n, is_local, source_image)
+            br = b2.run_one(model, n, cfg, source_image)
             results_2dfs.append((n, br))
 
             monitor.set_mode("idle")
@@ -95,7 +96,7 @@ def measure_builds(
 
             monitor.set_mode(f"2dfs_stargz_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === 2dfs+stargz: {n} split(s) ===")
-            br = b2s.run_one(model, n, is_local, source_image)
+            br = b2s.run_one(model, n, cfg, source_image)
             results_2dfs_stargz.append((n, br))
 
             monitor.set_mode("idle")
@@ -104,7 +105,7 @@ def measure_builds(
 
             monitor.set_mode(f"stargz_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === stargz: {n} split(s) ===")
-            br = bs.run_one(model, n, is_local, source_image)
+            br = bs.run_one(model, n, cfg, source_image)
             results_stargz.append((n, br))
 
             monitor.set_mode("idle")
@@ -113,7 +114,7 @@ def measure_builds(
 
             monitor.set_mode(f"base_splits_{n}")
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === base: {n} split(s) ===")
-            br = bb.run_one(model, n, is_local, source_image)
+            br = bb.run_one(model, n, cfg, source_image)
             results_base.append((n, br))
 
             if n < max_splits:
@@ -125,25 +126,25 @@ def measure_builds(
 
     # Non-monitored path: original sequential mode-by-mode execution
     log.info(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs builds ===")
-    results_2dfs = b2.run(model, max_splits, is_local, source_image)
+    results_2dfs = b2.run(model, max_splits, cfg, source_image)
 
     log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
     time.sleep(SLEEP_SECONDS)
 
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running 2dfs+stargz builds ===")
-    results_2dfs_stargz = b2s.run(model, max_splits, is_local, source_image)
+    results_2dfs_stargz = b2s.run(model, max_splits, cfg, source_image)
 
     log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
     time.sleep(SLEEP_SECONDS)
 
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running stargz builds ===")
-    results_stargz = bs.run(model, max_splits, is_local, source_image)
+    results_stargz = bs.run(model, max_splits, cfg, source_image)
 
     log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
     time.sleep(SLEEP_SECONDS)
 
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running base builds ===")
-    results_base = bb.run(model, max_splits, is_local, source_image)
+    results_base = bb.run(model, max_splits, cfg, source_image)
 
     return results_2dfs, results_2dfs_stargz, results_stargz, results_base
 
@@ -247,7 +248,7 @@ def plot(
     ax.set_xticklabels([str(n) for n in splits])
     ax.set_xlabel("Number of splits")
     ax.set_ylabel("Time (s)")
-    ax.set_title("Build stages breakdown (total wall clock)")
+    ax.set_title("Build stages breakdown")
 
     # Method labels below x-axis
     for j in range(n_splits):
@@ -374,7 +375,7 @@ def main():
 
     for model, base_image in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
-        prepare_local_registry(base_image, registry(IS_LOCAL))
+        prepare_local_registry(base_image, registry(CFG))
 
         monitor = None
         if WITH_RESOURCE:
@@ -382,7 +383,7 @@ def main():
             monitor.start()
 
         results_2dfs, results_2dfs_stargz, results_stargz, results_base = measure_builds(
-            model, MAX_SPLITS, base_image, IS_LOCAL, monitor=monitor,
+            model, MAX_SPLITS, base_image, CFG, monitor=monitor,
         )
 
         if monitor:

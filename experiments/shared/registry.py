@@ -4,22 +4,20 @@ import urllib.error
 import urllib.request
 
 from shared import log
-
-REGISTRY_LOCAL = "localhost:5000"
-REGISTRY_REMOTE = "10.10.1.2:5000"
+from shared.config import EnvConfig
 
 
-def registry(is_local: bool) -> str:
-    return REGISTRY_LOCAL if is_local else REGISTRY_REMOTE
+def registry(cfg: EnvConfig) -> str:
+    return cfg.registry
 
 
-def base_image(source_image: str, is_local: bool) -> str:
+def base_image(source_image: str, cfg: EnvConfig) -> str:
     """Derive the esgz image ref in the target registry from a source image.
 
-    ('docker.io/tensorflow/tensorflow', True)  -> 'localhost:5000/tensorflow:latest-esgz'
-    ('docker.io/library/python:3.12-slim', False) -> '10.10.1.2:5000/python:3.12-slim-esgz'
+    ('docker.io/tensorflow/tensorflow', cfg_local)  -> 'localhost:5000/tensorflow:latest-esgz'
+    ('docker.io/library/python:3.12-slim', cfg_remote) -> '131.159.25.169:5000/python:3.12-slim-esgz'
     """
-    return _local_esgz_tag(source_image, registry(is_local))
+    return _local_esgz_tag(source_image, cfg.registry)
 
 
 def image_slug(source_image: str) -> str:
@@ -34,10 +32,20 @@ def image_slug(source_image: str) -> str:
     return name.replace(":", "-")
 
 
-def tdfs_cmd(is_local: bool, work_dir: str) -> list[str]:
-    if is_local:
-        return [os.path.join(work_dir, "tdfs")]
-    return ["sudo", "env", "TMPDIR=/mydata/tmp", "tdfs", "--home-dir", "/mydata/.2dfs"]
+def tdfs_cmd(cfg: EnvConfig, work_dir: str) -> list[str]:
+    binary = cfg.tdfs_binary
+    if binary.startswith("./"):
+        # Local binary relative to work_dir, no sudo
+        return [os.path.join(work_dir, binary[2:])]
+    else:
+        # Global binary: wrap with sudo + env
+        cmd = ["sudo", "env"]
+        if cfg.tmpdir:
+            cmd.append(f"TMPDIR={cfg.tmpdir}")
+        cmd.append(binary)
+        if cfg.tdfs_home_dir:
+            cmd += ["--home-dir", cfg.tdfs_home_dir]
+        return cmd
 
 
 def _local_esgz_tag(source_image: str, registry_url: str) -> str:
@@ -68,7 +76,7 @@ def _image_exists_in_registry(registry_url: str, name: str, tag: str) -> bool:
 
 def prepare_local_registry(
     source_image: str,
-    registry_url: str = REGISTRY_LOCAL,
+    registry_url: str,
 ) -> str:
     """Ensure esgz base image exists in local registry.
 

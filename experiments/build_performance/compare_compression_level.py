@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import matplotlib.pyplot as plt
 
 from shared import log
+from shared.config import load_config
 from shared.registry import prepare_local_registry, registry, base_image, tdfs_cmd, image_slug
 from shared.build_result import BuildResult
 from shared.tdfs_parser import parse_tdfs_output
@@ -23,9 +24,7 @@ CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "compression")
 MODEL = "openai-community/gpt2-medium"
 SOURCE_IMAGE = "docker.io/library/python:3.12-slim"
 MAX_SPLITS = 2
-IS_LOCAL = False
-
-CLEAR_CACHE_CMD = "sudo rm -rf /mydata/.2dfs/blobs/* /mydata/.2dfs/uncompressed-keys/* /mydata/.2dfs/index/*"
+CFG = load_config()
 
 LEVELS = [
     ("level_n1", "level -1 (default)", "-1"),
@@ -40,23 +39,27 @@ class RunResult:
 
 
 def clear_cache() -> None:
+    home = CFG.tdfs_home_dir or "~/.2dfs"
+    cmd = f"rm -rf {home}/blobs/* {home}/uncompressed-keys/* {home}/index/*"
+    if not CFG.tdfs_binary.startswith("./"):
+        cmd = "sudo " + cmd
     log.info("=== Clearing 2dfs cache ===")
-    subprocess.run(CLEAR_CACHE_CMD, shell=True, check=True, capture_output=not log.VERBOSE)
+    subprocess.run(cmd, shell=True, check=True, capture_output=not log.VERBOSE)
 
 
 def build_one(n: int, level: str) -> BuildResult:
-    target = f"{registry(IS_LOCAL)}/compression-test-level{level.replace('-', 'n')}:{n}"
-    cmd = tdfs_cmd(IS_LOCAL, SCRIPT_DIR) + [
+    target = f"{registry(CFG)}/compression-test-level{level.replace('-', 'n')}:{n}"
+    cmd = tdfs_cmd(CFG, SCRIPT_DIR) + [
         "build",
         "--platforms", "linux/amd64",
         "--force-http",
         "-f", "2dfs.json",
         "--compression-level", level,
-        base_image(SOURCE_IMAGE, IS_LOCAL),
+        base_image(SOURCE_IMAGE, CFG),
         target,
     ]
 
-    env = {**os.environ, "TMPDIR": "/mydata/tmp"}
+    env = {**os.environ, "TMPDIR": CFG.tmpdir} if CFG.tmpdir else None
     start = time.perf_counter()
     result = subprocess.run(cmd, cwd=SCRIPT_DIR, capture_output=True, text=True, env=env)
     elapsed = time.perf_counter() - start
@@ -76,7 +79,7 @@ def build_one(n: int, level: str) -> BuildResult:
 
 def get_image_size() -> str:
     """Run tdfs image ls and parse the Size column from the OCI+2DFS row."""
-    cmd = tdfs_cmd(IS_LOCAL, SCRIPT_DIR) + ["image", "ls"]
+    cmd = tdfs_cmd(CFG, SCRIPT_DIR) + ["image", "ls"]
     result = subprocess.run(cmd, cwd=SCRIPT_DIR, capture_output=True, text=True)
     log.info(result.stdout)
     for line in result.stdout.splitlines():
@@ -98,7 +101,7 @@ def run_level(key: str, label: str, level: str) -> list[tuple[int, RunResult]]:
     for n in range(1, MAX_SPLITS + 1):
         log.info(f"\n=== Preparing {n} split(s) ===")
         subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
-        prepare(MODEL, n, SOURCE_IMAGE, IS_LOCAL)
+        prepare(MODEL, n, SOURCE_IMAGE, CFG)
         br = build_one(n, level)
         size = get_image_size()
         log.result(f"  image size: {size}")
@@ -181,7 +184,7 @@ def plot(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> Non
 def main():
     log.set_verbose(True)
 
-    prepare_local_registry(SOURCE_IMAGE, registry(IS_LOCAL))
+    prepare_local_registry(SOURCE_IMAGE, registry(CFG))
 
     all_results: list[tuple[str, str, list[tuple[int, RunResult]]]] = []
     for key, label, level in LEVELS:

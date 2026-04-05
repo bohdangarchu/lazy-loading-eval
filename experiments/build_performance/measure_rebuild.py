@@ -8,6 +8,7 @@ import numpy as np
 
 from shared import log
 from shared.build_result import BuildResult
+from shared.config import load_config
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -23,11 +24,11 @@ CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "rebuild")
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
     ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),     # ~1.4 GB     ~700 MB
-    ("facebook/opt-1.3b", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
+    # ("facebook/opt-1.3b", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
 N_SPLITS = 10
-IS_LOCAL = False
+CFG = load_config()
 VERBOSE = True
 SLEEP_SECONDS = 5
 DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
@@ -35,10 +36,10 @@ R_VALUES = [2, 4, 6, 8, 10]
 
 def make_methods(base_image: str):
     return [
-        ("2dfs", lambda n, bi=base_image: b2.build_only(n, IS_LOCAL, bi), lambda: b2.clear_cache(IS_LOCAL)),
-        ("2dfs_stargz", lambda n, bi=base_image: b2s.build_only(n, IS_LOCAL, bi), lambda: b2s.clear_cache(IS_LOCAL)),
-        ("stargz", lambda n: bs.build_only(n, IS_LOCAL), lambda: bs.clear_cache()),
-        ("base", lambda n: bb.build_only(n, IS_LOCAL), lambda: bb.clear_cache()),
+        ("2dfs", lambda n, bi=base_image: b2.build_only(n, CFG, bi), lambda: b2.clear_cache(CFG)),
+        ("2dfs_stargz", lambda n, bi=base_image: b2s.build_only(n, CFG, bi), lambda: b2s.clear_cache(CFG)),
+        ("stargz", lambda n: bs.build_only(n, CFG), lambda: bs.clear_cache()),
+        ("base", lambda n: bb.build_only(n, CFG), lambda: bb.clear_cache()),
     ]
 
 
@@ -168,12 +169,12 @@ def main():
 
     for model, base_image in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
-        prepare_local_registry(base_image, registry(IS_LOCAL))
+        prepare_local_registry(base_image, registry(CFG))
 
         methods = make_methods(base_image)
 
         log.info(f"Preparing model with {N_SPLITS} splits...")
-        chunk_paths = prepare(model, N_SPLITS, base_image, IS_LOCAL)
+        chunk_paths = prepare(model, N_SPLITS, base_image, CFG)
 
         results = measure_rebuilds(chunk_paths, methods)
 

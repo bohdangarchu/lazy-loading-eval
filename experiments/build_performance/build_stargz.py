@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from shared import log
 from shared.build_result import BuildResult
 from shared.buildctl_parser import parse_buildctl_plain
+from shared.config import EnvConfig, load_config
 from shared.registry import registry
 from build_performance.prepare import prepare
 
@@ -19,8 +20,8 @@ def clear_cache() -> None:
     subprocess.run(["sudo", "buildctl", "prune", "--all"], check=True, capture_output=not log.VERBOSE)
 
 
-def build_only(n: int, is_local: bool = True) -> BuildResult:
-    target = f"{registry(is_local)}/build-perf-stargz-only:{n}"
+def build_only(n: int, cfg: EnvConfig = None) -> BuildResult:
+    target = f"{registry(cfg)}/build-perf-stargz-only:{n}"
     cmd = [
         "sudo", "buildctl", "build",
         "--progress=plain",
@@ -50,22 +51,22 @@ def build_only(n: int, is_local: bool = True) -> BuildResult:
     return br
 
 
-def run_one(model: str, n: int, is_local: bool = True, source_image: str = "") -> BuildResult:
+def run_one(model: str, n: int, cfg: EnvConfig = None, source_image: str = "") -> BuildResult:
     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
     subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
-    prepare(model, n, source_image, is_local)
+    prepare(model, n, source_image, cfg)
 
-    br = build_only(n, is_local)
+    br = build_only(n, cfg)
 
     clear_cache()
     return br
 
 
-def run(model: str, max_splits: int, is_local: bool = True, source_image: str = "") -> list[tuple[int, BuildResult]]:
+def run(model: str, max_splits: int, cfg: EnvConfig = None, source_image: str = "") -> list[tuple[int, BuildResult]]:
     clear_cache()
     results = []
     for n in range(1, max_splits + 1):
-        br = run_one(model, n, is_local, source_image)
+        br = run_one(model, n, cfg, source_image)
         results.append((n, br))
     return results
 
@@ -76,7 +77,7 @@ def main():
     parser.add_argument("--max-splits", type=int, required=True, help="Maximum number of splits")
     args = parser.parse_args()
 
-    results = run(args.model, args.max_splits)
+    results = run(args.model, args.max_splits, load_config())
 
     log.result("\n=== Results ===")
     log.result(f"{'splits':>8}  {'seconds':>10}")
