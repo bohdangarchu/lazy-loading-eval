@@ -14,6 +14,13 @@ from pull_performance.images import (
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def _clear_2dfs_cache(cfg: EnvConfig) -> None:
+    log.info("Clearing 2dfs cache...")
+    tdfs_home = cfg.tdfs_home_dir or os.path.expanduser("~/.2dfs")
+    for subdir in ("blobs", "uncompressed-keys", "index"):
+        subprocess.run(f"rm -rf {tdfs_home}/{subdir}/*", shell=True, check=True)
+
+
 # ── chunks ─────────────────────────────────────────────────────────
 
 
@@ -139,14 +146,17 @@ def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_
 
 
 def prepare_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+    _clear_2dfs_cache(cfg)
     _build_and_push_2dfs(chunk_paths, source_image, cfg)
 
 
 def prepare_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+    _clear_2dfs_cache(cfg)
     _build_and_push_2dfs_stargz(chunk_paths, source_image, cfg)
 
 
 def prepare_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+    _clear_2dfs_cache(cfg)
     _build_and_push_2dfs_stargz_zstd(chunk_paths, source_image, cfg)
 
 
