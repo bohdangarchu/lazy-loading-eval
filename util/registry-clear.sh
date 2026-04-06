@@ -4,15 +4,15 @@ set -euox pipefail
 VOLUME_NAME="2dfs-registry-data"
 
 # Stop and remove registry container
-EXISTING=$(docker ps -a --format '{{.Names}}' | grep tdfs-registry || true)
+EXISTING=$(sudo docker ps -a --format '{{.Names}}' | grep tdfs-registry || true)
 if [ -n "$EXISTING" ]; then
-  docker rm -f "$EXISTING"
+  sudo docker rm -f "$EXISTING"
 fi
 
 # Remove the registry data volume
-docker volume rm "$VOLUME_NAME" 2>/dev/null || true
+sudo docker volume rm "$VOLUME_NAME" 2>/dev/null || true
 
 # Prune any anonymous/orphan volumes
-docker volume prune -f
+sudo docker volume prune -f
 
 echo "Registry stopped and volumes cleared. Run registry-start.sh to start fresh."

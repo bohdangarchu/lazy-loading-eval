@@ -6,16 +6,16 @@ IMAGE_NAME="tdfs-registry-1"
 VOLUME_NAME="2dfs-registry-data"
 
 # Build the registry image
-docker build -t "$IMAGE_NAME" "$REGISTRY_SRC"
+sudo docker build -t "$IMAGE_NAME" "$REGISTRY_SRC"
 
 # Remove existing container if any
-EXISTING=$(docker ps -a --format '{{.Names}}' | grep tdfs-registry || true)
+EXISTING=$(sudo docker ps -a --format '{{.Names}}' | grep tdfs-registry || true)
 if [ -n "$EXISTING" ]; then
-  docker rm -f "$EXISTING"
+  sudo docker rm -f "$EXISTING"
 fi
 
 # Run the registry with a named volume
-docker run -d \
+sudo docker run -d \
   --name tdfs-registry-1 \
   -e OTEL_TRACES_EXPORTER=none \
   -v "$VOLUME_NAME":/var/lib/registry \
