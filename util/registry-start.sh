@@ -6,16 +6,16 @@ IMAGE_NAME="tdfs-registry-1"
 VOLUME_NAME="2dfs-registry-data"
 
 # Build the registry image
-sudo nerdctl build -t "$IMAGE_NAME" "$REGISTRY_SRC"
+docker build -t "$IMAGE_NAME" "$REGISTRY_SRC"
 
 # Remove existing container if any
-EXISTING=$(sudo nerdctl ps -a --format '{{.Names}}' | grep tdfs-registry || true)
+EXISTING=$(docker ps -a --format '{{.Names}}' | grep tdfs-registry || true)
 if [ -n "$EXISTING" ]; then
-  sudo nerdctl rm -f "$EXISTING"
+  docker rm -f "$EXISTING"
 fi
 
 # Run the registry with a named volume
-sudo nerdctl run -d \
+docker run -d \
   --name tdfs-registry-1 \
   -e OTEL_TRACES_EXPORTER=none \
   -v "$VOLUME_NAME":/var/lib/registry \
