@@ -18,7 +18,7 @@ def _clear_2dfs_cache(cfg: EnvConfig) -> None:
     log.info("Clearing 2dfs cache...")
     tdfs_home = cfg.tdfs_home_dir or os.path.expanduser("~/.2dfs")
     for subdir in ("blobs", "uncompressed-keys", "index"):
-        subprocess.run(f"rm -rf {tdfs_home}/{subdir}/*", shell=True, check=True)
+        subprocess.run(f"sudo rm -rf {tdfs_home}/{subdir}/*", shell=True, check=True)
 
 
 # ── chunks ─────────────────────────────────────────────────────────
