@@ -99,8 +99,7 @@ def _timed_run(cmd: list[str]) -> float:
 
 def _run_cmd(n: int) -> list[str]:
     files = " ".join(f"/chunk{i+1}.bin" for i in range(n))
-    # simulate loading model files into memory
-    return ["python3", "-c", f"d=[open(f,'rb').read() for f in '{files}'.split()]"]
+    return ["sh", "-c", f"cat {files} > /dev/null"]
 
 
 # ── pull functions ─────────────────────────────────────────────────
