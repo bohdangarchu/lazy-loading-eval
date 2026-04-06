@@ -15,6 +15,7 @@ from shared.config import load_config
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
+from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_stargz as bs
 from build_performance import build_base as bb
 
@@ -37,14 +38,15 @@ CFG = load_config()
 WITH_RESOURCE = False
 VERBOSE = True
 SLEEP_SECONDS = 5
-MODES = ["2dfs", "2dfs-stargz", "stargz", "base"]
+MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 # MODES = ["2dfs-stargz"]
 
 _MODE_COLORS = {
-    "2dfs":        "#1f77b4",
-    "2dfs-stargz": "#ff7f0e",
-    "stargz":      "#2ca02c",
-    "base":        "#d62728",
+    "2dfs":             "#1f77b4",
+    "2dfs-stargz":      "#ff7f0e",
+    "2dfs-stargz-zstd": "#9467bd",
+    "stargz":           "#2ca02c",
+    "base":             "#d62728",
 }
 
 
@@ -83,6 +85,8 @@ def _clear_cache(mode: str, cfg) -> None:
         b2.clear_cache(cfg)
     elif mode == "2dfs-stargz":
         b2s.clear_cache(cfg)
+    elif mode == "2dfs-stargz-zstd":
+        b2sz.clear_cache(cfg)
     elif mode == "stargz":
         bs.clear_cache()
     elif mode == "base":
@@ -96,6 +100,8 @@ def _run_builds(mode: str, model: str, max_splits: int, cfg, source_image: str) 
         return b2.run(model, max_splits, cfg, source_image)
     elif mode == "2dfs-stargz":
         return b2s.run(model, max_splits, cfg, source_image)
+    elif mode == "2dfs-stargz-zstd":
+        return b2sz.run(model, max_splits, cfg, source_image)
     elif mode == "stargz":
         return bs.run(model, max_splits, cfg, source_image)
     elif mode == "base":
@@ -108,6 +114,8 @@ def _run_one(mode: str, model: str, n: int, cfg, source_image: str) -> BuildResu
         return b2.run_one(model, n, cfg, source_image)
     elif mode == "2dfs-stargz":
         return b2s.run_one(model, n, cfg, source_image)
+    elif mode == "2dfs-stargz-zstd":
+        return b2sz.run_one(model, n, cfg, source_image)
     elif mode == "stargz":
         return bs.run_one(model, n, cfg, source_image)
     elif mode == "base":

@@ -12,6 +12,7 @@ from shared.config import load_config
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
+from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_base as bb
 from build_performance import build_stargz as bs
 from build_performance.prepare import prepare
@@ -33,22 +34,24 @@ VERBOSE = True
 SLEEP_SECONDS = 5
 DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
 R_VALUES = [2, 4, 6, 8, 10]
-MODES = ["2dfs", "2dfs-stargz", "stargz", "base"]
+MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 # MODES = ["2dfs-stargz"]
 
 _MODE_COLORS = {
-    "2dfs":        "#1f77b4",
-    "2dfs-stargz": "#ff7f0e",
-    "stargz":      "#2ca02c",
-    "base":        "#d62728",
+    "2dfs":             "#1f77b4",
+    "2dfs-stargz":      "#ff7f0e",
+    "2dfs-stargz-zstd": "#9467bd",
+    "stargz":           "#2ca02c",
+    "base":             "#d62728",
 }
 
 def make_methods(base_image: str):
     all_methods = [
-        ("2dfs",        lambda n, bi=base_image: b2.build_only(n, CFG, bi),  lambda: b2.clear_cache(CFG)),
-        ("2dfs-stargz", lambda n, bi=base_image: b2s.build_only(n, CFG, bi), lambda: b2s.clear_cache(CFG)),
-        ("stargz",      lambda n: bs.build_only(n, CFG),                     lambda: bs.clear_cache()),
-        ("base",        lambda n: bb.build_only(n, CFG),                     lambda: bb.clear_cache()),
+        ("2dfs",             lambda n, bi=base_image: b2.build_only(n, CFG, bi),   lambda: b2.clear_cache(CFG)),
+        ("2dfs-stargz",      lambda n, bi=base_image: b2s.build_only(n, CFG, bi),  lambda: b2s.clear_cache(CFG)),
+        ("2dfs-stargz-zstd", lambda n, bi=base_image: b2sz.build_only(n, CFG, bi), lambda: b2sz.clear_cache(CFG)),
+        ("stargz",           lambda n: bs.build_only(n, CFG),                      lambda: bs.clear_cache()),
+        ("base",             lambda n: bb.build_only(n, CFG),                      lambda: bb.clear_cache()),
     ]
     return [(name, bf, cf) for name, bf, cf in all_methods if name in MODES]
 
