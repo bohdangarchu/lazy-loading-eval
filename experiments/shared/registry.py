@@ -193,9 +193,9 @@ def prepare_local_registry(
     )
 
     # ── plain ──────────────────────────────────────────────────────────
-    log.info(f"Tagging plain: {source_image} -> {plain_tag}...")
+    log.info(f"Converting to OCI: {source_image} -> {plain_tag}...")
     subprocess.run(
-        ["sudo", "nerdctl", "tag", source_image, plain_tag],
+        ["sudo", "nerdctl", "image", "convert", "--oci", source_image, plain_tag],
         check=True, capture_output=True,
     )
     log.info(f"Pushing {plain_tag} to registry...")
