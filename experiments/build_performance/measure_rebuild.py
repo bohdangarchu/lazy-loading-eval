@@ -9,6 +9,7 @@ import numpy as np
 from shared import log
 from shared.build_result import BuildResult
 from shared.config import load_config
+from shared.mode_colors import MODE_COLORS
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -29,6 +30,7 @@ EXPERIMENTS = [
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
 N_SPLITS = 10
+N_RUNS = 5
 CFG = load_config()
 VERBOSE = True
 SLEEP_SECONDS = 5
@@ -36,14 +38,6 @@ DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
 R_VALUES = [2, 4, 6, 8, 10]
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 # MODES = ["2dfs-stargz"]
-
-_MODE_COLORS = {
-    "2dfs":             "#1f77b4",
-    "2dfs-stargz":      "#ff7f0e",
-    "2dfs-stargz-zstd": "#9467bd",
-    "stargz":           "#2ca02c",
-    "base":             "#d62728",
-}
 
 def make_methods(base_image: str):
     all_methods = [
@@ -73,44 +67,47 @@ def get_chunks_to_mutate(chunk_paths: list[str], r: int, direction: str) -> list
 def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
     results = []
 
-    for r in R_VALUES:
-        for direction in DIRECTIONS:
-            targets = get_chunks_to_mutate(chunk_paths, r, direction)
+    for run in range(N_RUNS):
+        log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{N_RUNS} ===")
+        for r in R_VALUES:
+            for direction in DIRECTIONS:
+                targets = get_chunks_to_mutate(chunk_paths, r, direction)
 
-            for method_name, build_fn, clear_fn in methods:
-                log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
-                     f"=== r={r}, {direction}, {method_name} ===")
+                for method_name, build_fn, clear_fn in methods:
+                    log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
+                         f"=== r={r}, {direction}, {method_name} ===")
 
-                # clean slate: clear cache, build v1
-                t0 = time.time()
-                clear_fn()
-                log.info(f"Cache clear took {time.time() - t0:.2f}s")
-                build_fn(N_SPLITS)
+                    # clean slate: clear cache, build v1
+                    t0 = time.time()
+                    clear_fn()
+                    log.info(f"Cache clear took {time.time() - t0:.2f}s")
+                    build_fn(N_SPLITS)
 
-                # mutate r chunks
-                for path in targets:
-                    mutate_chunk(path)
+                    # mutate r chunks
+                    for path in targets:
+                        mutate_chunk(path)
 
-                # rebuild v2 (timed)
-                br: BuildResult = build_fn(N_SPLITS)
+                    # rebuild v2 (timed)
+                    br: BuildResult = build_fn(N_SPLITS)
 
-                # restore chunks
-                for path in targets:
-                    mutate_chunk(path)
+                    # restore chunks
+                    for path in targets:
+                        mutate_chunk(path)
 
-                results.append({
-                    "r": r,
-                    "direction": direction,
-                    "method": method_name,
-                    "rebuild_s": br.total_s,
-                    "pull_s": br.pull_s,
-                    "context_transfer_s": br.context_transfer_s,
-                    "build_s": br.build_s,
-                    "export_s": br.export_s,
-                })
+                    results.append({
+                        "run": run,
+                        "r": r,
+                        "direction": direction,
+                        "method": method_name,
+                        "rebuild_s": br.total_s,
+                        "pull_s": br.pull_s,
+                        "context_transfer_s": br.context_transfer_s,
+                        "build_s": br.build_s,
+                        "export_s": br.export_s,
+                    })
 
-                log.result(f"Rebuild time: {br.total_s:.2f}s")
-                time.sleep(SLEEP_SECONDS)
+                    log.result(f"Rebuild time: {br.total_s:.2f}s")
+                    time.sleep(SLEEP_SECONDS)
 
     return results
 
@@ -121,7 +118,7 @@ def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
     img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     path = os.path.join(RESULTS_DIR, f"{slug}_{img_slug}_rebuild_n{n}_{ts}.csv")
-    fieldnames = ["r", "direction", "method", "rebuild_s",
+    fieldnames = ["run", "r", "direction", "method", "rebuild_s",
                   "pull_s", "context_transfer_s", "build_s", "export_s"]
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -144,32 +141,53 @@ def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
     img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
+    n_modes = len(MODES)
+    bar_width = 0.8 / n_modes
+
     fig, (ax_ttb, ax_btt) = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
 
     for ax, direction, title in [
         (ax_ttb, "top_to_bottom", "Top to Bottom"),
         (ax_btt, "bottom_to_top", "Bottom to Top"),
     ]:
-        for mode in MODES:
-            subset = [row for row in results if row["direction"] == direction and row["method"] == mode]
-            rs = [row["r"] for row in subset]
-            times = [row["rebuild_s"] - row["pull_s"] for row in subset]
-            ax.plot(rs, times, marker="o", label=mode, color=_MODE_COLORS[mode])
+        for i, mode in enumerate(MODES):
+            for j, r in enumerate(R_VALUES):
+                group = [
+                    row for row in results
+                    if row["direction"] == direction and row["method"] == mode and row["r"] == r
+                ]
+                rebuild_vals = [row["rebuild_s"] - row["pull_s"] for row in group]
+                if not rebuild_vals:
+                    continue
 
+                x = j + i * bar_width
+                x_center = x + bar_width / 2
+                median_val = float(np.median(rebuild_vals))
+                label = mode if j == 0 else None
+                ax.bar(x, median_val, bar_width, color=MODE_COLORS[mode], label=label,
+                       edgecolor="black", linewidth=0.5)
+
+                for k, val in enumerate(rebuild_vals):
+                    jitter = (k - len(rebuild_vals) / 2) * 0.015
+                    ax.scatter(x_center + jitter, val, color="black", s=12, zorder=4)
+
+        center_offset = (n_modes - 1) * bar_width / 2
+        ax.set_xticks([j + center_offset for j in range(len(R_VALUES))])
+        ax.set_xticklabels([str(r) for r in R_VALUES])
         ax.set_xlabel("Chunks mutated (r)")
         ax.set_title(f"{title}")
-        ax.set_xticks(R_VALUES)
-        ax.legend()
-        ax.grid(True, linestyle="--", alpha=0.5)
+        ax.legend(fontsize="small")
+        ax.grid(True, linestyle="--", alpha=0.5, axis="y")
 
     ax_ttb.set_ylabel("Rebuild time (s)")
-    fig.suptitle(f"Incremental rebuild performance (n={n})")
+    fig.suptitle(f"Incremental rebuild performance (n={n}, median, {N_RUNS} runs, dots = individual runs)")
     fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
              fontsize=8, verticalalignment="bottom", family="monospace")
     fig.tight_layout()
 
     path = os.path.join(CHARTS_DIR, f"{slug}_{img_slug}_rebuild_n{n}_{ts}.png")
     fig.savefig(path, dpi=150)
+    plt.close(fig)
     log.result(f"Chart saved to {path}")
 
 
@@ -190,10 +208,10 @@ def main():
         save_csv(results, model, N_SPLITS, base_image)
         plot(results, model, N_SPLITS, base_image)
 
-        log.result(f"\n{'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild':>8}  {'pull':>6}  {'ctx':>6}  {'build':>6}  {'export':>6}")
-        log.result("-" * 76)
+        log.result(f"\n{'run':>4}  {'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild':>8}  {'pull':>6}  {'ctx':>6}  {'build':>6}  {'export':>6}")
+        log.result("-" * 84)
         for row in results:
-            log.result(f"{row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  "
+            log.result(f"{row['run']:>4}  {row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  "
                        f"{row['rebuild_s']:>8.2f}  {row['pull_s']:>6.2f}  {row['context_transfer_s']:>6.2f}  "
                        f"{row['build_s']:>6.2f}  {row['export_s']:>6.2f}")
 

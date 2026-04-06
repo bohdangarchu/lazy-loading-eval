@@ -12,6 +12,7 @@ import psutil
 from shared import log
 from shared.build_result import BuildResult
 from shared.config import load_config
+from shared.mode_colors import MODE_COLORS
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -28,26 +29,19 @@ CHARTS_BUILD_DIR = os.path.join(CHARTS_DIR, "build")
 CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 
 EXPERIMENTS = [
-    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
     # ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB     ~700 MB
-    ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
-    ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
+    # ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
+    # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
-MAX_SPLITS = 10
+MAX_SPLITS = 3
+N_RUNS = 3
 CFG = load_config()
 WITH_RESOURCE = True
 VERBOSE = True
 SLEEP_SECONDS = 5
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 # MODES = ["2dfs-stargz"]
-
-_MODE_COLORS = {
-    "2dfs":             "#1f77b4",
-    "2dfs-stargz":      "#ff7f0e",
-    "2dfs-stargz-zstd": "#9467bd",
-    "stargz":           "#2ca02c",
-    "base":             "#d62728",
-}
 
 
 class ResourceMonitor:
@@ -77,9 +71,6 @@ class ResourceMonitor:
             self._samples.append((ts, cpu, mem, self._mode))
 
 
-ResultList = list[tuple[int, BuildResult]]
-
-
 def _clear_cache(mode: str, cfg) -> None:
     if mode == "2dfs":
         b2.clear_cache(cfg)
@@ -93,20 +84,6 @@ def _clear_cache(mode: str, cfg) -> None:
         bb.clear_cache()
     else:
         raise ValueError(f"Unknown mode: {mode}")
-
-
-def _run_builds(mode: str, model: str, max_splits: int, cfg, source_image: str) -> ResultList:
-    if mode == "2dfs":
-        return b2.run(model, max_splits, cfg, source_image)
-    elif mode == "2dfs-stargz":
-        return b2s.run(model, max_splits, cfg, source_image)
-    elif mode == "2dfs-stargz-zstd":
-        return b2sz.run(model, max_splits, cfg, source_image)
-    elif mode == "stargz":
-        return bs.run(model, max_splits, cfg, source_image)
-    elif mode == "base":
-        return bb.run(model, max_splits, cfg, source_image)
-    raise ValueError(f"Unknown mode: {mode}")
 
 
 def _run_one(mode: str, model: str, n: int, cfg, source_image: str) -> BuildResult:
@@ -126,131 +103,108 @@ def _run_one(mode: str, model: str, n: int, cfg, source_image: str) -> BuildResu
 def measure_builds(
     model: str, max_splits: int, source_image: str, cfg=CFG,
     monitor: ResourceMonitor | None = None,
-) -> dict[str, ResultList]:
-    if monitor:
-        results: dict[str, ResultList] = {mode: [] for mode in MODES}
+) -> list[dict]:
+    results: list[dict] = []
 
-        for mode in MODES:
-            _clear_cache(mode, cfg)
-
+    for run in range(N_RUNS):
+        log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{N_RUNS} ===")
         for n in range(1, max_splits + 1):
             for i, mode in enumerate(MODES):
                 monitor_key = mode.replace("-", "_")
-                monitor.set_mode(f"{monitor_key}_splits_{n}")
+                if monitor:
+                    monitor.set_mode(f"{monitor_key}_splits_{n}_run_{run}")
                 log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === {mode}: {n} split(s) ===")
+                _clear_cache(mode, cfg)
                 br = _run_one(mode, model, n, cfg, source_image)
-                results[mode].append((n, br))
-
-                if i < len(MODES) - 1 or n < max_splits:
+                if monitor:
                     monitor.set_mode("idle")
-                    log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
+                results.append({
+                    "run": run,
+                    "splits": n,
+                    "mode": mode,
+                    "total_s": br.total_s,
+                    "pull_s": br.pull_s,
+                    "ctx_s": br.context_transfer_s,
+                    "build_s": br.build_s,
+                    "export_s": br.export_s,
+                })
+
+                is_last = (i == len(MODES) - 1) and (n == max_splits) and (run == N_RUNS - 1)
+                if not is_last:
+                    log.info(f"\nSleeping {SLEEP_SECONDS}s before next...")
                     time.sleep(SLEEP_SECONDS)
-
-        return results
-
-    # Non-monitored path: sequential mode-by-mode execution
-    results = {}
-    for i, mode in enumerate(MODES):
-        log.info(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Running {mode} builds ===")
-        results[mode] = _run_builds(mode, model, max_splits, cfg, source_image)
-        if i < len(MODES) - 1:
-            log.info(f"\nSleeping {SLEEP_SECONDS}s before next mode...")
-            time.sleep(SLEEP_SECONDS)
 
     return results
 
 
-def save_csv(
-    splits: list[int],
-    results: dict[str, list[BuildResult]],
-    model: str,
-    base_image: str,
-) -> None:
+def save_csv(results: list[dict], model: str, base_image: str) -> None:
     os.makedirs(RESULTS_BUILD_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
     img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(RESULTS_BUILD_DIR, f"{model_slug}_{img_slug}_splits_{len(splits)}_{ts}.csv")
+    output_path = os.path.join(RESULTS_BUILD_DIR, f"{model_slug}_{img_slug}_{ts}.csv")
 
-    header = ["splits"]
-    for mode in MODES:
-        slug = mode.replace("-", "_")
-        header.extend([f"{slug}_total_s", f"{slug}_pull_s", f"{slug}_ctx_s", f"{slug}_build_s", f"{slug}_export_s"])
-
+    fieldnames = ["run", "splits", "mode", "total_s", "pull_s", "ctx_s", "build_s", "export_s"]
     with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(header)
-        for i, n in enumerate(splits):
-            row: list = [n]
-            for mode in MODES:
-                br = results[mode][i]
-                row.extend([f"{br.total_s:.4f}", f"{br.pull_s:.4f}", f"{br.context_transfer_s:.4f}",
-                            f"{br.build_s:.4f}", f"{br.export_s:.4f}"])
-            writer.writerow(row)
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in results:
+            writer.writerow({
+                **row,
+                "total_s": f"{row['total_s']:.4f}",
+                "pull_s": f"{row['pull_s']:.4f}",
+                "ctx_s": f"{row['ctx_s']:.4f}",
+                "build_s": f"{row['build_s']:.4f}",
+                "export_s": f"{row['export_s']:.4f}",
+            })
     log.result(f"Results saved to {output_path}")
 
 
-def plot(
-    results: dict[str, ResultList],
-    model: str,
-    base_image: str,
-) -> None:
-    splits = [n for n, _ in next(iter(results.values()))]
+def plot(results: list[dict], model: str, base_image: str) -> None:
+    splits = sorted(set(r["splits"] for r in results))
     os.makedirs(CHARTS_BUILD_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
     img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-    # Chart 1: line chart, total
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for mode, mode_results in results.items():
-        ax.plot(splits, [br.total_s for _, br in mode_results], marker="o",
-                label=mode, color=_MODE_COLORS[mode])
-    ax.set_xlabel("Number of splits")
-    ax.set_ylabel("Build time (s)")
-    ax.set_title("Build performance (total)")
-    ax.set_xticks(splits)
-    ax.legend()
-    ax.grid(True, linestyle="--", alpha=0.5)
-    fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
-             fontsize=8, verticalalignment="bottom", family="monospace")
-    fig.tight_layout()
-    path1 = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_{img_slug}_splits_{len(splits)}_{ts}.png")
-    fig.savefig(path1, dpi=150)
-    plt.close(fig)
-    log.result(f"Chart saved to {path1}")
-
-    # Chart 2: stacked bar chart, all stages (total wall clock)
-    mode_list = list(results.keys())
-    n_modes = len(mode_list)
+    n_modes = len(MODES)
     n_splits = len(splits)
     bar_width = 0.8 / n_modes
     stage_colors = {"pull": "#4e79a7", "context": "#f28e2b", "build": "#e15759", "export": "#76b7b2"}
 
     fig, ax = plt.subplots(figsize=(max(8, n_splits * 3), 5))
-    for i, (mode, result_list) in enumerate(results.items()):
-        for j, (n, br) in enumerate(result_list):
+
+    for i, mode in enumerate(MODES):
+        for j, n in enumerate(splits):
+            group = [r for r in results if r["mode"] == mode and r["splits"] == n]
             x = j + i * bar_width
+            x_center = x + bar_width / 2
+
             bottom = 0.0
-            for stage, val in [("pull", br.pull_s), ("context", br.context_transfer_s),
-                               ("build", br.build_s), ("export", br.export_s)]:
+            for stage, key in [("pull", "pull_s"), ("context", "ctx_s"),
+                                ("build", "build_s"), ("export", "export_s")]:
+                vals = [r[key] for r in group]
+                median_val = float(np.median(vals)) if vals else 0.0
                 label = stage if (i == 0 and j == 0) else None
-                ax.bar(x, val, bar_width, bottom=bottom, color=stage_colors[stage], label=label,
-                       edgecolor="white", linewidth=0.5)
-                bottom += val
-            # total wall clock line on top
-            ax.plot(x + bar_width / 2, br.total_s, marker="_", color="black", markersize=8, markeredgewidth=1.5)
+                ax.bar(x, median_val, bar_width, bottom=bottom, color=stage_colors[stage],
+                       label=label, edgecolor="white", linewidth=0.5)
+                bottom += median_val
+
+            # overlay individual run dots at total_s
+            run_totals = [r["total_s"] for r in group]
+            for k, val in enumerate(run_totals):
+                jitter = (k - len(run_totals) / 2) * 0.015
+                ax.scatter(x_center + jitter, val, color="black", s=12, zorder=4)
 
     center_offset = (n_modes - 1) * bar_width / 2
     ax.set_xticks([j + center_offset for j in range(n_splits)])
     ax.set_xticklabels([str(n) for n in splits])
     ax.set_xlabel("Number of splits")
     ax.set_ylabel("Time (s)")
-    ax.set_title("Build stages breakdown")
+    ax.set_title(f"Build stages breakdown (median, n={N_RUNS} runs, dots = individual runs)")
 
-    # Method labels below x-axis
     for j in range(n_splits):
-        for i, mode in enumerate(mode_list):
+        for i, mode in enumerate(MODES):
             x = j + i * bar_width + bar_width / 2
             ax.text(x, -0.02, mode, ha="center", va="top", fontsize=6, rotation=45,
                     transform=ax.get_xaxis_transform())
@@ -261,10 +215,10 @@ def plot(
              fontsize=8, verticalalignment="bottom", family="monospace")
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.18)
-    path2 = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_{img_slug}_stages_{len(splits)}_{ts}.png")
-    fig.savefig(path2, dpi=150)
+    path = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_{img_slug}_stages_{n_splits}_{ts}.png")
+    fig.savefig(path, dpi=150)
     plt.close(fig)
-    log.result(f"Chart saved to {path2}")
+    log.result(f"Chart saved to {path}")
 
 
 def save_resource_csv(
@@ -292,25 +246,34 @@ def plot_resource(
         return
 
     monitor_keys = [mode.replace("-", "_") for mode in MODES]
-    colors = {mode.replace("-", "_"): _MODE_COLORS[mode] for mode in MODES}
+    colors = {mode.replace("-", "_"): MODE_COLORS[mode] for mode in MODES}
     labels = {mode.replace("-", "_"): mode for mode in MODES}
 
-    # Compute mean CPU and MEM per (base_mode, n_splits), skipping idle
-    cpu_by_split: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    mem_by_split: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    # Group samples by (base_mode, n_splits, run) → list of cpu/mem values
+    cpu_by_split_run: dict[int, dict[str, dict[int, list[float]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(list))
+    )
+    mem_by_split_run: dict[int, dict[str, dict[int, list[float]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(list))
+    )
 
     for _, cpu, mem, mode in samples:
         if mode == "idle":
             continue
-        parts = mode.rsplit("_splits_", 1)
-        if len(parts) != 2 or not parts[1].isdigit():
+        # mode format: "{base}_splits_{n}_run_{run}"
+        run_parts = mode.rsplit("_run_", 1)
+        if len(run_parts) != 2 or not run_parts[1].isdigit():
             continue
-        base = parts[0]
-        n = int(parts[1])
-        cpu_by_split[n][base].append(cpu)
-        mem_by_split[n][base].append(mem)
+        run = int(run_parts[1])
+        split_parts = run_parts[0].rsplit("_splits_", 1)
+        if len(split_parts) != 2 or not split_parts[1].isdigit():
+            continue
+        base = split_parts[0]
+        n = int(split_parts[1])
+        cpu_by_split_run[n][base][run].append(cpu)
+        mem_by_split_run[n][base][run].append(mem)
 
-    split_counts = sorted(cpu_by_split.keys())
+    split_counts = sorted(cpu_by_split_run.keys())
     if not split_counts:
         return
 
@@ -322,29 +285,46 @@ def plot_resource(
     fig, (ax_cpu, ax_mem) = plt.subplots(2, 1, figsize=(max(8, len(split_counts) * 2), 8))
 
     for i, mk in enumerate(monitor_keys):
-        cpu_means = []
-        mem_means = []
-        cpu_stds = []
-        mem_stds = []
+        cpu_run_medians_by_split = []
+        mem_run_medians_by_split = []
         for n in split_counts:
-            cpu_vals = cpu_by_split[n].get(mk, [])
-            mem_vals = mem_by_split[n].get(mk, [])
-            cpu_means.append(np.mean(cpu_vals) if cpu_vals else 0)
-            mem_means.append(np.mean(mem_vals) if mem_vals else 0)
-            cpu_stds.append(np.std(cpu_vals) if cpu_vals else 0)
-            mem_stds.append(np.std(mem_vals) if mem_vals else 0)
+            run_cpu_medians = [
+                float(np.median(vals))
+                for vals in cpu_by_split_run[n].get(mk, {}).values()
+                if vals
+            ]
+            run_mem_medians = [
+                float(np.median(vals))
+                for vals in mem_by_split_run[n].get(mk, {}).values()
+                if vals
+            ]
+            cpu_run_medians_by_split.append(run_cpu_medians)
+            mem_run_medians_by_split.append(run_mem_medians)
 
         offsets = [pos + i * bar_width for pos in x]
-        ax_cpu.bar(offsets, cpu_means, bar_width, yerr=cpu_stds, label=labels[mk],
-                   color=colors[mk], edgecolor="black", linewidth=0.5, capsize=3)
-        ax_mem.bar(offsets, mem_means, bar_width, yerr=mem_stds, label=labels[mk],
-                   color=colors[mk], edgecolor="black", linewidth=0.5, capsize=3)
+        cpu_bar_heights = [float(np.median(v)) if v else 0.0 for v in cpu_run_medians_by_split]
+        mem_bar_heights = [float(np.median(v)) if v else 0.0 for v in mem_run_medians_by_split]
+
+        ax_cpu.bar(offsets, cpu_bar_heights, bar_width, label=labels[mk],
+                   color=colors[mk], edgecolor="black", linewidth=0.5)
+        ax_mem.bar(offsets, mem_bar_heights, bar_width, label=labels[mk],
+                   color=colors[mk], edgecolor="black", linewidth=0.5)
+
+        # overlay individual run dots
+        for off, run_vals_cpu, run_vals_mem in zip(offsets, cpu_run_medians_by_split, mem_run_medians_by_split):
+            x_center = off + bar_width / 2
+            for k, val in enumerate(run_vals_cpu):
+                jitter = (k - len(run_vals_cpu) / 2) * 0.015
+                ax_cpu.scatter(x_center + jitter, val, color="black", s=12, zorder=4)
+            for k, val in enumerate(run_vals_mem):
+                jitter = (k - len(run_vals_mem) / 2) * 0.015
+                ax_mem.scatter(x_center + jitter, val, color="black", s=12, zorder=4)
 
     center_offset = (n_modes - 1) * bar_width / 2
     ax_cpu.set_xticks([pos + center_offset for pos in x])
     ax_cpu.set_xticklabels(x_labels)
     ax_cpu.set_ylabel("CPU Usage (%)")
-    ax_cpu.set_title("Resource usage during builds")
+    ax_cpu.set_title(f"Resource usage during builds (median, n={N_RUNS} runs, dots = individual runs)")
     ax_cpu.legend(fontsize="small")
     ax_cpu.grid(True, linestyle="--", alpha=0.5, axis="y")
 
@@ -365,6 +345,7 @@ def plot_resource(
     output_path = os.path.join(CHARTS_RESOURCE_DIR, f"{model_slug}_{img_slug}_resource_splits_{max_splits}_{ts}.png")
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
+    plt.close(fig)
     log.result(f"Resource chart saved to {output_path}")
 
 
@@ -387,19 +368,20 @@ def main():
             save_resource_csv(samples, model, MAX_SPLITS, base_image)
             plot_resource(samples, model, MAX_SPLITS, base_image)
 
-        splits = [n for n, _ in next(iter(results.values()))]
-        brs = {mode: [br for _, br in mode_results] for mode, mode_results in results.items()}
-
-        log.result("\n=== Comparison ===")
+        splits = sorted(set(r["splits"] for r in results))
+        log.result("\n=== Comparison (median across runs) ===")
         col = 16
-        header_modes = "  ".join(f"{m:>{col}}" for m in results)
+        header_modes = "  ".join(f"{m:>{col}}" for m in MODES)
         log.result(f"{'splits':>8}  {header_modes}")
-        log.result("-" * (10 + (col + 2) * len(results)))
-        for i, n in enumerate(splits):
-            row = "  ".join(f"{brs[m][i].total_s:>{col}.2f}" for m in results)
-            log.result(f"{n:>8}  {row}")
+        log.result("-" * (10 + (col + 2) * len(MODES)))
+        for n in splits:
+            row_vals = []
+            for m in MODES:
+                group = [r["total_s"] for r in results if r["mode"] == m and r["splits"] == n]
+                row_vals.append(f"{np.median(group):>{col}.2f}" if group else f"{'N/A':>{col}}")
+            log.result(f"{n:>8}  {'  '.join(row_vals)}")
 
-        save_csv(splits, brs, model, base_image)
+        save_csv(results, model, base_image)
         plot(results, model, base_image)
 
 
