@@ -23,8 +23,8 @@ CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "rebuild")
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),     # ~1.4 GB     ~700 MB
-    # ("facebook/opt-1.3b", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
+    # ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~1.4 GB     ~700 MB
+    # ("facebook/opt-1.3b", "docker.io/ollama/ollama"),                      # ~3.25 GB     ~3.4 GB
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
 N_SPLITS = 10
@@ -33,14 +33,24 @@ VERBOSE = True
 SLEEP_SECONDS = 5
 DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
 R_VALUES = [2, 4, 6, 8, 10]
+MODES = ["2dfs", "2dfs-stargz", "stargz", "base"]
+# MODES = ["2dfs-stargz"]
+
+_MODE_COLORS = {
+    "2dfs":        "#1f77b4",
+    "2dfs-stargz": "#ff7f0e",
+    "stargz":      "#2ca02c",
+    "base":        "#d62728",
+}
 
 def make_methods(base_image: str):
-    return [
-        ("2dfs", lambda n, bi=base_image: b2.build_only(n, CFG, bi), lambda: b2.clear_cache(CFG)),
-        ("2dfs_stargz", lambda n, bi=base_image: b2s.build_only(n, CFG, bi), lambda: b2s.clear_cache(CFG)),
-        ("stargz", lambda n: bs.build_only(n, CFG), lambda: bs.clear_cache()),
-        ("base", lambda n: bb.build_only(n, CFG), lambda: bb.clear_cache()),
+    all_methods = [
+        ("2dfs",        lambda n, bi=base_image: b2.build_only(n, CFG, bi),  lambda: b2.clear_cache(CFG)),
+        ("2dfs-stargz", lambda n, bi=base_image: b2s.build_only(n, CFG, bi), lambda: b2s.clear_cache(CFG)),
+        ("stargz",      lambda n: bs.build_only(n, CFG),                     lambda: bs.clear_cache()),
+        ("base",        lambda n: bb.build_only(n, CFG),                     lambda: bb.clear_cache()),
     ]
+    return [(name, bf, cf) for name, bf, cf in all_methods if name in MODES]
 
 
 def mutate_chunk(path: str) -> None:
@@ -102,7 +112,6 @@ def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
     return results
 
 
-
 def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
     os.makedirs(RESULTS_DIR, exist_ok=True)
     slug = model.replace("/", "--")
@@ -132,20 +141,17 @@ def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
     img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-    colors = {"2dfs": "#1f77b4", "2dfs_stargz": "#ff7f0e", "stargz": "#2ca02c", "base": "#d62728"}
-    labels = {"2dfs": "2dfs", "2dfs_stargz": "2dfs+stargz", "stargz": "stargz", "base": "base"}
-
     fig, (ax_ttb, ax_btt) = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
 
     for ax, direction, title in [
         (ax_ttb, "top_to_bottom", "Top to Bottom"),
         (ax_btt, "bottom_to_top", "Bottom to Top"),
     ]:
-        for method_name in ["2dfs", "2dfs_stargz", "stargz", "base"]:
-            subset = [row for row in results if row["direction"] == direction and row["method"] == method_name]
+        for mode in MODES:
+            subset = [row for row in results if row["direction"] == direction and row["method"] == mode]
             rs = [row["r"] for row in subset]
             times = [row["rebuild_s"] - row["pull_s"] for row in subset]
-            ax.plot(rs, times, marker="o", label=labels[method_name], color=colors[method_name])
+            ax.plot(rs, times, marker="o", label=mode, color=_MODE_COLORS[mode])
 
         ax.set_xlabel("Chunks mutated (r)")
         ax.set_title(f"{title}")
