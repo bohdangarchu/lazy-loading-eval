@@ -220,6 +220,9 @@ metrics_address = "127.0.0.1:8234"
 [[resolver.host."${REGISTRY_NODE}:5000".mirrors]]
 host = "${REGISTRY_NODE}:5000"
 insecure = true
+
+[fuse]
+passthrough = true
 EOF
 
 # -------------------------------------------------------------------
