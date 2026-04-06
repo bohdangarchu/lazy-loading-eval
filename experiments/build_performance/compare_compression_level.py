@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 from shared import log
 from shared.config import load_config
-from shared.registry import prepare_local_registry, registry, base_image, tdfs_cmd, image_slug
+from shared.registry import prepare_local_registry, registry, plain_base_image, tdfs_cmd, image_slug
 from shared.build_result import BuildResult
 from shared.tdfs_parser import parse_tdfs_output
 from build_performance.prepare import prepare
@@ -55,7 +55,7 @@ def build_one(n: int, level: str) -> BuildResult:
         "--force-http",
         "-f", "2dfs.json",
         "--compression-level", level,
-        base_image(SOURCE_IMAGE, CFG),
+        plain_base_image(SOURCE_IMAGE, CFG),
         target,
     ]
 

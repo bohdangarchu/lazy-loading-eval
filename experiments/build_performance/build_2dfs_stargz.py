@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from shared import log
 from shared.build_result import BuildResult
 from shared.config import EnvConfig, load_config
-from shared.registry import base_image, tdfs_cmd, registry
+from shared.registry import plain_base_image, tdfs_cmd, registry
 from shared.tdfs_parser import parse_tdfs_output
 from build_performance.prepare import prepare
 
@@ -33,7 +33,7 @@ def build_only(n: int, cfg: EnvConfig, source_image: str = "") -> BuildResult:
         "--stargz-compression-level", "1",
         "--force-http",
         "-f", "2dfs.json",
-        base_image(source_image, cfg),
+        plain_base_image(source_image, cfg),
         target,
     ]
 
