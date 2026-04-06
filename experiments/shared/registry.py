@@ -12,13 +12,23 @@ def registry(cfg: EnvConfig) -> str:
     return cfg.registry
 
 
-def base_image(source_image: str, cfg: EnvConfig) -> str:
+def stargz_base_image(source_image: str, cfg: EnvConfig) -> str:
     """Derive the esgz image ref in the target registry from a source image.
 
     ('docker.io/tensorflow/tensorflow', cfg_local)  -> 'localhost:5000/tensorflow:latest-esgz'
     ('docker.io/library/python:3.12-slim', cfg_remote) -> '131.159.25.169:5000/python:3.12-slim-esgz'
     """
     return _local_esgz_tag(source_image, cfg.registry)
+
+
+def plain_base_image(source_image: str, cfg: EnvConfig) -> str:
+    """Derive the plain (no conversion) image ref in the target registry from a source image."""
+    return _local_plain_tag(source_image, cfg.registry)
+
+
+def zstd_base_image(source_image: str, cfg: EnvConfig) -> str:
+    """Derive the zstdchunked image ref in the target registry from a source image."""
+    return _local_zstd_tag(source_image, cfg.registry)
 
 
 def image_slug(source_image: str) -> str:
@@ -61,6 +71,28 @@ def _local_esgz_tag(source_image: str, registry_url: str) -> str:
     return f"{registry_url}/{name_with_tag}-esgz"
 
 
+def _local_plain_tag(source_image: str, registry_url: str) -> str:
+    """Derive local plain tag from source image.
+
+    'docker.io/library/python:3.12-slim' -> 'localhost:5000/python:3.12-slim-plain'
+    """
+    name_with_tag = source_image.rsplit("/", 1)[-1]
+    if ":" not in name_with_tag:
+        name_with_tag += ":latest"
+    return f"{registry_url}/{name_with_tag}-plain"
+
+
+def _local_zstd_tag(source_image: str, registry_url: str) -> str:
+    """Derive local zstd tag from source image.
+
+    'docker.io/library/python:3.12-slim' -> 'localhost:5000/python:3.12-slim-zstd'
+    """
+    name_with_tag = source_image.rsplit("/", 1)[-1]
+    if ":" not in name_with_tag:
+        name_with_tag += ":latest"
+    return f"{registry_url}/{name_with_tag}-zstd"
+
+
 def _image_exists_in_registry(registry_url: str, name: str, tag: str) -> bool:
     """Check if image exists in registry via v2 API."""
     url = f"http://{registry_url}/v2/{name}/manifests/{tag}"
@@ -73,6 +105,13 @@ def _image_exists_in_registry(registry_url: str, name: str, tag: str) -> bool:
             return resp.status == 200
     except (urllib.error.HTTPError, urllib.error.URLError):
         return False
+
+
+def _parse_name_tag(local_tag: str, registry_url: str) -> tuple[str, str]:
+    """Parse name and tag from a local registry image ref."""
+    name_and_tag = local_tag.split("/", 1)[1]  # strip registry prefix
+    name, tag = name_and_tag.rsplit(":", 1)
+    return name, tag
 
 
 def clear_registry(cfg: EnvConfig) -> None:
@@ -111,10 +150,11 @@ def prepare_local_registry(
     source_image: str,
     registry_url: str,
 ) -> str:
-    """Ensure esgz base image exists in local registry.
+    """Ensure plain, esgz, and zstd base images exist in local registry.
 
-    Pulls the plain source image, converts to estargz, and pushes to local
-    registry. Skips if the image already exists. Also pushes a library/ variant.
+    Pulls the plain source image, pushes it as -plain, converts to estargz (-esgz)
+    and zstdchunked (-zstd), and pushes all three to the local registry. Also pushes
+    library/ variants for each. Skips if all three already exist.
 
     Returns the local esgz image reference.
     """
@@ -122,16 +162,22 @@ def prepare_local_registry(
     if ":" not in source_image.rsplit("/", 1)[-1]:
         source_image = f"{source_image}:latest"
 
-    local_tag = _local_esgz_tag(source_image, registry_url)
+    plain_tag = _local_plain_tag(source_image, registry_url)
+    esgz_tag = _local_esgz_tag(source_image, registry_url)
+    zstd_tag = _local_zstd_tag(source_image, registry_url)
 
-    # Parse name and tag for registry API check
-    name_and_tag = local_tag.split("/", 1)[1]  # 'python:3.10-esgz'
-    name, tag = name_and_tag.rsplit(":", 1)     # 'python', '3.10-esgz'
+    plain_name, plain_ver = _parse_name_tag(plain_tag, registry_url)
+    esgz_name, esgz_ver = _parse_name_tag(esgz_tag, registry_url)
+    zstd_name, zstd_ver = _parse_name_tag(zstd_tag, registry_url)
 
-    log.info(f"Checking if {local_tag} exists in registry...")
-    if _image_exists_in_registry(registry_url, name, tag):
-        log.info(f"Image {local_tag} already present in registry, skipping.")
-        return local_tag
+    log.info(f"Checking if base images exist in registry...")
+    if (
+        _image_exists_in_registry(registry_url, plain_name, plain_ver)
+        and _image_exists_in_registry(registry_url, esgz_name, esgz_ver)
+        and _image_exists_in_registry(registry_url, zstd_name, zstd_ver)
+    ):
+        log.info("All base images already present in registry, skipping.")
+        return esgz_tag
 
     log.info(f"Image not found. Pulling {source_image}...")
     subprocess.run(
@@ -139,35 +185,80 @@ def prepare_local_registry(
         check=True, capture_output=True,
     )
 
-    log.info(f"Converting to estargz: {source_image} -> {local_tag}...")
+    # ── plain ──────────────────────────────────────────────────────────
+    log.info(f"Tagging plain: {source_image} -> {plain_tag}...")
+    subprocess.run(
+        ["sudo", "nerdctl", "tag", source_image, plain_tag],
+        check=True, capture_output=True,
+    )
+    log.info(f"Pushing {plain_tag} to registry...")
+    subprocess.run(
+        ["sudo", "nerdctl", "push", "--insecure-registry", plain_tag],
+        check=True, capture_output=True,
+    )
+    plain_library_tag = f"{registry_url}/library/{plain_name}:{plain_ver}"
+    log.info(f"Tagging and pushing library variant: {plain_library_tag}...")
+    subprocess.run(
+        ["sudo", "nerdctl", "tag", plain_tag, plain_library_tag],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["sudo", "nerdctl", "push", "--insecure-registry", plain_library_tag],
+        check=True, capture_output=True,
+    )
+
+    # ── esgz ───────────────────────────────────────────────────────────
+    log.info(f"Converting to estargz: {source_image} -> {esgz_tag}...")
     subprocess.run(
         ["sudo", "ctr-remote", "images", "convert", "--estargz", "--oci",
-         source_image, local_tag],
+         "--estargz-compression-level", "1",
+         source_image, esgz_tag],
         check=True, capture_output=True,
     )
-
-    log.info(f"Pushing {local_tag} to registry...")
+    log.info(f"Pushing {esgz_tag} to registry...")
     subprocess.run(
-        ["sudo", "nerdctl", "push", "--insecure-registry", local_tag],
+        ["sudo", "nerdctl", "push", "--insecure-registry", esgz_tag],
         check=True, capture_output=True,
     )
-
-    # Also push library/ variant
-    library_tag = f"{registry_url}/library/{name}:{tag}"
-    log.info(f"Tagging and pushing library variant: {library_tag}...")
+    esgz_library_tag = f"{registry_url}/library/{esgz_name}:{esgz_ver}"
+    log.info(f"Tagging and pushing library variant: {esgz_library_tag}...")
     subprocess.run(
-        ["sudo", "nerdctl", "tag", local_tag, library_tag],
+        ["sudo", "nerdctl", "tag", esgz_tag, esgz_library_tag],
         check=True, capture_output=True,
     )
     subprocess.run(
-        ["sudo", "nerdctl", "push", "--insecure-registry", library_tag],
+        ["sudo", "nerdctl", "push", "--insecure-registry", esgz_library_tag],
         check=True, capture_output=True,
     )
 
-    # Verify
-    log.info(f"Verifying {local_tag} in registry...")
-    if not _image_exists_in_registry(registry_url, name, tag):
-        raise RuntimeError(f"Failed to push {local_tag} to registry")
-    log.result(f"Base image ready: {local_tag}")
+    # ── zstd ───────────────────────────────────────────────────────────
+    log.info(f"Converting to zstdchunked: {source_image} -> {zstd_tag}...")
+    subprocess.run(
+        ["sudo", "ctr-remote", "images", "convert", "--zstdchunked", "--oci",
+         "--zstdchunked-compression-level", "1",
+         source_image, zstd_tag],
+        check=True, capture_output=True,
+    )
+    log.info(f"Pushing {zstd_tag} to registry...")
+    subprocess.run(
+        ["sudo", "nerdctl", "push", "--insecure-registry", zstd_tag],
+        check=True, capture_output=True,
+    )
+    zstd_library_tag = f"{registry_url}/library/{zstd_name}:{zstd_ver}"
+    log.info(f"Tagging and pushing library variant: {zstd_library_tag}...")
+    subprocess.run(
+        ["sudo", "nerdctl", "tag", zstd_tag, zstd_library_tag],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["sudo", "nerdctl", "push", "--insecure-registry", zstd_library_tag],
+        check=True, capture_output=True,
+    )
 
-    return local_tag
+    # Verify esgz (representative check)
+    log.info(f"Verifying {esgz_tag} in registry...")
+    if not _image_exists_in_registry(registry_url, esgz_name, esgz_ver):
+        raise RuntimeError(f"Failed to push {esgz_tag} to registry")
+    log.result(f"Base images ready: {plain_tag}, {esgz_tag}, {zstd_tag}")
+
+    return esgz_tag

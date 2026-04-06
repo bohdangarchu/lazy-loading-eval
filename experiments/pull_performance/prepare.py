@@ -5,7 +5,7 @@ from shared import log
 from shared.config import EnvConfig
 from shared.model import download_model, split_model
 from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_base_dockerfile
-from shared.registry import base_image, tdfs_cmd
+from shared.registry import stargz_base_image, plain_base_image, zstd_base_image, tdfs_cmd
 from pull_performance.images import (
     build_name_2dfs, build_name_2dfs_stargz, build_name_2dfs_stargz_zstd,
     build_name_stargz, build_name_base,
@@ -45,7 +45,7 @@ def _build_and_push_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConf
         "--platforms", "linux/amd64",
         "--force-http",
         "-f", "2dfs.json",
-        base_image(source_image, cfg),
+        plain_base_image(source_image, cfg),
         target,
     ]
     log.info(f"Building 2dfs image: {target}")
@@ -68,7 +68,7 @@ def _build_and_push_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: 
         "--enable-stargz",
         "--force-http",
         "-f", "2dfs.json",
-        base_image(source_image, cfg),
+        stargz_base_image(source_image, cfg),
         target,
     ]
     log.info(f"Building 2dfs-stargz image: {target}")
@@ -92,7 +92,7 @@ def _build_and_push_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, 
         "--use-zstd",
         "--force-http",
         "-f", "2dfs.json",
-        base_image(source_image, cfg),
+        zstd_base_image(source_image, cfg),
         target,
     ]
     log.info(f"Building 2dfs-stargz-zstd image: {target}")
@@ -106,7 +106,7 @@ def _build_and_push_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, 
 
 
 def _build_and_push_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
-    create_stargz_dockerfile(chunk_paths, base_image(source_image, cfg), SCRIPT_DIR)
+    create_stargz_dockerfile(chunk_paths, stargz_base_image(source_image, cfg), SCRIPT_DIR)
     target = build_name_stargz(source_image, cfg)
 
     # force-compression=true makes sure the split layers are converted to stargz
@@ -126,7 +126,7 @@ def _build_and_push_stargz(chunk_paths: list[str], source_image: str, cfg: EnvCo
 
 def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_image: str, cfg: EnvConfig) -> None:
     for r in base_splits:
-        create_base_dockerfile(chunk_paths[:r], base_image(source_image, cfg), SCRIPT_DIR)
+        create_base_dockerfile(chunk_paths[:r], plain_base_image(source_image, cfg), SCRIPT_DIR)
         target = build_name_base(source_image, cfg, r)
 
         cmd = [
