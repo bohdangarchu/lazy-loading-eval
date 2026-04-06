@@ -47,13 +47,13 @@ _FLAG_LABELS: dict[str, str] = {flags: label for flags, label in FLAG_OPTIONS}
 
 
 def _build_name(source_image: str, cfg, label: str) -> str:
-    slug = label.replace(" ", "-")
+    slug = label.replace(" ", "-").lower()
     return f"{registry(cfg)}/{image_slug(source_image)}-{MODE}-{slug}:latest"
 
 
 def _pull_name(source_image: str, cfg, label: str, n: int) -> str:
     end_col = n - 1
-    slug = label.replace(" ", "-")
+    slug = label.replace(" ", "-").lower()
     return f"{registry(cfg)}/library/{image_slug(source_image)}-{MODE}-{slug}:latest--0.0.0.{end_col}"
 
 
