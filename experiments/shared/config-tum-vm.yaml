@@ -1,24 +1,4 @@
 # Environment config — edit this file to switch between local and remote setups.
-#
-# Local example (default):
-#   registry: "localhost:5000"
-#   tdfs_home_dir: "~/.2dfs"
-#   tmpdir: null
-#   tdfs_binary: "./tdfs"
-#   full_cache_wipe: false
-#
-# Remote TUM VM example:
-#   registry: "131.159.25.169:5000"
-#   tdfs_home_dir: null
-#   tmpdir: null
-#   tdfs_binary: "tdfs"
-#   full_cache_wipe: true
-# Cloudlab example:
-#   registry: "10.10.1.2:5000"
-#   tdfs_home_dir: "/mydata/.2dfs"
-#   tmpdir: "/mydata/tmp"
-#   tdfs_binary: "tdfs"
-#   full_cache_wipe: true
 
 registry: "131.159.25.169:5000"
 

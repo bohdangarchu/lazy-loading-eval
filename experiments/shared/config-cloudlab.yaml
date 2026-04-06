@@ -1,0 +1,5 @@
+registry: "10.10.1.2:5000"
+tdfs_home_dir: "/mydata/.2dfs"
+tmpdir: "/mydata/tmp"
+tdfs_binary: "tdfs"
+full_cache_wipe: true

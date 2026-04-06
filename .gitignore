@@ -20,3 +20,4 @@ chunks/
 results/
 charts/
 Dockerfile.base
+config.yaml
