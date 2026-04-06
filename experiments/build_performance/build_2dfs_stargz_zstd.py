@@ -31,6 +31,7 @@ def build_only(n: int, cfg: EnvConfig, source_image: str = "") -> BuildResult:
         "--platforms", "linux/amd64",
         "--enable-stargz",
         "--use-zstd",
+        "--zstd-compression-level", "1",
         "--force-http",
         "-f", "2dfs.json",
         zstd_base_image(source_image, cfg),
