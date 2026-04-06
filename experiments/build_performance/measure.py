@@ -28,14 +28,14 @@ CHARTS_BUILD_DIR = os.path.join(CHARTS_DIR, "build")
 CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 
 EXPERIMENTS = [
-    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
     # ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB     ~700 MB
-    # ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
-    # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
+    ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
+    ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
-MAX_SPLITS = 3
+MAX_SPLITS = 10
 CFG = load_config()
-WITH_RESOURCE = False
+WITH_RESOURCE = True
 VERBOSE = True
 SLEEP_SECONDS = 5
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
