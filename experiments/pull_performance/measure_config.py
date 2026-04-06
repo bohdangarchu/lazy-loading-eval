@@ -22,11 +22,12 @@ RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "config")
 CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "config")
 
 EXPERIMENTS = [
-    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
+    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
     # ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB    ~700 MB
     # ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB    ~3.4 GB
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),      # ~6.0 GB     ~50 MB
-    ("openai-community/gpt2", "docker.io/tensorflow/tensorflow"),              # ~0.5 GB    ~700 MB
+    ("openai-community/gpt2-medium", "docker.io/library/python:3.12-slim"),    # ~1.52 GB    ~50 MB
+    ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),     # ~3.25 GB    ~50 MB
 ]
 NUM_SPLITS = 10
 BASE_SPLITS = [2, 4, 6, 8, 10]
@@ -34,6 +35,9 @@ CFG = load_config()
 VERBOSE = True
 MODE = "2dfs-stargz"  # or "2dfs-stargz-zstd"
 FLAG_OPTIONS: list[tuple[str, str]] = [
+    ("--stargz-chunk-size 2097152",  "chunk-size 2 MiB"),
+    ("--stargz-chunk-size 4194304",  "chunk-size 4 MiB"),
+    ("--stargz-chunk-size 8388608",  "chunk-size 8 MiB"),
     ("--stargz-chunk-size 16777216", "chunk-size 16 MiB"),
     ("--stargz-chunk-size 33554432", "chunk-size 32 MiB"),
     ("--stargz-chunk-size 67108864", "chunk-size 64 MiB"),
@@ -41,6 +45,7 @@ FLAG_OPTIONS: list[tuple[str, str]] = [
 ]
 
 _FLAG_LABELS: dict[str, str] = {flags: label for flags, label in FLAG_OPTIONS}
+_FLAG_LABELS["--stargz-chunk-size 4194304"] = "chunk-size 4 MiB (default)"
 
 
 # ── image naming ───────────────────────────────────────────────────
