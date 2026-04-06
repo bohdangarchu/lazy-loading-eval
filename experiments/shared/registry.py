@@ -114,8 +114,12 @@ def _parse_name_tag(local_tag: str, registry_url: str) -> tuple[str, str]:
     return name, tag
 
 
-def clear_registry(cfg: EnvConfig) -> None:
-    """Delete all images from the registry via v2 API."""
+def clear_registry(cfg: EnvConfig, preserve_base: bool = False) -> None:
+    """Delete all images from the registry via v2 API.
+
+    If preserve_base=True, skips tags ending in -plain, -esgz, or -zstd
+    (the base images used as build inputs — expensive to regenerate).
+    """
     reg = cfg.registry
     log.info(f"Clearing registry {reg}...")
     catalog_url = f"http://{reg}/v2/_catalog"
@@ -126,6 +130,9 @@ def clear_registry(cfg: EnvConfig) -> None:
         with urllib.request.urlopen(tags_url) as resp:
             tags = json.loads(resp.read()).get("tags") or []
         for tag in tags:
+            if preserve_base and tag.endswith(("-plain", "-esgz", "-zstd")):
+                log.info(f"  Preserving base image {name}:{tag}")
+                continue
             manifest_url = f"http://{reg}/v2/{name}/manifests/{tag}"
             req = urllib.request.Request(manifest_url, headers={
                 "Accept": "application/vnd.docker.distribution.manifest.v2+json",

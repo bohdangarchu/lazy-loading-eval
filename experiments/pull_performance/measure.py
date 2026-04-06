@@ -246,7 +246,7 @@ def measure(
 ) -> dict[str, list[tuple[int, float, float]]]:
     results: dict[str, list[tuple[int, float, float]]] = {m: [] for m in MODES}
 
-    clear_registry(cfg)
+    clear_registry(cfg, preserve_base=True)
     for mode in MODES:
         log.info(f"\n=== Preparing mode: {mode} ===")
         prepare_local_registry(source_image, registry(cfg))
@@ -258,7 +258,7 @@ def measure(
             clear_cache(cfg)
             results[mode].append(_measure_one(mode, n, source_image, cfg))
 
-        clear_registry(cfg)
+        clear_registry(cfg, preserve_base=True)
 
     return results
 
