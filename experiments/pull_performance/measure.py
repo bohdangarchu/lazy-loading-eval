@@ -12,6 +12,7 @@ import numpy as np
 from shared import log
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
+from shared.services import ensure_buildkit
 from pull_performance.prepare import (
     prepare_chunks,
     prepare_2dfs, prepare_2dfs_stargz, prepare_2dfs_stargz_zstd,
@@ -29,11 +30,11 @@ EXPERIMENTS = [
     # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
 ]
 NUM_SPLITS = 10
-BASE_SPLITS = [2, 4, 6, 8]
+BASE_SPLITS = [2, 4, 6, 8, 10]
 CFG = load_config()
 VERBOSE = True
-# MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
-MODES = ["2dfs-stargz"]
+MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
+# MODES = ["2dfs-stargz"]
 
 _MODE_COLORS = {
     "2dfs":             "#1f77b4",
@@ -76,7 +77,8 @@ def clear_cache(cfg) -> None:
         # Full wipe — removes all images and restarts containerd
         _run("sudo systemctl stop stargz-snapshotter")
         _run("grep 'containerd-stargz-grpc/snapshotter/snapshots' /proc/mounts | awk '{print $2}' | xargs -r sudo umount -l")
-        _run(f"sudo rm -rf {STARGZ_ROOT}/*")
+        # Use sudo bash -c so glob expands as root (STARGZ_ROOT is not readable by user)
+        _run(f"sudo bash -c 'rm -rf {STARGZ_ROOT}/*'")
         _run("sudo nerdctl image rm -f $(sudo nerdctl images -q) 2>/dev/null || true")
         _run("sudo ctr content rm $(sudo ctr content ls -q) 2>/dev/null || true")
         _run("sudo systemctl start stargz-snapshotter")
@@ -361,6 +363,7 @@ def plot(
 
 def main():
     log.set_verbose(VERBOSE)
+    ensure_buildkit()
     log.info(f"Modes: {MODES}")
     log.info(f"Splits (2dfs/stargz): {NUM_SPLITS}")
     log.info(f"Splits (base): {BASE_SPLITS}")
