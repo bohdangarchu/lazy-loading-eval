@@ -170,7 +170,7 @@ def plot(results: list[dict], model: str, base_image: str) -> None:
     n_modes = len(MODES)
     n_splits = len(splits)
     bar_width = 0.8 / n_modes
-    stage_colors = {"pull": "#4e79a7", "context": "#f28e2b", "build": "#e15759", "export": "#76b7b2"}
+    stage_colors = {"pull": "#4e79a7", "build": "#e15759"}
 
     fig, ax = plt.subplots(figsize=(max(8, n_splits * 3), 5))
 
@@ -180,21 +180,21 @@ def plot(results: list[dict], model: str, base_image: str) -> None:
             x = j + i * bar_width
             x_center = x + bar_width / 2
 
-            bottom = 0.0
-            for stage, key in [("pull", "pull_s"), ("context", "ctx_s"),
-                                ("build", "build_s"), ("export", "export_s")]:
-                vals = [r[key] for r in group]
-                median_val = float(np.median(vals)) if vals else 0.0
-                label = stage if (i == 0 and j == 0) else None
-                ax.bar(x, median_val, bar_width, bottom=bottom, color=stage_colors[stage],
-                       label=label, edgecolor="white", linewidth=0.5)
-                bottom += median_val
+            median_total = float(np.median([r["total_s"] for r in group])) if group else 0.0
+            median_pull = float(np.median([r["pull_s"] for r in group])) if group else 0.0
+            median_build = median_total - median_pull
+
+            ax.bar(x, median_pull, bar_width, bottom=0.0, color=stage_colors["pull"],
+                   label="pull" if (i == 0 and j == 0) else None,
+                   edgecolor="white", linewidth=0.5)
+            ax.bar(x, median_build, bar_width, bottom=median_pull, color=stage_colors["build"],
+                   label="build" if (i == 0 and j == 0) else None,
+                   edgecolor="white", linewidth=0.5)
 
             # overlay individual run dots at total_s
-            run_totals = [r["total_s"] for r in group]
-            for k, val in enumerate(run_totals):
-                jitter = (k - len(run_totals) / 2) * 0.015
-                ax.scatter(x_center + jitter, val, color="black", s=12, zorder=4)
+            for k, r in enumerate(group):
+                jitter = (k - len(group) / 2) * 0.015
+                ax.scatter(x_center + jitter, r["total_s"], color="black", s=12, zorder=4)
 
     center_offset = (n_modes - 1) * bar_width / 2
     ax.set_xticks([j + center_offset for j in range(n_splits)])
