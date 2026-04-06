@@ -35,13 +35,16 @@ CFG = load_config()
 VERBOSE = True
 MODE = "2dfs-stargz"  # or "2dfs-stargz-zstd"
 FLAG_OPTIONS: list[tuple[str, str]] = [
+    ("--stargz-chunk-size 262144",   "chunk-size 256 KiB"),
+    ("--stargz-chunk-size 524288",   "chunk-size 512 KiB"),
+    ("--stargz-chunk-size 1048576",  "chunk-size 1 MiB"),
     ("--stargz-chunk-size 2097152",  "chunk-size 2 MiB"),
     ("--stargz-chunk-size 4194304",  "chunk-size 4 MiB"),
-    ("--stargz-chunk-size 8388608",  "chunk-size 8 MiB"),
-    ("--stargz-chunk-size 16777216", "chunk-size 16 MiB"),
-    ("--stargz-chunk-size 33554432", "chunk-size 32 MiB"),
-    ("--stargz-chunk-size 67108864", "chunk-size 64 MiB"),
-    ("--stargz-chunk-size 134217728", "chunk-size 128 MiB"),
+    # ("--stargz-chunk-size 8388608",  "chunk-size 8 MiB"),
+    # ("--stargz-chunk-size 16777216", "chunk-size 16 MiB"),
+    # ("--stargz-chunk-size 33554432", "chunk-size 32 MiB"),
+    # ("--stargz-chunk-size 67108864", "chunk-size 64 MiB"),
+    # ("--stargz-chunk-size 134217728", "chunk-size 128 MiB"),
 ]
 
 _FLAG_LABELS: dict[str, str] = {flags: label for flags, label in FLAG_OPTIONS}

@@ -90,6 +90,7 @@ def _build_and_push_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, 
         "--platforms", "linux/amd64",
         "--enable-stargz",
         "--use-zstd",
+        "--stargz-chunk-size", "8388608",  # 8 MiB (most optimal)
         "--force-http",
         "-f", "2dfs.json",
         zstd_base_image(source_image, cfg),
