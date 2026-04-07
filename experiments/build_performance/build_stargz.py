@@ -29,7 +29,7 @@ def build_only(n: int, cfg: EnvConfig = None) -> BuildResult:
         "--opt", "filename=Dockerfile.stargz",
         "--local", f"context={SCRIPT_DIR}",
         "--local", f"dockerfile={SCRIPT_DIR}",
-        "--output", f"type=image,name={target},push=false,compression=estargz,oci-mediatypes=true,registry.insecure=true",
+        "--output", f"type=image,name={target},push=false,compression=estargz,compression-level=1,oci-mediatypes=true,registry.insecure=true",
     ]
 
     log.info(f"=== Building with {n} split(s) (stargz) ===")
