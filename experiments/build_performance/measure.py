@@ -12,7 +12,7 @@ import psutil
 from shared import log
 from shared.build_result import BuildResult
 from shared.config import load_config
-from shared.mode_colors import MODE_COLORS
+from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure, write_csv
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -138,26 +138,20 @@ def measure_builds(
 
 
 def save_csv(results: list[dict], model: str, base_image: str) -> None:
-    os.makedirs(RESULTS_BUILD_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
     img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(RESULTS_BUILD_DIR, f"{model_slug}_{img_slug}_{ts}.csv")
-
     fieldnames = ["run", "splits", "mode", "total_s", "pull_s", "ctx_s", "build_s", "export_s"]
-    with open(output_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in results:
-            writer.writerow({
-                **row,
-                "total_s": f"{row['total_s']:.4f}",
-                "pull_s": f"{row['pull_s']:.4f}",
-                "ctx_s": f"{row['ctx_s']:.4f}",
-                "build_s": f"{row['build_s']:.4f}",
-                "export_s": f"{row['export_s']:.4f}",
-            })
-    log.result(f"Results saved to {output_path}")
+    rows = [{
+        **row,
+        "total_s": f"{row['total_s']:.4f}",
+        "pull_s": f"{row['pull_s']:.4f}",
+        "ctx_s": f"{row['ctx_s']:.4f}",
+        "build_s": f"{row['build_s']:.4f}",
+        "export_s": f"{row['export_s']:.4f}",
+    } for row in results]
+    write_csv(output_path, fieldnames, rows)
 
 
 def plot(results: list[dict], model: str, base_image: str) -> None:
@@ -192,13 +186,9 @@ def plot(results: list[dict], model: str, base_image: str) -> None:
                    edgecolor="white", linewidth=0.5)
 
             # overlay individual run dots at total_s
-            for k, r in enumerate(group):
-                jitter = (k - len(group) / 2) * 0.015
-                ax.scatter(x_center + jitter, r["total_s"], color="black", s=12, zorder=4)
+            add_run_dots(ax, x_center, [r["total_s"] for r in group])
 
-    center_offset = (n_modes - 1) * bar_width / 2
-    ax.set_xticks([j + center_offset for j in range(n_splits)])
-    ax.set_xticklabels([str(n) for n in splits])
+    bar_group_xticks(ax, n_splits, n_modes, bar_width, [str(n) for n in splits])
     ax.set_xlabel("Number of splits")
     ax.set_ylabel("Time (s)")
     ax.set_title(f"Build stages breakdown (median, n={N_RUNS} runs, dots = individual runs)")
@@ -211,14 +201,11 @@ def plot(results: list[dict], model: str, base_image: str) -> None:
 
     ax.legend(loc="upper right", fontsize="small")
     ax.grid(True, linestyle="--", alpha=0.5, axis="y")
-    fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
-             fontsize=8, verticalalignment="bottom", family="monospace")
+    figure_footer(fig, model, base_image)
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.18)
     path = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_{img_slug}_stages_{n_splits}_{ts}.png")
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-    log.result(f"Chart saved to {path}")
+    save_figure(fig, path)
 
 
 def save_resource_csv(
@@ -313,30 +300,22 @@ def plot_resource(
         # overlay individual run dots
         for off, run_vals_cpu, run_vals_mem in zip(offsets, cpu_run_medians_by_split, mem_run_medians_by_split):
             x_center = off + bar_width / 2
-            for k, val in enumerate(run_vals_cpu):
-                jitter = (k - len(run_vals_cpu) / 2) * 0.015
-                ax_cpu.scatter(x_center + jitter, val, color="black", s=12, zorder=4)
-            for k, val in enumerate(run_vals_mem):
-                jitter = (k - len(run_vals_mem) / 2) * 0.015
-                ax_mem.scatter(x_center + jitter, val, color="black", s=12, zorder=4)
+            add_run_dots(ax_cpu, x_center, run_vals_cpu)
+            add_run_dots(ax_mem, x_center, run_vals_mem)
 
-    center_offset = (n_modes - 1) * bar_width / 2
-    ax_cpu.set_xticks([pos + center_offset for pos in x])
-    ax_cpu.set_xticklabels(x_labels)
+    bar_group_xticks(ax_cpu, len(split_counts), n_modes, bar_width, x_labels)
     ax_cpu.set_ylabel("CPU Usage (%)")
     ax_cpu.set_title(f"Resource usage during builds (median, n={N_RUNS} runs, dots = individual runs)")
     ax_cpu.legend(fontsize="small")
     ax_cpu.grid(True, linestyle="--", alpha=0.5, axis="y")
 
-    ax_mem.set_xticks([pos + center_offset for pos in x])
-    ax_mem.set_xticklabels(x_labels)
+    bar_group_xticks(ax_mem, len(split_counts), n_modes, bar_width, x_labels)
     ax_mem.set_xlabel("Number of splits")
     ax_mem.set_ylabel("Memory Usage (MB)")
     ax_mem.legend(fontsize="small")
     ax_mem.grid(True, linestyle="--", alpha=0.5, axis="y")
 
-    fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
-             fontsize=8, verticalalignment="bottom", family="monospace")
+    figure_footer(fig, model, base_image)
 
     os.makedirs(CHARTS_RESOURCE_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
@@ -344,9 +323,7 @@ def plot_resource(
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(CHARTS_RESOURCE_DIR, f"{model_slug}_{img_slug}_resource_splits_{max_splits}_{ts}.png")
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
-    plt.close(fig)
-    log.result(f"Resource chart saved to {output_path}")
+    save_figure(fig, output_path)
 
 
 def main():

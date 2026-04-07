@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import matplotlib.pyplot as plt
 
 from shared import log
+from shared.charts import figure_footer, save_figure
 from shared.config import load_config
 from shared.registry import prepare_local_registry, registry, plain_base_image, tdfs_cmd, image_slug
 from shared.build_result import BuildResult
@@ -172,13 +173,10 @@ def plot(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> Non
     ax2.legend()
     ax2.grid(True, linestyle="--", alpha=0.5)
 
-    fig.text(0.01, 0.01, f"model: {MODEL}\nbase image: {SOURCE_IMAGE}",
-             fontsize=8, verticalalignment="bottom", family="monospace")
+    figure_footer(fig, MODEL, SOURCE_IMAGE)
     fig.tight_layout()
     path1 = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_splits_{MAX_SPLITS}_{ts}.png")
-    fig.savefig(path1, dpi=150)
-    plt.close(fig)
-    log.result(f"Chart saved to {path1}")
+    save_figure(fig, path1)
 
 
 def main():

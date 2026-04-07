@@ -10,6 +10,7 @@ import matplotlib.patches as mpatches
 import numpy as np
 
 from shared import log
+from shared.charts import MODE_COLORS, figure_footer, save_figure
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
 from shared.services import ensure_buildkit
@@ -35,14 +36,6 @@ CFG = load_config()
 VERBOSE = True
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 # MODES = ["2dfs-stargz"]
-
-_MODE_COLORS = {
-    "2dfs":             "#1f77b4",
-    "2dfs-stargz":      "#ff7f0e",
-    "2dfs-stargz-zstd": "#9467bd",
-    "stargz":           "#2ca02c",
-    "base":             "#d62728",
-}
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "pull")
@@ -321,7 +314,7 @@ def plot(
     fig, ax = plt.subplots(figsize=(max(10, n_modes * 2), 6))
 
     for i, (mode, mode_results) in enumerate(results.items()):
-        color = _MODE_COLORS[mode]
+        color = MODE_COLORS[mode]
         pulls = [p for _, p, _ in mode_results]
         runs = [r for _, _, r in mode_results]
         offset = (i - (n_modes - 1) / 2) * width
@@ -337,15 +330,14 @@ def plot(
     ax.set_xticklabels(splits)
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")
 
-    method_handles = [mpatches.Patch(facecolor=_MODE_COLORS[m], edgecolor=_MODE_COLORS[m], label=m)
+    method_handles = [mpatches.Patch(facecolor=MODE_COLORS[m], edgecolor=MODE_COLORS[m], label=m)
                       for m in results]
     pull_patch = mpatches.Patch(facecolor="gray", alpha=0.5, hatch="//",
                                 edgecolor="gray", label="pull")
     run_patch = mpatches.Patch(facecolor="gray", edgecolor="gray", label="run")
     ax.legend(handles=method_handles + [pull_patch, run_patch], loc="upper left")
 
-    fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
-             fontsize=8, verticalalignment="bottom", family="monospace")
+    figure_footer(fig, model, base_image)
 
     os.makedirs(CHARTS_DIR, exist_ok=True)
     model_slug = model.replace("/", "--")
@@ -353,8 +345,7 @@ def plot(
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_pull_{len(splits)}_{ts}.png")
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
-    log.result(f"Chart saved to {output_path}")
+    save_figure(fig, output_path)
 
 
 # ── main ───────────────────────────────────────────────────────────

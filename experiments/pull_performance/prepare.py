@@ -36,19 +36,26 @@ def prepare_chunks(model_name: str, num_splits: int) -> list[str]:
 # ── build + push per mode ───────────────────────────────────────────
 
 
-def _build_and_push_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+def _build_and_push_2dfs_image(
+    chunk_paths: list[str],
+    source_image: str,
+    cfg: EnvConfig,
+    target: str,
+    base_image: str,
+    extra_flags: list[str],
+    label: str,
+) -> None:
     write_2dfs_json(chunk_paths, SCRIPT_DIR)
-    target = build_name_2dfs(source_image, cfg)
-
     cmd = tdfs_cmd(cfg, SCRIPT_DIR) + [
         "build",
         "--platforms", "linux/amd64",
+        *extra_flags,
         "--force-http",
         "-f", "2dfs.json",
-        plain_base_image(source_image, cfg),
+        base_image,
         target,
     ]
-    log.info(f"Building 2dfs image: {target}")
+    log.info(f"Building {label} image: {target}")
     subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     log.result(f"Built {target}")
 
@@ -56,55 +63,36 @@ def _build_and_push_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConf
     log.info(f"Pushing {target}")
     subprocess.run(push_cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     log.result(f"Pushed {target}")
+
+
+def _build_and_push_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+    _build_and_push_2dfs_image(
+        chunk_paths, source_image, cfg,
+        target=build_name_2dfs(source_image, cfg),
+        base_image=plain_base_image(source_image, cfg),
+        extra_flags=[],
+        label="2dfs",
+    )
 
 
 def _build_and_push_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
-    write_2dfs_json(chunk_paths, SCRIPT_DIR)
-    target = build_name_2dfs_stargz(source_image, cfg)
-
-    cmd = tdfs_cmd(cfg, SCRIPT_DIR) + [
-        "build",
-        "--platforms", "linux/amd64",
-        "--enable-stargz",
-        "--stargz-chunk-size", "2097152",  # 2 MiB (most optimal)
-        "--force-http",
-        "-f", "2dfs.json",
-        stargz_base_image(source_image, cfg),
-        target,
-    ]
-    log.info(f"Building 2dfs-stargz image: {target}")
-    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
-    log.result(f"Built {target}")
-
-    push_cmd = tdfs_cmd(cfg, SCRIPT_DIR) + ["image", "push", "--force-http", target]
-    log.info(f"Pushing {target}")
-    subprocess.run(push_cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
-    log.result(f"Pushed {target}")
+    _build_and_push_2dfs_image(
+        chunk_paths, source_image, cfg,
+        target=build_name_2dfs_stargz(source_image, cfg),
+        base_image=stargz_base_image(source_image, cfg),
+        extra_flags=["--enable-stargz", "--stargz-chunk-size", "2097152"],  # 2 MiB (most optimal)
+        label="2dfs-stargz",
+    )
 
 
 def _build_and_push_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
-    write_2dfs_json(chunk_paths, SCRIPT_DIR)
-    target = build_name_2dfs_stargz_zstd(source_image, cfg)
-
-    cmd = tdfs_cmd(cfg, SCRIPT_DIR) + [
-        "build",
-        "--platforms", "linux/amd64",
-        "--enable-stargz",
-        "--use-zstd",
-        "--stargz-chunk-size", "8388608",  # 8 MiB (most optimal)
-        "--force-http",
-        "-f", "2dfs.json",
-        zstd_base_image(source_image, cfg),
-        target,
-    ]
-    log.info(f"Building 2dfs-stargz-zstd image: {target}")
-    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
-    log.result(f"Built {target}")
-
-    push_cmd = tdfs_cmd(cfg, SCRIPT_DIR) + ["image", "push", "--force-http", target]
-    log.info(f"Pushing {target}")
-    subprocess.run(push_cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
-    log.result(f"Pushed {target}")
+    _build_and_push_2dfs_image(
+        chunk_paths, source_image, cfg,
+        target=build_name_2dfs_stargz_zstd(source_image, cfg),
+        base_image=zstd_base_image(source_image, cfg),
+        extra_flags=["--enable-stargz", "--use-zstd", "--stargz-chunk-size", "8388608"],  # 8 MiB (most optimal)
+        label="2dfs-stargz-zstd",
+    )
 
 
 def _build_and_push_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:

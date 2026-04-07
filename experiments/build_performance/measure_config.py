@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import matplotlib.pyplot as plt
 
 from shared import log
+from shared.charts import figure_footer, save_figure
 from shared.build_result import BuildResult
 from shared.config import load_config
 from shared.registry import (
@@ -175,14 +176,11 @@ def plot(
     ax.set_xticks(splits)
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
-    fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
-             fontsize=8, verticalalignment="bottom", family="monospace")
+    figure_footer(fig, model, base_image)
     fig.tight_layout()
 
     output_path = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_{mode_slug}_splits_{len(splits)}_{ts}.png")
-    fig.savefig(output_path, dpi=150)
-    plt.close(fig)
-    log.result(f"Chart saved to {output_path}")
+    save_figure(fig, output_path)
 
 
 def main():

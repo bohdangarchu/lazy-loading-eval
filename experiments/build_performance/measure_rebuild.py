@@ -1,4 +1,3 @@
-import csv
 import os
 import time
 from datetime import datetime, timezone
@@ -8,8 +7,8 @@ import numpy as np
 
 from shared import log
 from shared.build_result import BuildResult
+from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure, write_csv
 from shared.config import load_config
-from shared.mode_colors import MODE_COLORS
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -113,26 +112,21 @@ def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
 
 
 def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
-    os.makedirs(RESULTS_DIR, exist_ok=True)
     slug = model.replace("/", "--")
     img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     path = os.path.join(RESULTS_DIR, f"{slug}_{img_slug}_rebuild_n{n}_{ts}.csv")
     fieldnames = ["run", "r", "direction", "method", "rebuild_s",
                   "pull_s", "context_transfer_s", "build_s", "export_s"]
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in results:
-            writer.writerow({
-                **row,
-                "rebuild_s": f"{row['rebuild_s']:.4f}",
-                "pull_s": f"{row['pull_s']:.4f}",
-                "context_transfer_s": f"{row['context_transfer_s']:.4f}",
-                "build_s": f"{row['build_s']:.4f}",
-                "export_s": f"{row['export_s']:.4f}",
-            })
-    log.result(f"Results saved to {path}")
+    rows = [{
+        **row,
+        "rebuild_s": f"{row['rebuild_s']:.4f}",
+        "pull_s": f"{row['pull_s']:.4f}",
+        "context_transfer_s": f"{row['context_transfer_s']:.4f}",
+        "build_s": f"{row['build_s']:.4f}",
+        "export_s": f"{row['export_s']:.4f}",
+    } for row in results]
+    write_csv(path, fieldnames, rows)
 
 
 def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
@@ -167,13 +161,9 @@ def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
                 ax.bar(x, median_val, bar_width, color=MODE_COLORS[mode], label=label,
                        edgecolor="black", linewidth=0.5)
 
-                for k, val in enumerate(rebuild_vals):
-                    jitter = (k - len(rebuild_vals) / 2) * 0.015
-                    ax.scatter(x_center + jitter, val, color="black", s=12, zorder=4)
+                add_run_dots(ax, x_center, rebuild_vals)
 
-        center_offset = (n_modes - 1) * bar_width / 2
-        ax.set_xticks([j + center_offset for j in range(len(R_VALUES))])
-        ax.set_xticklabels([str(r) for r in R_VALUES])
+        bar_group_xticks(ax, len(R_VALUES), n_modes, bar_width, [str(r) for r in R_VALUES])
         ax.set_xlabel("Chunks mutated (r)")
         ax.set_title(f"{title}")
         ax.legend(fontsize="small")
@@ -181,14 +171,11 @@ def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
 
     ax_ttb.set_ylabel("Rebuild time (s)")
     fig.suptitle(f"Incremental rebuild performance (n={n}, median, {N_RUNS} runs, dots = individual runs)")
-    fig.text(0.01, 0.01, f"model: {model}\nbase image: {base_image}",
-             fontsize=8, verticalalignment="bottom", family="monospace")
+    figure_footer(fig, model, base_image)
     fig.tight_layout()
 
     path = os.path.join(CHARTS_DIR, f"{slug}_{img_slug}_rebuild_n{n}_{ts}.png")
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-    log.result(f"Chart saved to {path}")
+    save_figure(fig, path)
 
 
 def main():
