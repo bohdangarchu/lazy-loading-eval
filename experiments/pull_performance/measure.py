@@ -10,7 +10,7 @@ import matplotlib.patches as mpatches
 import numpy as np
 
 from shared import log
-from shared.charts import MODE_COLORS, figure_footer, save_figure
+from shared.charts import MODE_COLORS, figure_footer, add_run_dots, save_figure
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
 from shared.services import ensure_buildkit
@@ -25,13 +25,14 @@ from pull_performance.images import (
 )
 
 EXPERIMENTS = [
-    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
-    # ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB    ~700 MB
-    # ("openai-community/gpt2-large", "docker.io/ollama/ollama"),            # ~3.25 GB    ~3.4 GB
-    # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),    # ~6.0 GB     ~50 MB
+    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~1.4 GB     ~700 MB
+    ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),                      # ~3.09 GB     ~3.4 GB
+    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
 ]
 NUM_SPLITS = 10
 BASE_SPLITS = [2, 4, 6, 8, 10]
+N_RUNS = 3
 CFG = load_config()
 VERBOSE = True
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
@@ -235,8 +236,9 @@ def _measure_one(mode: str, n: int, source_image: str, cfg) -> tuple[int, float,
 
 def measure(
     chunk_paths: list[str], base_splits: list[int], source_image: str, cfg,
-) -> dict[str, list[tuple[int, float, float]]]:
-    results: dict[str, list[tuple[int, float, float]]] = {m: [] for m in MODES}
+) -> dict[str, list[tuple[int, int, float, float]]]:
+    # results[mode] = list of (run, n, pull_t, run_t)
+    results: dict[str, list[tuple[int, int, float, float]]] = {m: [] for m in MODES}
 
     clear_registry(cfg, preserve_base=True)
     for mode in MODES:
@@ -244,11 +246,14 @@ def measure(
         prepare_local_registry(source_image, registry(cfg))
         _prepare_mode(mode, chunk_paths, base_splits, source_image, cfg)
 
-        for n in base_splits:
-            ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            log.info(f"\n[{ts}] === {mode}: {n} ===")
-            clear_cache(cfg)
-            results[mode].append(_measure_one(mode, n, source_image, cfg))
+        for run in range(N_RUNS):
+            log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{N_RUNS} ===")
+            for n in base_splits:
+                ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                log.info(f"\n[{ts}] === {mode}: {n} ===")
+                clear_cache(cfg)
+                n_val, pull_t, run_t = _measure_one(mode, n, source_image, cfg)
+                results[mode].append((run, n_val, pull_t, run_t))
 
         clear_registry(cfg, preserve_base=True)
 
@@ -258,25 +263,29 @@ def measure(
 # ── output ─────────────────────────────────────────────────────────
 
 
-def print_results(results: dict[str, list[tuple[int, float, float]]]) -> None:
-    splits = [n for n, _, _ in next(iter(results.values()))]
+def print_results(results: dict[str, list[tuple[int, int, float, float]]]) -> None:
+    splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
     col = 18
     header_modes = "  ".join(f"{m:>{col}}" for m in results)
     subheader = "  ".join(f"{'pull/run/total':>{col}}" for _ in results)
-    log.result("\n=== Pull + Run Performance Results ===")
+    log.result("\n=== Pull + Run Performance Results (median across runs) ===")
     log.result(f"{'splits':>8}  {header_modes}")
     log.result(f"{'':>8}  {subheader}")
     log.result("-" * (10 + (col + 2) * len(results)))
-    for i, n in enumerate(splits):
-        def fmt(r: list[tuple[int, float, float]], idx: int) -> str:
-            _, p, r_t = r[idx]
+    for n in splits:
+        def fmt(entries: list[tuple[int, int, float, float]]) -> str:
+            group = [(pull_t, run_t) for _, n_val, pull_t, run_t in entries if n_val == n]
+            if not group:
+                return "N/A"
+            p = float(np.median([g[0] for g in group]))
+            r_t = float(np.median([g[1] for g in group]))
             return f"{p:.1f}/{r_t:.1f}/{p+r_t:.1f}"
-        row = "  ".join(f"{fmt(r, i):>{col}}" for r in results.values())
+        row = "  ".join(f"{fmt(entries):>{col}}" for entries in results.values())
         log.result(f"{n:>8}  {row}")
 
 
 def save_csv(
-    results: dict[str, list[tuple[int, float, float]]],
+    results: dict[str, list[tuple[int, int, float, float]]],
     model: str,
     base_image: str,
 ) -> None:
@@ -284,48 +293,60 @@ def save_csv(
     model_slug = model.replace("/", "--")
     img_slug = image_slug(base_image)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    splits = [n for n, _, _ in next(iter(results.values()))]
+    splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
     output_path = os.path.join(RESULTS_DIR, f"{model_slug}_{img_slug}_pull_{len(splits)}_{ts}.csv")
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
-        header = ["splits"]
+        header = ["run", "splits"]
         for mode in results:
             slug = mode.replace("-", "_")
             header += [f"{slug}_pull_s", f"{slug}_run_s", f"{slug}_total_s"]
         writer.writerow(header)
-        for i in range(len(splits)):
-            def row(r: list[tuple[int, float, float]], idx: int) -> list[str]:
-                _, p, r_t = r[idx]
-                return [f"{p:.4f}", f"{r_t:.4f}", f"{p+r_t:.4f}"]
-            writer.writerow([splits[i], *(v for r in results.values() for v in row(r, i))])
+        for run in range(N_RUNS):
+            for n in splits:
+                def row_vals(entries: list[tuple[int, int, float, float]]) -> list[str]:
+                    match = [(pull_t, run_t) for r, n_val, pull_t, run_t in entries if r == run and n_val == n]
+                    if not match:
+                        return ["", "", ""]
+                    p, r_t = match[0]
+                    return [f"{p:.4f}", f"{r_t:.4f}", f"{p+r_t:.4f}"]
+                writer.writerow([run, n, *(v for entries in results.values() for v in row_vals(entries))])
     log.result(f"Results saved to {output_path}")
 
 
 def plot(
-    results: dict[str, list[tuple[int, float, float]]],
+    results: dict[str, list[tuple[int, int, float, float]]],
     model: str,
     base_image: str,
 ) -> None:
-    splits = [n for n, _, _ in next(iter(results.values()))]
+    splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
     x = np.arange(len(splits))
     n_modes = len(results)
     width = min(0.8 / n_modes, 0.15)
 
     fig, ax = plt.subplots(figsize=(max(10, n_modes * 2), 6))
 
-    for i, (mode, mode_results) in enumerate(results.items()):
+    for i, (mode, entries) in enumerate(results.items()):
         color = MODE_COLORS[mode]
-        pulls = [p for _, p, _ in mode_results]
-        runs = [r for _, _, r in mode_results]
         offset = (i - (n_modes - 1) / 2) * width
-        ax.bar(x + offset, pulls, width, color=color, alpha=0.5,
+        med_pulls = []
+        med_runs = []
+        for j, n in enumerate(splits):
+            group = [(pull_t, run_t) for _, n_val, pull_t, run_t in entries if n_val == n]
+            med_p = float(np.median([g[0] for g in group])) if group else 0.0
+            med_r = float(np.median([g[1] for g in group])) if group else 0.0
+            med_pulls.append(med_p)
+            med_runs.append(med_r)
+            x_center = x[j] + offset + width / 2
+            add_run_dots(ax, x_center, [g[0] + g[1] for g in group])
+        ax.bar(x + offset, med_pulls, width, color=color, alpha=0.5,
                hatch="//", edgecolor=color, linewidth=0.5)
-        ax.bar(x + offset, runs, width, bottom=pulls, color=color,
+        ax.bar(x + offset, med_runs, width, bottom=med_pulls, color=color,
                edgecolor=color, linewidth=0.5, label=mode)
 
     ax.set_xlabel("Number of splits pulled")
     ax.set_ylabel("Time (s)")
-    ax.set_title("Pull + Run Performance")
+    ax.set_title(f"Pull + Run Performance (median, n={N_RUNS} runs, dots = individual runs)")
     ax.set_xticks(x)
     ax.set_xticklabels(splits)
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")
@@ -357,6 +378,7 @@ def main():
     log.info(f"Modes: {MODES}")
     log.info(f"Splits (2dfs/stargz): {NUM_SPLITS}")
     log.info(f"Splits (base): {BASE_SPLITS}")
+    log.info(f"Runs: {N_RUNS}")
 
     for model, base_image in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
