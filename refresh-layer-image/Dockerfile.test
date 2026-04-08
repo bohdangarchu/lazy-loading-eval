@@ -1,4 +1,0 @@
-FROM alpine:3.19
-ARG CONTENT="hello-v1"
-RUN echo "$CONTENT" > /data.txt
-CMD ["sh", "-c", "while true; do cat /data.txt; sleep 2; done"]
