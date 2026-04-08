@@ -16,6 +16,15 @@ def download_model(model_name: str, work_dir: str) -> list[str]:
     local_dir = os.path.join(work_dir, "models", slug)
     os.makedirs(local_dir, exist_ok=True)
 
+    # Check if already downloaded — avoids hitting the HF API on every call
+    cached = sorted(
+        f for f in os.listdir(local_dir)
+        if f.endswith(".safetensors") or ("pytorch_model" in f and f.endswith(".bin"))
+    )
+    if cached:
+        log.info(f"Using cached model files in {local_dir}")
+        return [os.path.join(local_dir, f) for f in cached]
+
     token = os.environ.get("HF_TOKEN")
     files = list_repo_files(model_name, token=token)
     shards = sorted(f for f in files if f.endswith(".safetensors"))

@@ -21,3 +21,4 @@ results/
 charts/
 Dockerfile.base
 config.yaml
+nohup.out
