@@ -9,6 +9,7 @@ from shared import log
 from shared.build_result import BuildResult
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure, write_csv
 from shared.config import load_config
+from shared.artifacts import mutate_chunk
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -47,14 +48,6 @@ def make_methods(base_image: str):
         ("base",             lambda n: bb.build_only(n, CFG),                      lambda: bb.clear_cache()),
     ]
     return [(name, bf, cf) for name, bf, cf in all_methods if name in MODES]
-
-
-def mutate_chunk(path: str) -> None:
-    with open(path, "r+b") as f:
-        data = np.fromfile(f, dtype=np.uint8)
-        np.bitwise_not(data, out=data)
-        f.seek(0)
-        data.tofile(f)
 
 
 def get_chunks_to_mutate(chunk_paths: list[str], r: int, direction: str) -> list[str]:

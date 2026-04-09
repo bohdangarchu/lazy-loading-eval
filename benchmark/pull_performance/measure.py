@@ -75,6 +75,11 @@ def clear_cache(cfg) -> None:
         _run(f"sudo bash -c 'rm -rf {STARGZ_ROOT}/*'")
         _run("sudo nerdctl image rm -f $(sudo nerdctl images -q) 2>/dev/null || true")
         _run("sudo ctr content rm $(sudo ctr content ls -q) 2>/dev/null || true")
+        # Delete containerd's metadata bolt DB before restart: rm -rf STARGZ_ROOT/* above
+        # removes the stargz plugin's local metadata.db, leaving orphaned stargz snapshot
+        # entries in containerd's bolt DB. Those entries cause rpull to fail with
+        # "already exists". Deleting meta.db lets containerd recreate it fresh on restart.
+        _run("sudo rm -f /var/lib/containerd/io.containerd.metadata.v1.bolt/meta.db")
         _run("sudo systemctl start stargz-snapshotter")
         _run("sudo systemctl restart containerd")
 

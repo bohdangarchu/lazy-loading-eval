@@ -1,6 +1,17 @@
 import json
 import os
 
+import numpy as np
+
+
+def mutate_chunk(path: str) -> None:
+    """Flip all bits in a chunk file in-place. Calling twice restores original content."""
+    with open(path, "r+b") as f:
+        data = np.fromfile(f, dtype=np.uint8)
+        np.bitwise_not(data, out=data)
+        f.seek(0)
+        data.tofile(f)
+
 
 def write_2dfs_json(chunk_paths: list[str], work_dir: str) -> None:
     allotments = [
