@@ -29,18 +29,18 @@ CHARTS_BUILD_DIR = os.path.join(CHARTS_DIR, "build")
 CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 
 EXPERIMENTS = [
-    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~1.4 GB     ~700 MB
+    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    # ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~1.4 GB     ~700 MB
     ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),                      # ~3.09 GB     ~3.4 GB
-    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
+    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
 ]
-MAX_SPLITS = 10
-N_RUNS = 3
+MAX_SPLITS = 3
+N_RUNS = 1
 CFG = load_config()
 WITH_RESOURCE = True
 VERBOSE = True
 SLEEP_SECONDS = 5
-MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
+MODES = ["2dfs", "2dfs-stargz"]
 # MODES = ["2dfs-stargz"]
 
 
@@ -326,6 +326,86 @@ def plot_resource(
     save_figure(fig, output_path)
 
 
+def plot_resource_individual(
+    samples: list[tuple[int, float, float, str]], model: str, max_splits: int,
+    base_image: str,
+) -> None:
+    if not samples:
+        return
+
+    # Collect time-series per (mode_key, n_splits, run)
+    series: dict[tuple[str, int, int], list[tuple[int, float, float]]] = defaultdict(list)
+
+    for ts_ms, cpu, mem, mode in samples:
+        if mode == "idle":
+            continue
+        run_parts = mode.rsplit("_run_", 1)
+        if len(run_parts) != 2 or not run_parts[1].isdigit():
+            continue
+        run = int(run_parts[1])
+        split_parts = run_parts[0].rsplit("_splits_", 1)
+        if len(split_parts) != 2 or not split_parts[1].isdigit():
+            continue
+        base = split_parts[0]
+        n = int(split_parts[1])
+        series[(base, n, run)].append((ts_ms, cpu, mem))
+
+    mode_label = {mode.replace("-", "_"): mode for mode in MODES}
+    model_slug = model.replace("/", "--")
+    img_slug = image_slug(base_image)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+    cpu_dir = os.path.join(CHARTS_RESOURCE_DIR, "cpu")
+    ram_dir = os.path.join(CHARTS_RESOURCE_DIR, "ram")
+    os.makedirs(cpu_dir, exist_ok=True)
+    os.makedirs(ram_dir, exist_ok=True)
+
+    for (mk, n, run), points in sorted(series.items()):
+        points.sort(key=lambda p: p[0])
+        t0 = points[0][0]
+        t_sec = [(p[0] - t0) / 1000.0 for p in points]
+        cpu_vals = [p[1] for p in points]
+        mem_vals = [p[2] for p in points]
+
+        mode_name = mode_label.get(mk, mk)
+        file_stem = f"{model_slug}_{img_slug}_{mk}_run{run + 1}_splits{n}_{ts}"
+
+        def _add_run_footer(fig) -> None:
+            figure_footer(fig, model, base_image)
+            fig.text(
+                0.99, 0.01,
+                f"mode: {mode_name}  |  run: {run + 1}  |  splits: {n}",
+                fontsize=8,
+                verticalalignment="bottom",
+                horizontalalignment="right",
+                family="monospace",
+            )
+
+        # CPU chart
+        fig, ax = plt.subplots(figsize=(8, 3))
+        ax.plot(t_sec, cpu_vals, color=MODE_COLORS.get(mode_name, "#888888"), linewidth=1)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("CPU (%)")
+        ax.set_title("CPU usage over time")
+        ax.grid(True, linestyle="--", alpha=0.5)
+        _add_run_footer(fig)
+        fig.tight_layout()
+        fig.subplots_adjust(bottom=0.18)
+        save_figure(fig, os.path.join(cpu_dir, f"{file_stem}.png"))
+
+        # RAM chart
+        fig, ax = plt.subplots(figsize=(8, 3))
+        ax.plot(t_sec, mem_vals, color=MODE_COLORS.get(mode_name, "#888888"), linewidth=1)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Memory (MB)")
+        ax.set_title("RAM usage over time")
+        ax.grid(True, linestyle="--", alpha=0.5)
+        _add_run_footer(fig)
+        fig.tight_layout()
+        fig.subplots_adjust(bottom=0.18)
+        save_figure(fig, os.path.join(ram_dir, f"{file_stem}.png"))
+
+
 def main():
     log.set_verbose(VERBOSE)
 
@@ -344,6 +424,7 @@ def main():
             samples = monitor.stop()
             save_resource_csv(samples, model, MAX_SPLITS, base_image)
             plot_resource(samples, model, MAX_SPLITS, base_image)
+            plot_resource_individual(samples, model, MAX_SPLITS, base_image)
 
         splits = sorted(set(r["splits"] for r in results))
         log.result("\n=== Comparison (median across runs) ===")
