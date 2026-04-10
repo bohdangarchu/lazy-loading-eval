@@ -126,6 +126,8 @@ def _measure_option(
         log.result(f"  run: {run_t:.2f}s")
 
         results.append((n, pull_t, run_t))
+        log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
+        time.sleep(cfg.pull_cooldown)
     return results
 
 

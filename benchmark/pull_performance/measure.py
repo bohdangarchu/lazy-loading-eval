@@ -259,6 +259,8 @@ def measure(
                 clear_cache(cfg)
                 n_val, pull_t, run_t = _measure_one(mode, n, source_image, cfg)
                 results[mode].append((run, n_val, pull_t, run_t))
+                log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
+                time.sleep(cfg.pull_cooldown)
 
         clear_registry(cfg, preserve_base=True)
 

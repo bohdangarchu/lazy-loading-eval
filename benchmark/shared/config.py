@@ -11,6 +11,8 @@ class EnvConfig:
     tmpdir: Optional[str]
     tdfs_binary: str
     full_cache_wipe: bool
+    build_cooldown: int
+    pull_cooldown: int
 
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")

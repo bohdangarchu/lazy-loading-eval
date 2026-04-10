@@ -25,16 +25,15 @@ RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "config")
 CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "config")
 
 EXPERIMENTS = [
-    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    # ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB     ~700 MB
-    # ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
-    # ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),      # ~6.0 GB     ~50 MB
+    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    ("openai-community/gpt2-medium", "docker.io/tensorflow/tensorflow"),     # ~1.52 GB     ~700 MB
+    ("openai-community/gpt2-large", "docker.io/ollama/ollama"),              # ~3.25 GB     ~3.4 GB
+    ("openai-community/gpt2-xl", "docker.io/library/python:3.12-slim"),      # ~6.0 GB     ~50 MB
     ("openai-community/gpt2", "docker.io/tensorflow/tensorflow"),            # ~0.5GB     ~700 MB, only model size matters
 ]
 MAX_SPLITS = 5
 CFG = load_config()
 VERBOSE = True
-SLEEP_SECONDS = 5
 MODE = "2dfs-stargz"  # or "2dfs-stargz-zstd"
 FLAG_OPTIONS: list[tuple[str, str]] = [
     ("--stargz-chunk-size 16777216", "chunk-size 16 MiB"),
@@ -117,8 +116,8 @@ def measure(model: str, max_splits: int, source_image: str) -> dict[str, ResultL
         results[flags] = flag_results
 
         if i < len(FLAG_OPTIONS) - 1:
-            log.info(f"\nSleeping {SLEEP_SECONDS}s before next flag option...")
-            time.sleep(SLEEP_SECONDS)
+            log.info(f"\nSleeping {CFG.build_cooldown}s before next flag option...")
+            time.sleep(CFG.build_cooldown)
 
     return results
 

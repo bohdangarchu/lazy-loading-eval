@@ -29,17 +29,16 @@ CHARTS_BUILD_DIR = os.path.join(CHARTS_DIR, "build")
 CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 
 EXPERIMENTS = [
-    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    # ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~1.4 GB     ~700 MB
+    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~1.4 GB     ~700 MB
     ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),                      # ~3.09 GB     ~3.4 GB
-    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
+    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
 ]
 MAX_SPLITS = 3
 N_RUNS = 1
 CFG = load_config()
 WITH_RESOURCE = True
 VERBOSE = True
-SLEEP_SECONDS = 5
 MODES = ["2dfs", "2dfs-stargz"]
 # MODES = ["2dfs-stargz"]
 
@@ -131,8 +130,8 @@ def measure_builds(
 
                 is_last = (i == len(MODES) - 1) and (n == max_splits) and (run == N_RUNS - 1)
                 if not is_last:
-                    log.info(f"\nSleeping {SLEEP_SECONDS}s before next...")
-                    time.sleep(SLEEP_SECONDS)
+                    log.info(f"\nSleeping {cfg.build_cooldown}s before next...")
+                    time.sleep(cfg.build_cooldown)
 
     return results
 

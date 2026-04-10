@@ -33,7 +33,6 @@ N_SPLITS = 10
 N_RUNS = 3
 CFG = load_config()
 VERBOSE = True
-SLEEP_SECONDS = 5
 DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
 R_VALUES = [2, 4, 6, 8, 10]
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
@@ -99,7 +98,8 @@ def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
                     })
 
                     log.result(f"Rebuild time: {br.total_s:.2f}s")
-                    time.sleep(SLEEP_SECONDS)
+                    log.info(f"\nSleeping {CFG.build_cooldown}s before next...")
+                    time.sleep(CFG.build_cooldown)
 
     return results
 

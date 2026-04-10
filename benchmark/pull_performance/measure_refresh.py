@@ -258,6 +258,8 @@ def measure_refresh(
                 log.result(f"  post-refresh access ({k} layers): {refresh_t:.2f}s")
 
                 _stop_container(name)
+                log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
+                time.sleep(cfg.pull_cooldown)
 
                 results[mode].append((run, k, pull_t, baseline_t, refresh_t))
 
