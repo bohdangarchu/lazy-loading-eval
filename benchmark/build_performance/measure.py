@@ -1,5 +1,6 @@
 import csv
 import os
+import subprocess
 import threading
 import time
 from collections import defaultdict
@@ -19,8 +20,10 @@ from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_stargz as bs
 from build_performance import build_base as bb
+from build_performance.prepare import prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
 RESULTS_BUILD_DIR = os.path.join(RESULTS_DIR, "build")
 RESULTS_RESOURCE_DIR = os.path.join(RESULTS_DIR, "resource")
@@ -82,17 +85,17 @@ def _clear_cache(mode: str, cfg) -> None:
         raise ValueError(f"Unknown mode: {mode}")
 
 
-def _run_one(mode: str, model: str, n: int, cfg, source_image: str) -> BuildResult:
+def _run_one(mode: str, n: int, cfg, source_image: str) -> BuildResult:
     if mode == "2dfs":
-        return b2.run_one(model, n, cfg, source_image)
+        return b2.run_one(n, cfg, source_image)
     elif mode == "2dfs-stargz":
-        return b2s.run_one(model, n, cfg, source_image)
+        return b2s.run_one(n, cfg, source_image)
     elif mode == "2dfs-stargz-zstd":
-        return b2sz.run_one(model, n, cfg, source_image)
+        return b2sz.run_one(n, cfg, source_image)
     elif mode == "stargz":
-        return bs.run_one(model, n, cfg, source_image)
+        return bs.run_one(n, cfg)
     elif mode == "base":
-        return bb.run_one(model, n, cfg, source_image)
+        return bb.run_one(n, cfg)
     raise ValueError(f"Unknown mode: {mode}")
 
 
@@ -105,13 +108,16 @@ def measure_builds(
     for run in range(cfg.build_n_runs):
         log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{cfg.build_n_runs} ===")
         for n in range(1, max_splits + 1):
+            log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
+            subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
+            prepare(model, n, source_image, cfg)
             for i, mode in enumerate(MODES):
                 monitor_key = mode.replace("-", "_")
                 if monitor:
                     monitor.set_mode(f"{monitor_key}_splits_{n}_run_{run}")
                 log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === {mode}: {n} split(s) ===")
                 _clear_cache(mode, cfg)
-                br = _run_one(mode, model, n, cfg, source_image)
+                br = _run_one(mode, n, cfg, source_image)
                 if monitor:
                     monitor.set_mode("idle")
                 results.append({
