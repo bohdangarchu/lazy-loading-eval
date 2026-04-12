@@ -6,6 +6,7 @@ from huggingface_hub import hf_hub_download, list_repo_files
 load_dotenv()
 
 from shared import fs, log, paths
+from shared.registry import clear_registry
 from shared.services import clear_2dfs_cache, clear_stargz_cache, prune_buildkit
 
 BUFFER_SIZE = 8 * 1024 * 1024  # 8 MB
@@ -57,8 +58,32 @@ def cleanup_pull_experiment(model_name: str, work_dir: str, cfg) -> None:
     fs.rmtree(paths.models_dir(work_dir, model_name))
     fs.rmtree(paths.model_chunks_dir(work_dir, model_name))
     clear_2dfs_cache(cfg)
-    clear_stargz_cache()
     prune_buildkit()
+    clear_stargz_cache()
+
+
+def cleanup_build_artifacts(build_dir: str, cfg) -> None:
+    """Clear build_performance models/chunks and all caches between build and pull phases.
+
+    Preserves base images in the registry (-plain/-esgz/-zstd) so pull scripts can
+    reuse them without re-converting.
+    """
+    log.info("Cleaning up build artifacts...")
+    fs.clear_dir(os.path.join(build_dir, "models"))
+    fs.clear_dir(paths.chunks_dir(build_dir))
+    prune_buildkit()
+    clear_registry(cfg, preserve_base=True)
+    clear_stargz_cache()
+
+
+def cleanup_pull_artifacts(experiments: list, pull_dir: str, cfg) -> None:
+    """Full cleanup after all pull experiments: per-model cleanup then wipe registry.
+
+    Called at the very end of a nightly run to leave the system in a clean state.
+    """
+    for model, _ in experiments:
+        cleanup_pull_experiment(model, pull_dir, cfg)
+    clear_registry(cfg, preserve_base=False)
 
 
 def split_model(shard_paths: list[str], num_splits: int, work_dir: str, output_dir: str = None) -> list[str]:

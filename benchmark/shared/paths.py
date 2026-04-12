@@ -11,6 +11,12 @@ def now_ts() -> str:
 
 # ── directory helpers ──────────────────────────────────────────────
 
+def build_perf_dir(benchmark_dir: str) -> str:
+    return os.path.join(benchmark_dir, "build_performance")
+
+def pull_perf_dir(benchmark_dir: str) -> str:
+    return os.path.join(benchmark_dir, "pull_performance")
+
 def chunks_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "chunks")
 
