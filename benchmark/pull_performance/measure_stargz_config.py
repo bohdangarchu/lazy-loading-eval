@@ -13,7 +13,7 @@ import numpy as np
 from shared import log
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure
 from shared.config import load_config
-from shared.registry import prepare_local_registry, registry, image_slug
+from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
 from pull_performance.measure import clear_cache, _timed_pull, _timed_run, _run_cmd
 from pull_performance.prepare import (
     prepare_2dfs_stargz, prepare_2dfs_stargz_zstd, prepare_chunks,
@@ -27,8 +27,8 @@ STARGZ_CONFIG_PATH = "/etc/containerd-stargz-grpc/config.toml"
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
-    # ("openai-community/gpt2-medium", "docker.io/library/python:3.12-slim"),   # ~1.52 GB    ~50 MB
-    # ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
+    ("openai-community/gpt2-medium", "docker.io/library/python:3.12-slim"),   # ~1.52 GB    ~50 MB
+    ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
 ]
 MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
@@ -150,17 +150,20 @@ def measure(
     # results[(mode, config_label)] = list of (run, n, pull_t, run_t)
     results: dict[tuple[str, str], list[tuple[int, int, float, float]]] = {}
 
-    log.info("\n=== Preparing images ===")
-    for mode in MODES:
-        log.info(f"\n--- Preparing mode: {mode} ---")
-        prepare_local_registry(source_image, registry(cfg))
-        _prepare_mode(mode, chunk_paths, source_image, cfg)
-
     base_config = _read_base_config()
+
+    def _prepare_all_images():
+        log.info("\n=== Preparing images ===")
+        for mode in MODES:
+            log.info(f"\n--- Preparing mode: {mode} ---")
+            prepare_local_registry(source_image, registry(cfg))
+            _prepare_mode(mode, chunk_paths, source_image, cfg)
 
     try:
         for overrides, label in CONFIG_OPTIONS:
             log.info(f"\n=== Config option: {label} ===")
+            clear_registry(cfg, preserve_base=True)
+            _prepare_all_images()
             config_content = _apply_overrides(base_config, overrides)
             apply_stargz_config(config_content)
 

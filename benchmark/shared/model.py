@@ -51,8 +51,8 @@ def download_model(model_name: str, work_dir: str) -> list[str]:
     return local_paths
 
 
-def split_model(shard_paths: list[str], num_splits: int, work_dir: str) -> list[str]:
-    chunk_dir = os.path.join(work_dir, "chunks")
+def split_model(shard_paths: list[str], num_splits: int, work_dir: str, output_dir: str = None) -> list[str]:
+    chunk_dir = output_dir if output_dir is not None else os.path.join(work_dir, "chunks")
     os.makedirs(chunk_dir, exist_ok=True)
 
     chunk_paths = [os.path.join(chunk_dir, f"chunk{i + 1}.bin") for i in range(num_splits)]

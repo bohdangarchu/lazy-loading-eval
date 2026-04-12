@@ -3,7 +3,7 @@ import subprocess
 
 from shared import log
 from shared.config import EnvConfig
-from shared.model import download_model, split_model
+from shared.model import download_model, split_model, model_slug
 from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_base_dockerfile
 from shared.registry import stargz_base_image, plain_base_image, zstd_base_image, tdfs_cmd
 from pull_performance.images import (
@@ -25,12 +25,14 @@ def _clear_2dfs_cache(cfg: EnvConfig) -> None:
 
 
 def prepare_chunks(model_name: str, num_splits: int) -> list[str]:
-    chunk_paths = [os.path.join(SCRIPT_DIR, "chunks", f"chunk{i+1}.bin") for i in range(num_splits)]
+    chunk_dir = os.path.join(SCRIPT_DIR, "chunks", model_slug(model_name))
+    chunk_paths = [os.path.join(chunk_dir, f"chunk{i+1}.bin") for i in range(num_splits)]
     if all(os.path.exists(p) for p in chunk_paths):
         log.info("Chunks already exist, skipping download and split.")
         return chunk_paths
+    os.makedirs(chunk_dir, exist_ok=True)
     shard_paths = download_model(model_name, SCRIPT_DIR)
-    return split_model(shard_paths, num_splits, SCRIPT_DIR)
+    return split_model(shard_paths, num_splits, SCRIPT_DIR, output_dir=chunk_dir)
 
 
 # ── build + push per mode ───────────────────────────────────────────
