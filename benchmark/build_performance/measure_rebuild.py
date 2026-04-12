@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from shared import log
-from shared import paths
 from shared.build_result import BuildResult
+from build_performance.paths import rebuild_charts_dir, rebuild_csv_path, rebuild_chart_path
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure, write_csv
 from shared.config import load_config
 from shared.artifacts import mutate_chunk
@@ -100,7 +100,7 @@ def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
 
 
 def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
-    path = paths.rebuild_csv_path(SCRIPT_DIR, model, base_image, n)
+    path = rebuild_csv_path(SCRIPT_DIR, model, base_image, n)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fieldnames = ["run", "r", "direction", "method", "rebuild_s",
                   "pull_s", "context_transfer_s", "build_s", "export_s"]
@@ -116,7 +116,7 @@ def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
 
 
 def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
-    os.makedirs(paths.rebuild_charts_dir(SCRIPT_DIR), exist_ok=True)
+    os.makedirs(rebuild_charts_dir(SCRIPT_DIR), exist_ok=True)
 
     n_modes = len(MODES)
     bar_width = 0.8 / n_modes
@@ -157,7 +157,7 @@ def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
     figure_footer(fig, model, base_image)
     fig.tight_layout()
 
-    path = paths.rebuild_chart_path(SCRIPT_DIR, model, base_image, n)
+    path = rebuild_chart_path(SCRIPT_DIR, model, base_image, n)
     save_figure(fig, path)
 
 

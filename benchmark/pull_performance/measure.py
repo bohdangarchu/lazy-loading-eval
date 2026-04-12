@@ -10,8 +10,8 @@ import matplotlib.patches as mpatches
 import numpy as np
 
 from shared import log
-from shared import paths
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, save_figure
+from pull_performance.paths import pull_csv_path, pull_chart_path
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
 from shared.services import ensure_buildkit, clear_stargz_cache
@@ -263,7 +263,7 @@ def save_csv(
     base_image: str,
 ) -> None:
     splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
-    output_path = paths.pull_csv_path(SCRIPT_DIR, model, base_image, len(splits))
+    output_path = pull_csv_path(SCRIPT_DIR, model, base_image, len(splits))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -330,7 +330,7 @@ def plot(
 
     figure_footer(fig, model, base_image)
 
-    output_path = paths.pull_chart_path(SCRIPT_DIR, model, base_image, len(splits))
+    output_path = pull_chart_path(SCRIPT_DIR, model, base_image, len(splits))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout()
     save_figure(fig, output_path)

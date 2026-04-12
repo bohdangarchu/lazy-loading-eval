@@ -11,8 +11,8 @@ from matplotlib.lines import Line2D
 import numpy as np
 
 from shared import log
-from shared import paths
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, save_figure, write_csv
+from pull_performance.paths import refresh_csv_path, refresh_chart_path
 from shared.config import load_config
 from shared.registry import (
     prepare_local_registry, clear_registry, registry, image_slug,
@@ -287,7 +287,7 @@ def save_results_csv(
     model: str,
     base_image: str,
 ) -> None:
-    path = paths.refresh_csv_path(SCRIPT_DIR, model, base_image)
+    path = refresh_csv_path(SCRIPT_DIR, model, base_image)
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     fieldnames = ["run", "n_refreshed"]
@@ -365,7 +365,7 @@ def plot(
 
     figure_footer(fig, model, base_image)
 
-    output_path = paths.refresh_chart_path(SCRIPT_DIR, model, base_image)
+    output_path = refresh_chart_path(SCRIPT_DIR, model, base_image)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout()
     save_figure(fig, output_path)

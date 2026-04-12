@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 import matplotlib.pyplot as plt
 
 from shared import log
-from shared import paths
 from shared.charts import figure_footer, save_figure
+from build_performance.paths import compression_charts_dir, compression_csv_path, compression_chart_path
 from shared.config import load_config
 from shared.registry import prepare_local_registry, registry, plain_base_image, tdfs_cmd, image_slug
 from shared.build_result import BuildResult
@@ -106,7 +106,7 @@ def run_level(key: str, label: str, level: str) -> list[tuple[int, RunResult]]:
 
 
 def save_csv(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> None:
-    path = paths.compression_csv_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, MAX_SPLITS)
+    path = compression_csv_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, MAX_SPLITS)
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     header = ["splits"]
@@ -130,7 +130,7 @@ def save_csv(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) ->
 
 
 def plot(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> None:
-    os.makedirs(paths.compression_charts_dir(SCRIPT_DIR), exist_ok=True)
+    os.makedirs(compression_charts_dir(SCRIPT_DIR), exist_ok=True)
     splits = [n for n, _ in all_results[0][2]]
 
     def to_mb(size_str: str) -> float:
@@ -163,7 +163,7 @@ def plot(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> Non
 
     figure_footer(fig, MODEL, SOURCE_IMAGE)
     fig.tight_layout()
-    save_figure(fig, paths.compression_chart_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, MAX_SPLITS))
+    save_figure(fig, compression_chart_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, MAX_SPLITS))
 
 
 def main():

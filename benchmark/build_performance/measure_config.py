@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 import matplotlib.pyplot as plt
 
 from shared import log
-from shared import paths
 from shared.charts import figure_footer, save_figure
+from build_performance.paths import config_charts_dir, measure_config_csv_path, measure_config_chart_path
 from shared.build_result import BuildResult
 from shared.config import load_config
 from shared.registry import (
@@ -126,7 +126,7 @@ def save_csv(
     model: str,
     base_image: str,
 ) -> None:
-    output_path = paths.measure_config_csv_path(SCRIPT_DIR, model, base_image, MODE, len(splits))
+    output_path = measure_config_csv_path(SCRIPT_DIR, model, base_image, MODE, len(splits))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     header = ["splits"]
@@ -153,7 +153,7 @@ def plot(
     base_image: str,
 ) -> None:
     splits = [n for n, _ in next(iter(results.values()))]
-    os.makedirs(paths.config_charts_dir(SCRIPT_DIR), exist_ok=True)
+    os.makedirs(config_charts_dir(SCRIPT_DIR), exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(8, 5))
     for flags, flag_results in results.items():
@@ -168,7 +168,7 @@ def plot(
     figure_footer(fig, model, base_image)
     fig.tight_layout()
 
-    output_path = paths.measure_config_chart_path(SCRIPT_DIR, model, base_image, MODE, len(splits))
+    output_path = measure_config_chart_path(SCRIPT_DIR, model, base_image, MODE, len(splits))
     save_figure(fig, output_path)
 
 

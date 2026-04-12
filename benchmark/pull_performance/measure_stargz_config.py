@@ -11,8 +11,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from shared import log
-from shared import paths
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure
+from pull_performance.paths import (
+    stargz_config_charts_dir, stargz_config_csv_path, stargz_config_chart_path,
+)
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
 from pull_performance.measure import _timed_pull, _timed_run, _run_cmd
@@ -192,7 +194,7 @@ def save_csv(
     model: str,
     base_image: str,
 ) -> None:
-    output_path = paths.stargz_config_csv_path(SCRIPT_DIR, model, base_image)
+    output_path = stargz_config_csv_path(SCRIPT_DIR, model, base_image)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
 
@@ -232,7 +234,7 @@ def plot(
     model: str,
     base_image: str,
 ) -> None:
-    os.makedirs(paths.stargz_config_charts_dir(SCRIPT_DIR), exist_ok=True)
+    os.makedirs(stargz_config_charts_dir(SCRIPT_DIR), exist_ok=True)
 
     config_labels = [label for _, label in CONFIG_OPTIONS]
     splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
@@ -289,7 +291,7 @@ def plot(
         figure_footer(fig, model, base_image)
         fig.tight_layout()
 
-        output_path = paths.stargz_config_chart_path(SCRIPT_DIR, model, base_image, mode)
+        output_path = stargz_config_chart_path(SCRIPT_DIR, model, base_image, mode)
         save_figure(fig, output_path)
 
 

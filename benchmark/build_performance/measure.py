@@ -10,8 +10,12 @@ import numpy as np
 import psutil
 
 from shared import log
-from shared import paths
 from shared.build_result import BuildResult
+from shared.paths import now_ts
+from build_performance.paths import (
+    build_csv_path, build_charts_dir, build_chart_path,
+    resource_csv_path, resource_chart_path, resource_cpu_charts_dir, resource_ram_charts_dir,
+)
 from shared.config import load_config
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure, write_csv
 from shared.registry import prepare_local_registry, registry, image_slug
@@ -133,7 +137,7 @@ def measure_builds(
 
 
 def save_csv(results: list[dict], model: str, base_image: str) -> None:
-    output_path = paths.build_csv_path(SCRIPT_DIR, model, base_image)
+    output_path = build_csv_path(SCRIPT_DIR, model, base_image)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fieldnames = ["run", "splits", "mode", "total_s", "pull_s", "ctx_s", "build_s", "export_s"]
     rows = [{
@@ -149,7 +153,7 @@ def save_csv(results: list[dict], model: str, base_image: str) -> None:
 
 def plot(results: list[dict], model: str, base_image: str) -> None:
     splits = sorted(set(r["splits"] for r in results))
-    os.makedirs(paths.build_charts_dir(SCRIPT_DIR), exist_ok=True)
+    os.makedirs(build_charts_dir(SCRIPT_DIR), exist_ok=True)
 
     n_modes = len(MODES)
     n_splits = len(splits)
@@ -194,7 +198,7 @@ def plot(results: list[dict], model: str, base_image: str) -> None:
     figure_footer(fig, model, base_image)
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.18)
-    path = paths.build_chart_path(SCRIPT_DIR, model, base_image, n_splits)
+    path = build_chart_path(SCRIPT_DIR, model, base_image, n_splits)
     save_figure(fig, path)
 
 
@@ -202,7 +206,7 @@ def save_resource_csv(
     samples: list[tuple[int, float, float, str]], model: str, max_splits: int,
     base_image: str,
 ) -> None:
-    output_path = paths.resource_csv_path(SCRIPT_DIR, model, base_image, max_splits)
+    output_path = resource_csv_path(SCRIPT_DIR, model, base_image, max_splits)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -304,7 +308,7 @@ def plot_resource(
 
     figure_footer(fig, model, base_image)
 
-    output_path = paths.resource_chart_path(SCRIPT_DIR, model, base_image, max_splits)
+    output_path = resource_chart_path(SCRIPT_DIR, model, base_image, max_splits)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout()
     save_figure(fig, output_path)
@@ -337,9 +341,9 @@ def plot_resource_individual(
     mode_label = {mode.replace("-", "_"): mode for mode in MODES}
     model_slug = model.replace("/", "--")
     img_slug = image_slug(base_image)
-    ts = paths.now_ts()
-    cpu_dir = paths.resource_cpu_charts_dir(SCRIPT_DIR)
-    ram_dir = paths.resource_ram_charts_dir(SCRIPT_DIR)
+    ts = now_ts()
+    cpu_dir = resource_cpu_charts_dir(SCRIPT_DIR)
+    ram_dir = resource_ram_charts_dir(SCRIPT_DIR)
     os.makedirs(cpu_dir, exist_ok=True)
     os.makedirs(ram_dir, exist_ok=True)
 
