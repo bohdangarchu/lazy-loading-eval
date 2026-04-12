@@ -1,6 +1,9 @@
 import os
 
+from dotenv import load_dotenv
 from huggingface_hub import hf_hub_download, list_repo_files
+
+load_dotenv()
 
 from shared import log
 

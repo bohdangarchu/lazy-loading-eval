@@ -1,3 +1,4 @@
+.env
 /binaries
 .venv
 big_file*
