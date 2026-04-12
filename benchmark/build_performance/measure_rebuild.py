@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from shared import log
+from shared import paths
 from shared.build_result import BuildResult
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure, write_csv
 from shared.config import load_config
@@ -19,9 +20,6 @@ from build_performance import build_stargz as bs
 from build_performance.prepare import prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
-RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "rebuild")
-CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "rebuild")
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
@@ -102,10 +100,8 @@ def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
 
 
 def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
-    slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(RESULTS_DIR, f"{slug}_{img_slug}_rebuild_n{n}_{ts}.csv")
+    path = paths.rebuild_csv_path(SCRIPT_DIR, model, base_image, n)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     fieldnames = ["run", "r", "direction", "method", "rebuild_s",
                   "pull_s", "context_transfer_s", "build_s", "export_s"]
     rows = [{
@@ -120,10 +116,7 @@ def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
 
 
 def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
-    os.makedirs(CHARTS_DIR, exist_ok=True)
-    slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    os.makedirs(paths.rebuild_charts_dir(SCRIPT_DIR), exist_ok=True)
 
     n_modes = len(MODES)
     bar_width = 0.8 / n_modes
@@ -164,7 +157,7 @@ def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
     figure_footer(fig, model, base_image)
     fig.tight_layout()
 
-    path = os.path.join(CHARTS_DIR, f"{slug}_{img_slug}_rebuild_n{n}_{ts}.png")
+    path = paths.rebuild_chart_path(SCRIPT_DIR, model, base_image, n)
     save_figure(fig, path)
 
 

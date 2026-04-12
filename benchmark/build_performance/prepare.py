@@ -6,13 +6,13 @@ from shared.model import download_model, split_model
 from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_base_dockerfile
 from shared.registry import plain_base_image
 from shared import log
+from shared import paths
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
 
 
 def clear_chunks() -> None:
-    subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
+    subprocess.run(f"rm -rf {paths.chunks_dir(SCRIPT_DIR)}/*", shell=True, check=True, capture_output=not log.VERBOSE)
 
 
 def prepare(model_name: str, num_splits: int, source_image: str = "", cfg: EnvConfig = None) -> list[str]:

@@ -10,6 +10,7 @@ import matplotlib.patches as mpatches
 import numpy as np
 
 from shared import log
+from shared import paths
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, save_figure
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
@@ -37,8 +38,6 @@ MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 # MODES = ["2dfs-stargz"]
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "pull")
-CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "pull")
 
 # ── helpers ────────────────────────────────────────────────────────
 
@@ -263,12 +262,9 @@ def save_csv(
     model: str,
     base_image: str,
 ) -> None:
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    model_slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
-    output_path = os.path.join(RESULTS_DIR, f"{model_slug}_{img_slug}_pull_{len(splits)}_{ts}.csv")
+    output_path = paths.pull_csv_path(SCRIPT_DIR, model, base_image, len(splits))
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         header = ["run", "splits"]
@@ -334,11 +330,8 @@ def plot(
 
     figure_footer(fig, model, base_image)
 
-    os.makedirs(CHARTS_DIR, exist_ok=True)
-    model_slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_pull_{len(splits)}_{ts}.png")
+    output_path = paths.pull_chart_path(SCRIPT_DIR, model, base_image, len(splits))
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout()
     save_figure(fig, output_path)
 

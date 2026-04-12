@@ -2,8 +2,9 @@ import os
 import subprocess
 
 from shared import log
+from shared import paths
 from shared.config import EnvConfig
-from shared.model import download_model, split_model, model_slug
+from shared.model import download_model, split_model
 from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_base_dockerfile
 from shared.registry import stargz_base_image, plain_base_image, zstd_base_image, tdfs_cmd
 from shared.services import clear_2dfs_cache
@@ -19,7 +20,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def prepare_chunks(model_name: str, num_splits: int) -> list[str]:
-    chunk_dir = os.path.join(SCRIPT_DIR, "chunks", model_slug(model_name))
+    chunk_dir = paths.model_chunks_dir(SCRIPT_DIR, model_name)
     chunk_paths = [os.path.join(chunk_dir, f"chunk{i+1}.bin") for i in range(num_splits)]
     if all(os.path.exists(p) for p in chunk_paths):
         log.info("Chunks already exist, skipping download and split.")

@@ -10,6 +10,7 @@ import numpy as np
 import psutil
 
 from shared import log
+from shared import paths
 from shared.build_result import BuildResult
 from shared.config import load_config
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure, write_csv
@@ -22,12 +23,6 @@ from build_performance import build_base as bb
 from build_performance.prepare import prepare, clear_chunks
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
-RESULTS_BUILD_DIR = os.path.join(RESULTS_DIR, "build")
-RESULTS_RESOURCE_DIR = os.path.join(RESULTS_DIR, "resource")
-CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts")
-CHARTS_BUILD_DIR = os.path.join(CHARTS_DIR, "build")
-CHARTS_RESOURCE_DIR = os.path.join(CHARTS_DIR, "resource")
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
@@ -138,10 +133,8 @@ def measure_builds(
 
 
 def save_csv(results: list[dict], model: str, base_image: str) -> None:
-    model_slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(RESULTS_BUILD_DIR, f"{model_slug}_{img_slug}_{ts}.csv")
+    output_path = paths.build_csv_path(SCRIPT_DIR, model, base_image)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fieldnames = ["run", "splits", "mode", "total_s", "pull_s", "ctx_s", "build_s", "export_s"]
     rows = [{
         **row,
@@ -156,10 +149,7 @@ def save_csv(results: list[dict], model: str, base_image: str) -> None:
 
 def plot(results: list[dict], model: str, base_image: str) -> None:
     splits = sorted(set(r["splits"] for r in results))
-    os.makedirs(CHARTS_BUILD_DIR, exist_ok=True)
-    model_slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    os.makedirs(paths.build_charts_dir(SCRIPT_DIR), exist_ok=True)
 
     n_modes = len(MODES)
     n_splits = len(splits)
@@ -204,7 +194,7 @@ def plot(results: list[dict], model: str, base_image: str) -> None:
     figure_footer(fig, model, base_image)
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.18)
-    path = os.path.join(CHARTS_BUILD_DIR, f"{model_slug}_{img_slug}_stages_{n_splits}_{ts}.png")
+    path = paths.build_chart_path(SCRIPT_DIR, model, base_image, n_splits)
     save_figure(fig, path)
 
 
@@ -212,11 +202,8 @@ def save_resource_csv(
     samples: list[tuple[int, float, float, str]], model: str, max_splits: int,
     base_image: str,
 ) -> None:
-    os.makedirs(RESULTS_RESOURCE_DIR, exist_ok=True)
-    model_slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(RESULTS_RESOURCE_DIR, f"{model_slug}_{img_slug}_resource_splits_{max_splits}_{ts}.csv")
+    output_path = paths.resource_csv_path(SCRIPT_DIR, model, base_image, max_splits)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["timestamp_ms", "cpu_percent", "mem_mb", "mode"])
@@ -317,11 +304,8 @@ def plot_resource(
 
     figure_footer(fig, model, base_image)
 
-    os.makedirs(CHARTS_RESOURCE_DIR, exist_ok=True)
-    model_slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(CHARTS_RESOURCE_DIR, f"{model_slug}_{img_slug}_resource_splits_{max_splits}_{ts}.png")
+    output_path = paths.resource_chart_path(SCRIPT_DIR, model, base_image, max_splits)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout()
     save_figure(fig, output_path)
 
@@ -353,10 +337,9 @@ def plot_resource_individual(
     mode_label = {mode.replace("-", "_"): mode for mode in MODES}
     model_slug = model.replace("/", "--")
     img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-
-    cpu_dir = os.path.join(CHARTS_RESOURCE_DIR, "cpu")
-    ram_dir = os.path.join(CHARTS_RESOURCE_DIR, "ram")
+    ts = paths.now_ts()
+    cpu_dir = paths.resource_cpu_charts_dir(SCRIPT_DIR)
+    ram_dir = paths.resource_ram_charts_dir(SCRIPT_DIR)
     os.makedirs(cpu_dir, exist_ok=True)
     os.makedirs(ram_dir, exist_ok=True)
 

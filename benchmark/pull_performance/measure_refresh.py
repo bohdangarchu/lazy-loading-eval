@@ -11,6 +11,7 @@ from matplotlib.lines import Line2D
 import numpy as np
 
 from shared import log
+from shared import paths
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, save_figure, write_csv
 from shared.config import load_config
 from shared.registry import (
@@ -18,10 +19,9 @@ from shared.registry import (
     tdfs_cmd, stargz_base_image, zstd_base_image,
 )
 from shared.artifacts import write_2dfs_json, mutate_chunk
-from shared.services import ensure_buildkit
-from pull_performance.prepare import prepare_chunks, _clear_2dfs_cache
+from shared.services import ensure_buildkit, clear_2dfs_cache, clear_stargz_cache
+from pull_performance.prepare import prepare_chunks
 from pull_performance.measure import _next_container_name
-from shared.services import clear_stargz_cache
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
@@ -34,8 +34,6 @@ VERBOSE = True
 MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "refresh")
-CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "refresh")
 
 _ALLOTMENT_RE = re.compile(r"Stargz Allotment 0/(\d+) ([a-f0-9]{64})")
 
@@ -136,7 +134,7 @@ def prepare_refresh(
       vN: all chunks bit-flipped
     Chunks are restored to original content after all builds.
     """
-    _clear_2dfs_cache(cfg)
+    clear_2dfs_cache(cfg)
 
     all_digests: list[dict[int, str]] = []
 
@@ -289,11 +287,8 @@ def save_results_csv(
     model: str,
     base_image: str,
 ) -> None:
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    model_slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(RESULTS_DIR, f"{model_slug}_{img_slug}_refresh_{ts}.csv")
+    path = paths.refresh_csv_path(SCRIPT_DIR, model, base_image)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
 
     fieldnames = ["run", "n_refreshed"]
     for mode in results:
@@ -324,7 +319,6 @@ def plot(
     model: str,
     base_image: str,
 ) -> None:
-    os.makedirs(CHARTS_DIR, exist_ok=True)
     k_values = list(range(1, CFG.refresh_n_splits + 1))
     x = np.arange(len(k_values))
     n_modes = len(results)
@@ -371,10 +365,8 @@ def plot(
 
     figure_footer(fig, model, base_image)
 
-    model_slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_refresh_{ts}.png")
+    output_path = paths.refresh_chart_path(SCRIPT_DIR, model, base_image)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout()
     save_figure(fig, output_path)
 

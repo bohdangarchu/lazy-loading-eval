@@ -3,6 +3,8 @@ import os
 
 import numpy as np
 
+from shared import paths
+
 
 def mutate_chunk(path: str) -> None:
     """Flip all bits in a chunk file in-place. Calling twice restores original content."""
@@ -24,7 +26,7 @@ def write_2dfs_json(chunk_paths: list[str], work_dir: str) -> None:
         for i, p in enumerate(chunk_paths)
     ]
     data = {"allotments": allotments}
-    out_path = os.path.join(work_dir, "2dfs.json")
+    out_path = paths.tdfs_json_path(work_dir)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
 
@@ -35,7 +37,7 @@ def create_stargz_dockerfile(chunk_paths: list[str], base_image: str, work_dir: 
         rel = os.path.relpath(p, work_dir)
         name = os.path.basename(p)
         lines.append(f"COPY {rel} /{name}")
-    out_path = os.path.join(work_dir, "Dockerfile.stargz")
+    out_path = paths.stargz_dockerfile_path(work_dir)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
@@ -46,6 +48,6 @@ def create_base_dockerfile(chunk_paths: list[str], base_image: str, work_dir: st
         rel = os.path.relpath(p, work_dir)
         name = os.path.basename(p)
         lines.append(f"COPY {rel} /{name}")
-    out_path = os.path.join(work_dir, "Dockerfile.base")
+    out_path = paths.base_dockerfile_path(work_dir)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

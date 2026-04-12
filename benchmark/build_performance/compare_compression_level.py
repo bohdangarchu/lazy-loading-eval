@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import matplotlib.pyplot as plt
 
 from shared import log
+from shared import paths
 from shared.charts import figure_footer, save_figure
 from shared.config import load_config
 from shared.registry import prepare_local_registry, registry, plain_base_image, tdfs_cmd, image_slug
@@ -19,9 +20,6 @@ from shared.tdfs_parser import parse_tdfs_output
 from build_performance.prepare import prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
-RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "compression")
-CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "compression")
 
 MODEL = "openai-community/gpt2-medium"
 SOURCE_IMAGE = "docker.io/library/python:3.12-slim"
@@ -97,7 +95,7 @@ def run_level(key: str, label: str, level: str) -> list[tuple[int, RunResult]]:
     results = []
     for n in range(1, MAX_SPLITS + 1):
         log.info(f"\n=== Preparing {n} split(s) ===")
-        subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
+        subprocess.run(f"rm -rf {paths.chunks_dir(SCRIPT_DIR)}/*", shell=True, check=True, capture_output=not log.VERBOSE)
         prepare(MODEL, n, SOURCE_IMAGE, CFG)
         br = build_one(n, level)
         size = get_image_size()
@@ -108,11 +106,8 @@ def run_level(key: str, label: str, level: str) -> list[tuple[int, RunResult]]:
 
 
 def save_csv(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> None:
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    model_slug = MODEL.replace("/", "--")
-    img_slug = image_slug(SOURCE_IMAGE)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(RESULTS_DIR, f"{model_slug}_{img_slug}_splits_{MAX_SPLITS}_{ts}.csv")
+    path = paths.compression_csv_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, MAX_SPLITS)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
 
     header = ["splits"]
     for key, _, _ in all_results:
@@ -135,10 +130,7 @@ def save_csv(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) ->
 
 
 def plot(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> None:
-    os.makedirs(CHARTS_DIR, exist_ok=True)
-    model_slug = MODEL.replace("/", "--")
-    img_slug = image_slug(SOURCE_IMAGE)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    os.makedirs(paths.compression_charts_dir(SCRIPT_DIR), exist_ok=True)
     splits = [n for n, _ in all_results[0][2]]
 
     def to_mb(size_str: str) -> float:
@@ -171,8 +163,7 @@ def plot(all_results: list[tuple[str, str, list[tuple[int, RunResult]]]]) -> Non
 
     figure_footer(fig, MODEL, SOURCE_IMAGE)
     fig.tight_layout()
-    path1 = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_splits_{MAX_SPLITS}_{ts}.png")
-    save_figure(fig, path1)
+    save_figure(fig, paths.compression_chart_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, MAX_SPLITS))
 
 
 def main():

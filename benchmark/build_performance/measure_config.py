@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import matplotlib.pyplot as plt
 
 from shared import log
+from shared import paths
 from shared.charts import figure_footer, save_figure
 from shared.build_result import BuildResult
 from shared.config import load_config
@@ -20,9 +21,6 @@ from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance.prepare import prepare
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
-RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "config")
-CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "config")
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
@@ -105,7 +103,7 @@ def measure(model: str, max_splits: int, source_image: str) -> dict[str, ResultL
     for i, (flags, label) in enumerate(FLAG_OPTIONS):
         log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === {MODE} {label} ({flags}) ===")
         _clear_cache()
-        subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
+        subprocess.run(f"rm -rf {paths.chunks_dir(SCRIPT_DIR)}/*", shell=True, check=True, capture_output=not log.VERBOSE)
 
         flag_results: ResultList = []
         for n in range(1, max_splits + 1):
@@ -128,12 +126,8 @@ def save_csv(
     model: str,
     base_image: str,
 ) -> None:
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    model_slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    mode_slug = MODE.replace("-", "_")
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(RESULTS_DIR, f"{model_slug}_{img_slug}_{mode_slug}_splits_{len(splits)}_{ts}.csv")
+    output_path = paths.measure_config_csv_path(SCRIPT_DIR, model, base_image, MODE, len(splits))
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     header = ["splits"]
     for flags, label in FLAG_OPTIONS:
@@ -159,11 +153,7 @@ def plot(
     base_image: str,
 ) -> None:
     splits = [n for n, _ in next(iter(results.values()))]
-    os.makedirs(CHARTS_DIR, exist_ok=True)
-    model_slug = model.replace("/", "--")
-    img_slug = image_slug(base_image)
-    mode_slug = MODE.replace("-", "_")
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    os.makedirs(paths.config_charts_dir(SCRIPT_DIR), exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(8, 5))
     for flags, flag_results in results.items():
@@ -178,7 +168,7 @@ def plot(
     figure_footer(fig, model, base_image)
     fig.tight_layout()
 
-    output_path = os.path.join(CHARTS_DIR, f"{model_slug}_{img_slug}_{mode_slug}_splits_{len(splits)}_{ts}.png")
+    output_path = paths.measure_config_chart_path(SCRIPT_DIR, model, base_image, MODE, len(splits))
     save_figure(fig, output_path)
 
 
