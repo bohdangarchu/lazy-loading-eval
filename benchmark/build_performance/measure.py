@@ -1,6 +1,5 @@
 import csv
 import os
-import subprocess
 import threading
 import time
 from collections import defaultdict
@@ -20,10 +19,9 @@ from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_stargz as bs
 from build_performance import build_base as bb
-from build_performance.prepare import prepare
+from build_performance.prepare import prepare, clear_chunks
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CHUNKS_DIR = os.path.join(SCRIPT_DIR, "chunks")
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
 RESULTS_BUILD_DIR = os.path.join(RESULTS_DIR, "build")
 RESULTS_RESOURCE_DIR = os.path.join(RESULTS_DIR, "resource")
@@ -109,7 +107,7 @@ def measure_builds(
         log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{cfg.build_n_runs} ===")
         for n in range(1, max_splits + 1):
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
-            subprocess.run(f"rm -rf {CHUNKS_DIR}/*", shell=True, check=True, capture_output=not log.VERBOSE)
+            clear_chunks()
             prepare(model, n, source_image, cfg)
             for i, mode in enumerate(MODES):
                 monitor_key = mode.replace("-", "_")
