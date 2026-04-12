@@ -6,19 +6,13 @@ from shared.config import EnvConfig
 from shared.model import download_model, split_model, model_slug
 from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_base_dockerfile
 from shared.registry import stargz_base_image, plain_base_image, zstd_base_image, tdfs_cmd
+from shared.services import clear_2dfs_cache
 from pull_performance.images import (
     build_name_2dfs, build_name_2dfs_stargz, build_name_2dfs_stargz_zstd,
     build_name_stargz, build_name_base,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-def _clear_2dfs_cache(cfg: EnvConfig) -> None:
-    log.info("Clearing 2dfs cache...")
-    tdfs_home = cfg.tdfs_home_dir or os.path.expanduser("~/.2dfs")
-    for subdir in ("blobs", "uncompressed-keys", "index"):
-        subprocess.run(f"sudo rm -rf {tdfs_home}/{subdir}/*", shell=True, check=True)
 
 
 # ── chunks ─────────────────────────────────────────────────────────
@@ -137,17 +131,17 @@ def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_
 
 
 def prepare_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
-    _clear_2dfs_cache(cfg)
+    clear_2dfs_cache(cfg)
     _build_and_push_2dfs(chunk_paths, source_image, cfg)
 
 
 def prepare_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
-    _clear_2dfs_cache(cfg)
+    clear_2dfs_cache(cfg)
     _build_and_push_2dfs_stargz(chunk_paths, source_image, cfg)
 
 
 def prepare_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
-    _clear_2dfs_cache(cfg)
+    clear_2dfs_cache(cfg)
     _build_and_push_2dfs_stargz_zstd(chunk_paths, source_image, cfg)
 
 

@@ -20,7 +20,8 @@ from shared.registry import (
 from shared.artifacts import write_2dfs_json, mutate_chunk
 from shared.services import ensure_buildkit
 from pull_performance.prepare import prepare_chunks, _clear_2dfs_cache
-from pull_performance.measure import clear_cache, _next_container_name
+from pull_performance.measure import _next_container_name
+from shared.services import clear_stargz_cache
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
@@ -234,7 +235,7 @@ def measure_refresh(
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 log.info(f"\n[{ts}] === {mode}: refresh {k} layer(s) ===")
 
-                clear_cache(cfg)
+                clear_stargz_cache()
 
                 v0_pull = _pull_name_refresh(source_image, cfg, mode, 0)
                 log.info(f"Pulling v0: {v0_pull}")

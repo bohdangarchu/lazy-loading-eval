@@ -14,10 +14,6 @@ tmpdir: null
 # "tdfs"   means global binary on PATH, invoked with sudo.
 tdfs_binary: "tdfs"
 
-# If true: fully wipe stargz cache + remove all nerdctl/ctr images + restart containerd.
-# If false: selective cleanup that preserves tdfs-registry images (safe for local dev).
-full_cache_wipe: true
-
 build_cooldown: 5
 pull_cooldown: 5
 

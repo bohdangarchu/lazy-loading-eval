@@ -14,6 +14,7 @@ from shared.charts import figure_footer, save_figure
 from shared.config import load_config
 from shared.registry import prepare_local_registry, registry, plain_base_image, tdfs_cmd, image_slug
 from shared.build_result import BuildResult
+from shared.services import clear_2dfs_cache
 from shared.tdfs_parser import parse_tdfs_output
 from build_performance.prepare import prepare
 
@@ -40,12 +41,7 @@ class RunResult:
 
 
 def clear_cache() -> None:
-    home = CFG.tdfs_home_dir or "~/.2dfs"
-    cmd = f"rm -rf {home}/blobs/* {home}/uncompressed-keys/* {home}/index/*"
-    if not CFG.tdfs_binary.startswith("./"):
-        cmd = "sudo " + cmd
-    log.info("=== Clearing 2dfs cache ===")
-    subprocess.run(cmd, shell=True, check=True, capture_output=not log.VERBOSE)
+    clear_2dfs_cache(CFG)
 
 
 def build_one(n: int, level: str) -> BuildResult:

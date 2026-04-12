@@ -1,4 +1,5 @@
 import os
+import subprocess
 
 from dotenv import load_dotenv
 from huggingface_hub import hf_hub_download, list_repo_files
@@ -6,6 +7,7 @@ from huggingface_hub import hf_hub_download, list_repo_files
 load_dotenv()
 
 from shared import log
+from shared.services import clear_2dfs_cache, clear_stargz_cache, prune_buildkit
 
 BUFFER_SIZE = 8 * 1024 * 1024  # 8 MB
 
@@ -49,6 +51,19 @@ def download_model(model_name: str, work_dir: str) -> list[str]:
             )
         local_paths.append(dest)
     return local_paths
+
+
+def cleanup_pull_experiment(model_name: str, work_dir: str, cfg) -> None:
+    """Delete model files, chunks, and 2dfs/buildkit caches after an experiment."""
+    slug = model_slug(model_name)
+    models_dir = os.path.join(work_dir, "models", slug)
+    chunks_dir = os.path.join(work_dir, "chunks", slug)
+    log.info(f"Cleaning up experiment artifacts for {model_name}...")
+    subprocess.run(f"rm -rf {models_dir}", shell=True, check=True)
+    subprocess.run(f"rm -rf {chunks_dir}", shell=True, check=True)
+    clear_2dfs_cache(cfg)
+    clear_stargz_cache()
+    prune_buildkit()
 
 
 def split_model(shard_paths: list[str], num_splits: int, work_dir: str, output_dir: str = None) -> list[str]:

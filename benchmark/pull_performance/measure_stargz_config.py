@@ -14,10 +14,12 @@ from shared import log
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
-from pull_performance.measure import clear_cache, _timed_pull, _timed_run, _run_cmd
+from pull_performance.measure import _timed_pull, _timed_run, _run_cmd
+from shared.services import clear_stargz_cache
 from pull_performance.prepare import (
     prepare_2dfs_stargz, prepare_2dfs_stargz_zstd, prepare_chunks,
 )
+from shared.model import cleanup_pull_experiment
 from pull_performance.images import pull_name_2dfs_stargz, pull_name_2dfs_stargz_zstd
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +31,7 @@ EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
     ("openai-community/gpt2-medium", "docker.io/library/python:3.12-slim"),   # ~1.52 GB    ~50 MB
     ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
+    ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),    # ~6 GB    ~50 MB
 ]
 MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
@@ -122,7 +125,7 @@ def _measure_config_option(
     for n in cfg.stargz_config_base_splits:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         log.info(f"\n[{ts}] === {mode}: {n} allotments ===")
-        clear_cache(cfg)
+        clear_stargz_cache()
 
         image = _pull_name(mode, source_image, cfg, n)
         pull_t = _timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", image])
@@ -309,6 +312,10 @@ def main():
     log.info(f"Splits (measured): {CFG.stargz_config_base_splits}")
     log.info(f"Runs: {CFG.stargz_config_n_runs}")
 
+    log.info("Pre-run cleanup...")
+    for model, _ in EXPERIMENTS:
+        cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
+
     for model, base_image in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
         prepare_local_registry(base_image, registry(CFG))
@@ -318,6 +325,7 @@ def main():
 
         save_csv(results, model, base_image)
         plot(results, model, base_image)
+        cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
 
 
 if __name__ == "__main__":

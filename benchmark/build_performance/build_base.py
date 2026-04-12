@@ -7,13 +7,13 @@ from shared.build_result import BuildResult
 from shared.buildctl_parser import parse_buildctl_plain
 from shared.config import EnvConfig
 from shared.registry import registry
+from shared.services import prune_buildkit
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def clear_cache() -> None:
-    log.info("=== Pruning buildkit cache ===")
-    subprocess.run(["sudo", "buildctl", "prune", "--all"], check=True, capture_output=not log.VERBOSE)
+    prune_buildkit()
 
 
 def build_only(n: int, cfg: EnvConfig = None) -> BuildResult:

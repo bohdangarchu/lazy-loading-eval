@@ -10,7 +10,6 @@ class EnvConfig:
     tdfs_home_dir: Optional[str]
     tmpdir: Optional[str]
     tdfs_binary: str
-    full_cache_wipe: bool
     build_cooldown: int
     pull_cooldown: int
     build_max_splits: int

@@ -15,7 +15,8 @@ from shared.registry import (
     prepare_local_registry, registry, image_slug,
     stargz_base_image, zstd_base_image, tdfs_cmd,
 )
-from pull_performance.measure import clear_cache, _timed_pull, _timed_run, _run_cmd
+from pull_performance.measure import _timed_pull, _timed_run, _run_cmd
+from shared.services import clear_stargz_cache
 from pull_performance.prepare import _clear_2dfs_cache, prepare_chunks
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -112,7 +113,7 @@ def _measure_option(
     for n in BASE_SPLITS:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         log.info(f"\n[{ts}] === {label}: {n} allotments ===")
-        clear_cache(cfg)
+        clear_stargz_cache()
 
         image = _pull_name(source_image, cfg, label, n)
         pull_t = _timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", image])

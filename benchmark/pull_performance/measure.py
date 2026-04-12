@@ -13,7 +13,8 @@ from shared import log
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, save_figure
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
-from shared.services import ensure_buildkit
+from shared.services import ensure_buildkit, clear_stargz_cache
+from shared.model import cleanup_pull_experiment
 from pull_performance.prepare import (
     prepare_chunks,
     prepare_2dfs, prepare_2dfs_stargz, prepare_2dfs_stargz_zstd,
@@ -39,9 +40,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "results", "pull")
 CHARTS_DIR = os.path.join(SCRIPT_DIR, "charts", "pull")
 
-STARGZ_ROOT = "/var/lib/containerd-stargz-grpc"
-
-
 # ── helpers ────────────────────────────────────────────────────────
 
 
@@ -51,34 +49,6 @@ def _run(cmd: str) -> None:
 
 def _next_container_name(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
-
-
-def clear_cache(cfg) -> None:
-    log.info("Clearing stargz cache...")
-    if not cfg.full_cache_wipe:
-        # Selective cleanup — preserves tdfs-registry images (safe for local dev)
-        _run("sudo ctr -n default images ls -q | grep -v 'tdfs-registry' | xargs -r sudo ctr -n default images rm 2>/dev/null")
-        _run(f'grep "{STARGZ_ROOT}/snapshotter/snapshots" /proc/mounts | awk \'{{print $2}}\' | xargs -r sudo umount')
-        _run("sudo systemctl daemon-reload")
-        _run("sudo systemctl stop stargz-snapshotter")
-        _run(f"sudo rm -rf {STARGZ_ROOT}/snapshotter")
-        _run(f"sudo rm -rf {STARGZ_ROOT}/stargz")
-        _run("sudo systemctl start stargz-snapshotter")
-    else:
-        # Full wipe — removes all images and restarts containerd
-        _run("sudo systemctl stop stargz-snapshotter")
-        _run("grep 'containerd-stargz-grpc/snapshotter/snapshots' /proc/mounts | awk '{print $2}' | xargs -r sudo umount -l")
-        # Use sudo bash -c so glob expands as root (STARGZ_ROOT is not readable by user)
-        _run(f"sudo bash -c 'rm -rf {STARGZ_ROOT}/*'")
-        _run("sudo nerdctl image rm -f $(sudo nerdctl images -q) 2>/dev/null || true")
-        _run("sudo ctr content rm $(sudo ctr content ls -q) 2>/dev/null || true")
-        # Delete containerd's metadata bolt DB before restart: rm -rf STARGZ_ROOT/* above
-        # removes the stargz plugin's local metadata.db, leaving orphaned stargz snapshot
-        # entries in containerd's bolt DB. Those entries cause rpull to fail with
-        # "already exists". Deleting meta.db lets containerd recreate it fresh on restart.
-        _run("sudo rm -f /var/lib/containerd/io.containerd.metadata.v1.bolt/meta.db")
-        _run("sudo systemctl start stargz-snapshotter")
-        _run("sudo systemctl restart containerd")
 
 
 def _timed_pull(cmd: list[str]) -> float:
@@ -253,7 +223,7 @@ def measure(
             for n in base_splits:
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 log.info(f"\n[{ts}] === {mode}: {n} ===")
-                clear_cache(cfg)
+                clear_stargz_cache()
                 n_val, pull_t, run_t = _measure_one(mode, n, source_image, cfg)
                 results[mode].append((run, n_val, pull_t, run_t))
                 log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
@@ -384,6 +354,10 @@ def main():
     log.info(f"Splits (base): {CFG.pull_base_splits}")
     log.info(f"Runs: {CFG.pull_n_runs}")
 
+    log.info("Pre-run cleanup...")
+    for model, _ in EXPERIMENTS:
+        cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
+
     for model, base_image in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
         chunk_paths = prepare_chunks(model, CFG.pull_n_splits)
@@ -393,6 +367,7 @@ def main():
         print_results(results)
         save_csv(results, model, base_image)
         plot(results, model, base_image)
+        cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
 
 
 if __name__ == "__main__":

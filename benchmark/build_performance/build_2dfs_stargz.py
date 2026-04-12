@@ -6,18 +6,14 @@ from shared import log
 from shared.build_result import BuildResult
 from shared.config import EnvConfig
 from shared.registry import plain_base_image, tdfs_cmd, registry
+from shared.services import clear_2dfs_cache
 from shared.tdfs_parser import parse_tdfs_output
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def clear_cache(cfg: EnvConfig) -> None:
-    home = cfg.tdfs_home_dir or "~/.2dfs"
-    cmd = f"rm -rf {home}/blobs/* {home}/uncompressed-keys/* {home}/index/*"
-    if not cfg.tdfs_binary.startswith("./"):
-        cmd = "sudo " + cmd
-    log.info("=== Clearing 2dfs cache ===")
-    subprocess.run(cmd, shell=True, check=True, capture_output=not log.VERBOSE)
+    clear_2dfs_cache(cfg)
 
 
 def build_only(n: int, cfg: EnvConfig, source_image: str = "") -> BuildResult:
