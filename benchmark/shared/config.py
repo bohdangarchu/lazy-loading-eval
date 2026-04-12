@@ -24,6 +24,9 @@ class EnvConfig:
     pull_n_runs: int
     refresh_n_splits: int
     refresh_n_runs: int
+    stargz_config_n_splits: int
+    stargz_config_base_splits: list[int]
+    stargz_config_n_runs: int
 
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
