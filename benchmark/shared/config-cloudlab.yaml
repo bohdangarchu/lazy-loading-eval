@@ -5,3 +5,22 @@ tdfs_binary: "tdfs"
 full_cache_wipe: true
 build_cooldown: 30
 pull_cooldown: 10
+
+# build_performance/measure.py
+build_max_splits: 10
+build_n_runs: 3
+build_with_resource: true
+
+# build_performance/measure_rebuild.py
+rebuild_n_splits: 10
+rebuild_n_runs: 3
+rebuild_r_values: [2, 4, 6, 8, 10]
+
+# pull_performance/measure.py
+pull_n_splits: 10
+pull_base_splits: [2, 4, 6, 8, 10]
+pull_n_runs: 3
+
+# pull_performance/measure_refresh.py
+refresh_n_splits: 10
+refresh_n_runs: 3
