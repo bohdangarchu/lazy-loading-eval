@@ -27,15 +27,15 @@ STARGZ_CONFIG_PATH = "/etc/containerd-stargz-grpc/config.toml"
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
-    ("openai-community/gpt2-medium", "docker.io/library/python:3.12-slim"),   # ~1.52 GB    ~50 MB
-    ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
+    # ("openai-community/gpt2-medium", "docker.io/library/python:3.12-slim"),   # ~1.52 GB    ~50 MB
+    # ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
 ]
 MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
-    ({}, "base-config"),
-    # Add config overrides here, e.g.:
-    # ({"noprefetch": False}, "with-prefetch"),
-    # ({"noprefetch": False, "prefetch_async_size": 134217728}, "prefetch-async-128MB"),
+    ({"passthrough": True, "merge_worker_count": 10}, "passthrough-10"),
+    ({"passthrough": True, "merge_worker_count": 25}, "passthrough-25"),
+    ({"passthrough": True, "merge_worker_count": 50}, "passthrough-50"),
+    ({"passthrough": True, "merge_worker_count": 100}, "passthrough-100"),
 ]
 CFG = load_config()
 VERBOSE = True
@@ -76,8 +76,10 @@ def _apply_overrides(base_content: str, overrides: dict) -> str:
 
 def apply_stargz_config(config_content: str) -> None:
     """Stop service, write config, start service (mirrors local/apply-config.sh)."""
+    current = _read_base_config()
     log.info("--- applying stargz config ---")
-    log.info(config_content)
+    log.info(f"BEFORE:\n{current}")
+    log.info(f"AFTER:\n{config_content}")
     tmp = "/tmp/stargz-config-measure.toml"
     with open(tmp, "w") as f:
         f.write(config_content)

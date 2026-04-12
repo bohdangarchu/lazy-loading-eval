@@ -38,7 +38,6 @@ def prepare_chunks(model_name: str, num_splits: int) -> list[str]:
 
 def _build_and_push_2dfs_image(
     chunk_paths: list[str],
-    source_image: str,
     cfg: EnvConfig,
     target: str,
     base_image: str,
@@ -67,7 +66,7 @@ def _build_and_push_2dfs_image(
 
 def _build_and_push_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
     _build_and_push_2dfs_image(
-        chunk_paths, source_image, cfg,
+        chunk_paths, cfg,
         target=build_name_2dfs(source_image, cfg),
         base_image=plain_base_image(source_image, cfg),
         extra_flags=[],
@@ -77,7 +76,7 @@ def _build_and_push_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConf
 
 def _build_and_push_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
     _build_and_push_2dfs_image(
-        chunk_paths, source_image, cfg,
+        chunk_paths, cfg,
         target=build_name_2dfs_stargz(source_image, cfg),
         base_image=stargz_base_image(source_image, cfg),
         extra_flags=["--enable-stargz", "--stargz-chunk-size", "2097152"],  # 2 MiB (most optimal)
@@ -87,7 +86,7 @@ def _build_and_push_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: 
 
 def _build_and_push_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
     _build_and_push_2dfs_image(
-        chunk_paths, source_image, cfg,
+        chunk_paths, cfg,
         target=build_name_2dfs_stargz_zstd(source_image, cfg),
         base_image=zstd_base_image(source_image, cfg),
         extra_flags=["--enable-stargz", "--use-zstd", "--stargz-chunk-size", "8388608"],  # 8 MiB (most optimal)

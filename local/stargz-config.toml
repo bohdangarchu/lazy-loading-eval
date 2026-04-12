@@ -6,6 +6,10 @@ disable_verification = true
 host = "localhost:5000"
 insecure = true
 
+[[resolver.host."131.159.25.169:5000".mirrors]]
+host = "131.159.25.169:5000"
+insecure = true
+
 [fuse]
 passthrough = true
 merge_worker_count = 10
