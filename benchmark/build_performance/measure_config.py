@@ -18,7 +18,7 @@ from shared.registry import (
 from shared.tdfs_parser import parse_tdfs_output
 from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
-from build_performance.prepare import prepare
+from build_performance.prepare import prepare, clear_chunks
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -103,7 +103,7 @@ def measure(model: str, max_splits: int, source_image: str) -> dict[str, ResultL
     for i, (flags, label) in enumerate(FLAG_OPTIONS):
         log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === {MODE} {label} ({flags}) ===")
         _clear_cache()
-        subprocess.run(f"rm -rf {paths.chunks_dir(SCRIPT_DIR)}/*", shell=True, check=True, capture_output=not log.VERBOSE)
+        clear_chunks()
 
         flag_results: ResultList = []
         for n in range(1, max_splits + 1):

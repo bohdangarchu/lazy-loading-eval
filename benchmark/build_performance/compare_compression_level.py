@@ -17,7 +17,7 @@ from shared.registry import prepare_local_registry, registry, plain_base_image, 
 from shared.build_result import BuildResult
 from shared.services import clear_2dfs_cache
 from shared.tdfs_parser import parse_tdfs_output
-from build_performance.prepare import prepare
+from build_performance.prepare import prepare, clear_chunks
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -95,7 +95,7 @@ def run_level(key: str, label: str, level: str) -> list[tuple[int, RunResult]]:
     results = []
     for n in range(1, MAX_SPLITS + 1):
         log.info(f"\n=== Preparing {n} split(s) ===")
-        subprocess.run(f"rm -rf {paths.chunks_dir(SCRIPT_DIR)}/*", shell=True, check=True, capture_output=not log.VERBOSE)
+        clear_chunks()
         prepare(MODEL, n, SOURCE_IMAGE, CFG)
         br = build_one(n, level)
         size = get_image_size()
