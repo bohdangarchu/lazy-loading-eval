@@ -34,12 +34,9 @@ EXPERIMENTS = [
     ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),                      # ~3.09 GB     ~3.4 GB
     ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
 ]
-MAX_SPLITS = 3
-N_RUNS = 1
 CFG = load_config()
-WITH_RESOURCE = True
 VERBOSE = True
-MODES = ["2dfs", "2dfs-stargz"]
+MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 # MODES = ["2dfs-stargz"]
 
 
@@ -105,8 +102,8 @@ def measure_builds(
 ) -> list[dict]:
     results: list[dict] = []
 
-    for run in range(N_RUNS):
-        log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{N_RUNS} ===")
+    for run in range(cfg.build_n_runs):
+        log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{cfg.build_n_runs} ===")
         for n in range(1, max_splits + 1):
             for i, mode in enumerate(MODES):
                 monitor_key = mode.replace("-", "_")
@@ -128,7 +125,7 @@ def measure_builds(
                     "export_s": br.export_s,
                 })
 
-                is_last = (i == len(MODES) - 1) and (n == max_splits) and (run == N_RUNS - 1)
+                is_last = (i == len(MODES) - 1) and (n == max_splits) and (run == cfg.build_n_runs - 1)
                 if not is_last:
                     log.info(f"\nSleeping {cfg.build_cooldown}s before next...")
                     time.sleep(cfg.build_cooldown)
@@ -190,7 +187,7 @@ def plot(results: list[dict], model: str, base_image: str) -> None:
     bar_group_xticks(ax, n_splits, n_modes, bar_width, [str(n) for n in splits])
     ax.set_xlabel("Number of splits")
     ax.set_ylabel("Time (s)")
-    ax.set_title(f"Build stages breakdown (median, n={N_RUNS} runs, dots = individual runs)")
+    ax.set_title(f"Build stages breakdown (median, n={CFG.build_n_runs} runs, dots = individual runs)")
 
     for j in range(n_splits):
         for i, mode in enumerate(MODES):
@@ -304,7 +301,7 @@ def plot_resource(
 
     bar_group_xticks(ax_cpu, len(split_counts), n_modes, bar_width, x_labels)
     ax_cpu.set_ylabel("CPU Usage (%)")
-    ax_cpu.set_title(f"Resource usage during builds (median, n={N_RUNS} runs, dots = individual runs)")
+    ax_cpu.set_title(f"Resource usage during builds (median, n={CFG.build_n_runs} runs, dots = individual runs)")
     ax_cpu.legend(fontsize="small")
     ax_cpu.grid(True, linestyle="--", alpha=0.5, axis="y")
 
@@ -413,17 +410,17 @@ def main():
         prepare_local_registry(base_image, registry(CFG))
 
         monitor = None
-        if WITH_RESOURCE:
+        if CFG.build_with_resource:
             monitor = ResourceMonitor()
             monitor.start()
 
-        results = measure_builds(model, MAX_SPLITS, base_image, CFG, monitor=monitor)
+        results = measure_builds(model, CFG.build_max_splits, base_image, CFG, monitor=monitor)
 
         if monitor:
             samples = monitor.stop()
-            save_resource_csv(samples, model, MAX_SPLITS, base_image)
-            plot_resource(samples, model, MAX_SPLITS, base_image)
-            plot_resource_individual(samples, model, MAX_SPLITS, base_image)
+            save_resource_csv(samples, model, CFG.build_max_splits, base_image)
+            plot_resource(samples, model, CFG.build_max_splits, base_image)
+            plot_resource_individual(samples, model, CFG.build_max_splits, base_image)
 
         splits = sorted(set(r["splits"] for r in results))
         log.result("\n=== Comparison (median across runs) ===")

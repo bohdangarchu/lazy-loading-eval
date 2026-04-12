@@ -24,12 +24,10 @@ from pull_performance.measure import clear_cache, _next_container_name
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    # ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~1.4 GB     ~700 MB
-    # ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),                      # ~3.09 GB     ~3.4 GB
-    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
+    ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~1.4 GB     ~700 MB
+    ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),                      # ~3.09 GB     ~3.4 GB
+    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
 ]
-N_SPLITS = 4
-N_RUNS = 1
 CFG = load_config()
 VERBOSE = True
 MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
@@ -49,7 +47,7 @@ def _build_name_refresh(source_image: str, cfg, mode: str, version_idx: int) -> 
 
 
 def _pull_name_refresh(source_image: str, cfg, mode: str, version_idx: int) -> str:
-    end_col = N_SPLITS - 1
+    end_col = CFG.refresh_n_splits - 1
     return f"{registry(cfg)}/library/{image_slug(source_image)}-{mode}-refresh:v{version_idx}--0.0.0.{end_col}"
 
 
@@ -127,7 +125,7 @@ def prepare_refresh(
     cfg,
     mode: str,
 ) -> list[dict[int, str]]:
-    """Build N_SPLITS+1 image versions, return all_digests[version_idx][col].
+    """Build CFG.refresh_n_splits+1 image versions, return all_digests[version_idx][col].
 
     Build sequence (cache cleared once at start):
       v0: original chunks
@@ -146,7 +144,7 @@ def prepare_refresh(
     all_digests.append(parsed)
 
     # v1..vN: cumulative mutations
-    for k in range(1, N_SPLITS + 1):
+    for k in range(1, CFG.refresh_n_splits + 1):
         mutate_chunk(chunk_paths[k - 1])
         parsed = _build_version(chunk_paths, source_image, cfg, mode, k)
         # Inherit digests from previous version for splits not logged (cache hits)
@@ -229,10 +227,10 @@ def measure_refresh(
     for mode in MODES:
         all_digests = all_digests_per_mode[mode]
 
-        for run in range(N_RUNS):
+        for run in range(CFG.refresh_n_runs):
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
-                     f"=== {mode} run {run + 1}/{N_RUNS} ===")
-            for k in range(1, N_SPLITS + 1):
+                     f"=== {mode} run {run + 1}/{CFG.refresh_n_runs} ===")
+            for k in range(1, CFG.refresh_n_splits + 1):
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 log.info(f"\n[{ts}] === {mode}: refresh {k} layer(s) ===")
 
@@ -246,7 +244,7 @@ def measure_refresh(
                 name = _next_container_name(f"refresh-{mode.replace('-', '')}")
                 _start_container(v0_pull, name)
 
-                baseline_t = _exec_timed(name, N_SPLITS)
+                baseline_t = _exec_timed(name, CFG.refresh_n_splits)
                 log.result(f"  baseline access: {baseline_t:.2f}s")
 
                 for i in range(k):
@@ -254,7 +252,7 @@ def measure_refresh(
                     new_digest = all_digests[i + 1][i]
                     _refresh_layer(old_digest, new_digest)
 
-                refresh_t = _exec_timed(name, N_SPLITS)
+                refresh_t = _exec_timed(name, CFG.refresh_n_splits)
                 log.result(f"  post-refresh access ({k} layers): {refresh_t:.2f}s")
 
                 _stop_container(name)
@@ -274,7 +272,7 @@ def print_results(results: dict[str, list[tuple[int, int, float, float, float]]]
     log.result(f"{'k':>4}  {'mode':<20}  {'pull':>8}  {'baseline':>10}  {'refresh':>10}")
     log.result("-" * 60)
     for mode, entries in results.items():
-        for k in range(1, N_SPLITS + 1):
+        for k in range(1, CFG.refresh_n_splits + 1):
             group = [(pull_t, baseline_t, refresh_t)
                      for _, kk, pull_t, baseline_t, refresh_t in entries if kk == k]
             if not group:
@@ -302,8 +300,8 @@ def save_results_csv(
         fieldnames += [f"{slug}_pull_s", f"{slug}_baseline_s", f"{slug}_refresh_s"]
 
     rows = []
-    for run in range(N_RUNS):
-        for k in range(1, N_SPLITS + 1):
+    for run in range(CFG.refresh_n_runs):
+        for k in range(1, CFG.refresh_n_splits + 1):
             row: dict = {"run": run, "n_refreshed": k}
             for mode, entries in results.items():
                 slug = mode.replace("-", "_")
@@ -326,7 +324,7 @@ def plot(
     base_image: str,
 ) -> None:
     os.makedirs(CHARTS_DIR, exist_ok=True)
-    k_values = list(range(1, N_SPLITS + 1))
+    k_values = list(range(1, CFG.refresh_n_splits + 1))
     x = np.arange(len(k_values))
     n_modes = len(results)
     width = min(0.8 / n_modes, 0.2)
@@ -357,7 +355,7 @@ def plot(
     ax.set_xlabel("Number of layers refreshed")
     ax.set_ylabel("Access time (s)")
     ax.set_title(
-        f"refresh-layer access time (median, n={N_RUNS} runs, dots = individual runs)\n"
+        f"refresh-layer access time (median, n={CFG.refresh_n_runs} runs, dots = individual runs)\n"
         f"dashed = baseline access before refresh"
     )
     ax.set_xticks(x)
@@ -387,13 +385,13 @@ def main():
     log.set_verbose(VERBOSE)
     ensure_buildkit()
     log.info(f"Modes: {MODES}")
-    log.info(f"N_SPLITS: {N_SPLITS}")
-    log.info(f"N_RUNS: {N_RUNS}")
+    log.info(f"CFG.refresh_n_splits: {CFG.refresh_n_splits}")
+    log.info(f"CFG.refresh_n_runs: {CFG.refresh_n_runs}")
 
     for model, base_image in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
 
-        chunk_paths = prepare_chunks(model, N_SPLITS)
+        chunk_paths = prepare_chunks(model, CFG.refresh_n_splits)
 
         prepare_local_registry(base_image, registry(CFG))
 

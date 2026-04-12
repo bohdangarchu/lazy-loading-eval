@@ -30,9 +30,6 @@ EXPERIMENTS = [
     ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),                      # ~3.09 GB     ~3.4 GB
     ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
 ]
-NUM_SPLITS = 10
-BASE_SPLITS = [2, 4, 6, 8, 10]
-N_RUNS = 3
 CFG = load_config()
 VERBOSE = True
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
@@ -251,8 +248,8 @@ def measure(
         prepare_local_registry(source_image, registry(cfg))
         _prepare_mode(mode, chunk_paths, base_splits, source_image, cfg)
 
-        for run in range(N_RUNS):
-            log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{N_RUNS} ===")
+        for run in range(CFG.pull_n_runs):
+            log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{CFG.pull_n_runs} ===")
             for n in base_splits:
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 log.info(f"\n[{ts}] === {mode}: {n} ===")
@@ -309,7 +306,7 @@ def save_csv(
             slug = mode.replace("-", "_")
             header += [f"{slug}_pull_s", f"{slug}_run_s", f"{slug}_total_s"]
         writer.writerow(header)
-        for run in range(N_RUNS):
+        for run in range(CFG.pull_n_runs):
             for n in splits:
                 def row_vals(entries: list[tuple[int, int, float, float]]) -> list[str]:
                     match = [(pull_t, run_t) for r, n_val, pull_t, run_t in entries if r == run and n_val == n]
@@ -353,7 +350,7 @@ def plot(
 
     ax.set_xlabel("Number of splits pulled")
     ax.set_ylabel("Time (s)")
-    ax.set_title(f"Pull + Run Performance (median, n={N_RUNS} runs, dots = individual runs)")
+    ax.set_title(f"Pull + Run Performance (median, n={CFG.pull_n_runs} runs, dots = individual runs)")
     ax.set_xticks(x)
     ax.set_xticklabels(splits)
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")
@@ -383,15 +380,15 @@ def main():
     log.set_verbose(VERBOSE)
     ensure_buildkit()
     log.info(f"Modes: {MODES}")
-    log.info(f"Splits (2dfs/stargz): {NUM_SPLITS}")
-    log.info(f"Splits (base): {BASE_SPLITS}")
-    log.info(f"Runs: {N_RUNS}")
+    log.info(f"Splits (2dfs/stargz): {CFG.pull_n_splits}")
+    log.info(f"Splits (base): {CFG.pull_base_splits}")
+    log.info(f"Runs: {CFG.pull_n_runs}")
 
     for model, base_image in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
-        chunk_paths = prepare_chunks(model, NUM_SPLITS)
+        chunk_paths = prepare_chunks(model, CFG.pull_n_splits)
 
-        results = measure(chunk_paths, BASE_SPLITS, base_image, CFG)
+        results = measure(chunk_paths, CFG.pull_base_splits, base_image, CFG)
 
         print_results(results)
         save_csv(results, model, base_image)

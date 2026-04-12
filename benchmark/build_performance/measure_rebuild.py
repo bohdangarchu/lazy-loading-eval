@@ -29,12 +29,9 @@ EXPERIMENTS = [
     ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),                      # ~3.09 GB     ~3.4 GB
     ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
 ]
-N_SPLITS = 10
-N_RUNS = 3
 CFG = load_config()
 VERBOSE = True
 DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
-R_VALUES = [2, 4, 6, 8, 10]
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 # MODES = ["2dfs-stargz"]
 
@@ -58,9 +55,9 @@ def get_chunks_to_mutate(chunk_paths: list[str], r: int, direction: str) -> list
 def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
     results = []
 
-    for run in range(N_RUNS):
-        log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{N_RUNS} ===")
-        for r in R_VALUES:
+    for run in range(CFG.rebuild_n_runs):
+        log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{CFG.rebuild_n_runs} ===")
+        for r in CFG.rebuild_r_values:
             for direction in DIRECTIONS:
                 targets = get_chunks_to_mutate(chunk_paths, r, direction)
 
@@ -72,14 +69,14 @@ def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
                     t0 = time.time()
                     clear_fn()
                     log.info(f"Cache clear took {time.time() - t0:.2f}s")
-                    build_fn(N_SPLITS)
+                    build_fn(CFG.rebuild_n_splits)
 
                     # mutate r chunks
                     for path in targets:
                         mutate_chunk(path)
 
                     # rebuild v2 (timed)
-                    br: BuildResult = build_fn(N_SPLITS)
+                    br: BuildResult = build_fn(CFG.rebuild_n_splits)
 
                     # restore chunks
                     for path in targets:
@@ -138,7 +135,7 @@ def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
         (ax_btt, "bottom_to_top", "Bottom to Top"),
     ]:
         for i, mode in enumerate(MODES):
-            for j, r in enumerate(R_VALUES):
+            for j, r in enumerate(CFG.rebuild_r_values):
                 group = [
                     row for row in results
                     if row["direction"] == direction and row["method"] == mode and row["r"] == r
@@ -156,14 +153,14 @@ def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
 
                 add_run_dots(ax, x_center, rebuild_vals)
 
-        bar_group_xticks(ax, len(R_VALUES), n_modes, bar_width, [str(r) for r in R_VALUES])
+        bar_group_xticks(ax, len(CFG.rebuild_r_values), n_modes, bar_width, [str(r) for r in CFG.rebuild_r_values])
         ax.set_xlabel("Chunks mutated (r)")
         ax.set_title(f"{title}")
         ax.legend(fontsize="small")
         ax.grid(True, linestyle="--", alpha=0.5, axis="y")
 
     ax_ttb.set_ylabel("Rebuild time (s)")
-    fig.suptitle(f"Incremental rebuild performance (n={n}, median, {N_RUNS} runs, dots = individual runs)")
+    fig.suptitle(f"Incremental rebuild performance (n={n}, median, {CFG.rebuild_n_runs} runs, dots = individual runs)")
     figure_footer(fig, model, base_image)
     fig.tight_layout()
 
@@ -180,13 +177,13 @@ def main():
 
         methods = make_methods(base_image)
 
-        log.info(f"Preparing model with {N_SPLITS} splits...")
-        chunk_paths = prepare(model, N_SPLITS, base_image, CFG)
+        log.info(f"Preparing model with {CFG.rebuild_n_splits} splits...")
+        chunk_paths = prepare(model, CFG.rebuild_n_splits, base_image, CFG)
 
         results = measure_rebuilds(chunk_paths, methods)
 
-        save_csv(results, model, N_SPLITS, base_image)
-        plot(results, model, N_SPLITS, base_image)
+        save_csv(results, model, CFG.rebuild_n_splits, base_image)
+        plot(results, model, CFG.rebuild_n_splits, base_image)
 
         log.result(f"\n{'run':>4}  {'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild':>8}  {'pull':>6}  {'ctx':>6}  {'build':>6}  {'export':>6}")
         log.result("-" * 84)
