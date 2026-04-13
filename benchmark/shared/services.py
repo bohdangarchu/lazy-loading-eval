@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 
 from shared import log
 
@@ -35,6 +36,7 @@ def clear_stargz_cache() -> None:
 
 
 def prune_buildkit() -> None:
+    ensure_buildkit()
     log.info("Pruning buildkit cache...")
     subprocess.run(["sudo", "buildctl", "prune", "--all"], check=True, capture_output=not log.VERBOSE)
 
@@ -47,4 +49,10 @@ def ensure_buildkit() -> None:
     if result.returncode != 0:
         log.info("buildkit is not running, starting it...")
         subprocess.run(["sudo", "systemctl", "start", "buildkit"], check=True)
+        # Wait for the socket to become available (up to 10s)
+        sock = "/run/buildkit/buildkitd.sock"
+        for _ in range(20):
+            if os.path.exists(sock):
+                break
+            time.sleep(0.5)
         log.info("buildkit started.")
