@@ -219,9 +219,9 @@ def measure_refresh(
     source_image: str,
     cfg,
     all_digests_per_mode: dict[str, list[dict[int, str]]],
-) -> dict[str, list[tuple[int, int, float, float, float]]]:
-    """results[mode] = list of (run, k, pull_t, baseline_t, refresh_t)"""
-    results: dict[str, list[tuple[int, int, float, float, float]]] = {m: [] for m in MODES}
+) -> dict[str, list[tuple[int, int, float, float, float, float]]]:
+    """results[mode] = list of (run, k, pull_t, baseline_t, layer_refresh_t, file_access_t)"""
+    results: dict[str, list[tuple[int, int, float, float, float, float]]] = {m: [] for m in MODES}
 
     for mode in MODES:
         all_digests = all_digests_per_mode[mode]
@@ -246,19 +246,22 @@ def measure_refresh(
                 baseline_t = _exec_timed(name, CFG.refresh_n_splits)
                 log.result(f"  baseline access: {baseline_t:.2f}s")
 
+                t0 = time.perf_counter()
                 for i in range(k):
                     old_digest = all_digests[0][i]
                     new_digest = all_digests[i + 1][i]
                     _refresh_layer(old_digest, new_digest)
+                layer_refresh_t = time.perf_counter() - t0
+                log.result(f"  refresh-layer ({k} layers): {layer_refresh_t:.2f}s")
 
-                refresh_t = _exec_timed(name, CFG.refresh_n_splits)
-                log.result(f"  post-refresh access ({k} layers): {refresh_t:.2f}s")
+                file_access_t = _exec_timed(name, CFG.refresh_n_splits)
+                log.result(f"  post-refresh file access ({k} layers): {file_access_t:.2f}s")
 
                 _stop_container(name)
                 log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
                 time.sleep(cfg.pull_cooldown)
 
-                results[mode].append((run, k, pull_t, baseline_t, refresh_t))
+                results[mode].append((run, k, pull_t, baseline_t, layer_refresh_t, file_access_t))
 
     return results
 
@@ -266,24 +269,25 @@ def measure_refresh(
 # ── output ─────────────────────────────────────────────────────────────
 
 
-def print_results(results: dict[str, list[tuple[int, int, float, float, float]]]) -> None:
+def print_results(results: dict[str, list[tuple[int, int, float, float, float, float]]]) -> None:
     log.result("\n=== Refresh Performance Results (median across runs) ===")
-    log.result(f"{'k':>4}  {'mode':<20}  {'pull':>8}  {'baseline':>10}  {'refresh':>10}")
-    log.result("-" * 60)
+    log.result(f"{'k':>4}  {'mode':<20}  {'pull':>8}  {'baseline':>10}  {'layer_refresh':>14}  {'file_access':>12}")
+    log.result("-" * 76)
     for mode, entries in results.items():
         for k in range(1, CFG.refresh_n_splits + 1):
-            group = [(pull_t, baseline_t, refresh_t)
-                     for _, kk, pull_t, baseline_t, refresh_t in entries if kk == k]
+            group = [(pull_t, baseline_t, lr_t, fa_t)
+                     for _, kk, pull_t, baseline_t, lr_t, fa_t in entries if kk == k]
             if not group:
                 continue
             med_pull = float(np.median([g[0] for g in group]))
             med_base = float(np.median([g[1] for g in group]))
-            med_ref = float(np.median([g[2] for g in group]))
-            log.result(f"{k:>4}  {mode:<20}  {med_pull:>8.2f}  {med_base:>10.2f}  {med_ref:>10.2f}")
+            med_lr = float(np.median([g[2] for g in group]))
+            med_fa = float(np.median([g[3] for g in group]))
+            log.result(f"{k:>4}  {mode:<20}  {med_pull:>8.2f}  {med_base:>10.2f}  {med_lr:>14.2f}  {med_fa:>12.2f}")
 
 
 def save_results_csv(
-    results: dict[str, list[tuple[int, int, float, float, float]]],
+    results: dict[str, list[tuple[int, int, float, float, float, float]]],
     model: str,
     base_image: str,
 ) -> None:
@@ -293,7 +297,8 @@ def save_results_csv(
     fieldnames = ["run", "n_refreshed"]
     for mode in results:
         slug = mode.replace("-", "_")
-        fieldnames += [f"{slug}_pull_s", f"{slug}_baseline_s", f"{slug}_refresh_s"]
+        fieldnames += [f"{slug}_pull_s", f"{slug}_baseline_s",
+                       f"{slug}_layer_refresh_s", f"{slug}_file_access_s"]
 
     rows = []
     for run in range(CFG.refresh_n_runs):
@@ -301,14 +306,16 @@ def save_results_csv(
             row: dict = {"run": run, "n_refreshed": k}
             for mode, entries in results.items():
                 slug = mode.replace("-", "_")
-                match = [(p, b, r) for rr, kk, p, b, r in entries if rr == run and kk == k]
+                match = [(p, b, lr, fa) for rr, kk, p, b, lr, fa in entries if rr == run and kk == k]
                 if match:
-                    p, b, r = match[0]
+                    p, b, lr, fa = match[0]
                     row[f"{slug}_pull_s"] = f"{p:.4f}"
                     row[f"{slug}_baseline_s"] = f"{b:.4f}"
-                    row[f"{slug}_refresh_s"] = f"{r:.4f}"
+                    row[f"{slug}_layer_refresh_s"] = f"{lr:.4f}"
+                    row[f"{slug}_file_access_s"] = f"{fa:.4f}"
                 else:
-                    row[f"{slug}_pull_s"] = row[f"{slug}_baseline_s"] = row[f"{slug}_refresh_s"] = ""
+                    row[f"{slug}_pull_s"] = row[f"{slug}_baseline_s"] = ""
+                    row[f"{slug}_layer_refresh_s"] = row[f"{slug}_file_access_s"] = ""
             rows.append(row)
 
     write_csv(path, fieldnames, rows)
@@ -331,34 +338,44 @@ def plot(
         offset = (i - (n_modes - 1) / 2) * width
 
         # Dashed baseline line (median baseline across all k, per mode)
-        all_baselines = [b for _, _, _, b, _ in entries]
+        all_baselines = [b for _, _, _, b, _, _ in entries]
         if all_baselines:
             med_baseline = float(np.median(all_baselines))
             ax.axhline(med_baseline, color=color, linestyle="--", linewidth=1.0, alpha=0.6)
 
-        med_refresh = []
+        med_lr = []
+        med_fa = []
         for j, k in enumerate(k_values):
-            group = [refresh_t for _, kk, _, _, refresh_t in entries if kk == k]
-            med_r = float(np.median(group)) if group else 0.0
-            med_refresh.append(med_r)
+            lr_group = [lr for _, kk, _, _, lr, _ in entries if kk == k]
+            fa_group = [fa for _, kk, _, _, _, fa in entries if kk == k]
+            med_lr.append(float(np.median(lr_group)) if lr_group else 0.0)
+            med_fa.append(float(np.median(fa_group)) if fa_group else 0.0)
             x_center = x[j] + offset + width / 2
-            add_run_dots(ax, x_center, group)
+            total_group = [lr + fa for lr, fa in zip(lr_group, fa_group)]
+            add_run_dots(ax, x_center, total_group)
 
-        ax.bar(x + offset, med_refresh, width, color=color,
-               edgecolor=color, linewidth=0.5, label=mode)
+        ax.bar(x + offset, med_lr, width, color=color,
+               edgecolor=color, linewidth=0.5, alpha=1.0, label=f"{mode} (layer refresh)")
+        ax.bar(x + offset, med_fa, width, bottom=med_lr, color=color,
+               edgecolor=color, linewidth=0.5, alpha=0.45, label=f"{mode} (file access)")
 
     ax.set_xlabel("Number of layers refreshed")
     ax.set_ylabel("Access time (s)")
     ax.set_title(
-        f"refresh-layer access time (median, n={CFG.refresh_n_runs} runs, dots = individual runs)\n"
-        f"dashed = baseline access before refresh"
+        f"refresh-layer total time (median, n={CFG.refresh_n_runs} runs, dots = individual run totals)\n"
+        f"dashed = baseline access after pull"
     )
     ax.set_xticks(x)
     ax.set_xticklabels(k_values)
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")
 
-    method_handles = [mpatches.Patch(facecolor=MODE_COLORS[m], edgecolor=MODE_COLORS[m], label=m)
-                      for m in results]
+    method_handles = []
+    for m in results:
+        c = MODE_COLORS[m]
+        method_handles.append(mpatches.Patch(facecolor=c, edgecolor=c, alpha=1.0,
+                                             label=f"{m} – layer refresh"))
+        method_handles.append(mpatches.Patch(facecolor=c, edgecolor=c, alpha=0.45,
+                                             label=f"{m} – file access"))
     baseline_handle = Line2D([0], [0], color="gray", linestyle="--", linewidth=1.0,
                              label="baseline (dashed)")
     ax.legend(handles=method_handles + [baseline_handle], loc="upper left")
