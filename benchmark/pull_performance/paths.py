@@ -69,3 +69,16 @@ def build_config_csv_path(base_dir: str, model: str, base_image: str, mode: str)
 def build_config_chart_path(base_dir: str, model: str, base_image: str, mode: str) -> str:
     mode_slug = mode.replace("-", "_")
     return os.path.join(config_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{now_ts()}.png")
+
+def prefetch_results_dir(base_dir: str) -> str:
+    return os.path.join(base_dir, "results", "prefetch")
+
+def prefetch_charts_dir(base_dir: str) -> str:
+    return os.path.join(base_dir, "charts", "prefetch")
+
+def prefetch_csv_path(base_dir: str, model: str, base_image: str) -> str:
+    return os.path.join(prefetch_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{now_ts()}.csv")
+
+def prefetch_chart_path(base_dir: str, model: str, base_image: str, mode: str) -> str:
+    mode_slug = mode.replace("-", "_")
+    return os.path.join(prefetch_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{now_ts()}.png")

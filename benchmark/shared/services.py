@@ -1,8 +1,39 @@
+import json
 import os
+import re
 import subprocess
 import time
 
 from shared import log
+
+_JOURNAL_KV_RE = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\S+)')
+
+
+def parse_journal_kv(text: str) -> dict[str, str]:
+    """Parse a logrus-formatted log line into a key→value dict."""
+    result = {}
+    for m in _JOURNAL_KV_RE.finditer(text):
+        result[m.group(1)] = m.group(2).strip('"')
+    return result
+
+
+def collect_stargz_journal_since(since_s: float) -> list[dict]:
+    """Return all stargz-snapshotter journal entries since a Unix timestamp."""
+    result = subprocess.run(
+        ["sudo", "journalctl", "-u", "stargz-snapshotter",
+         f"--since=@{since_s:.0f}", "--output", "json", "--no-pager"],
+        capture_output=True, text=True, check=True,
+    )
+    entries = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            pass
+    return entries
 
 
 def clear_2dfs_cache(cfg) -> None:

@@ -74,7 +74,13 @@ def _apply_overrides(base_content: str, overrides: dict) -> str:
         if pattern.search(content):
             content = pattern.sub(replacement, content)
         else:
-            content = content.rstrip("\n") + f"\n{replacement}\n"
+            # Insert before the first section header so the key stays top-level.
+            section_match = re.search(r"^\[", content, re.MULTILINE)
+            if section_match:
+                idx = section_match.start()
+                content = content[:idx].rstrip("\n") + f"\n{replacement}\n\n" + content[idx:]
+            else:
+                content = content.rstrip("\n") + f"\n{replacement}\n"
     return content
 
 
