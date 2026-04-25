@@ -352,7 +352,7 @@ def plot(
     n_modes = len(results)
     width = min(0.8 / n_modes, 0.2)
 
-    fig, ax = plt.subplots(figsize=(max(8, n_modes * 3), 6))
+    fig, ax = plt.subplots(figsize=(10, 6.5))
 
     for i, (mode, entries) in enumerate(results.items()):
         color = MODE_COLORS[mode]
@@ -390,28 +390,29 @@ def plot(
     ax.set_xticklabels(k_values)
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")
 
-    method_handles = []
+    mode_handles = []
     for m in results:
         c = MODE_COLORS[m]
-        method_handles.append(mpatches.Patch(facecolor=c, edgecolor=c, alpha=1.0,
-                                             label=f"{m} – layer refresh"))
-        method_handles.append(mpatches.Patch(facecolor=c, edgecolor=c, alpha=0.45,
-                                             label=f"{m} – file access"))
-    baseline_handle = Line2D([0], [0], color="gray", linestyle="--", linewidth=1.0,
-                             label="baseline (dashed)")
+        mode_handles.append(mpatches.Patch(facecolor=c, edgecolor=c, alpha=1.0, label=m))
+    style_handles = [
+        mpatches.Patch(facecolor="gray", edgecolor="gray", alpha=1.0, label="layer refresh"),
+        mpatches.Patch(facecolor="gray", edgecolor="gray", alpha=0.45, label="file access"),
+        Line2D([0], [0], color="gray", linestyle="--", linewidth=1.0, label="baseline"),
+    ]
     ax.legend(
-        handles=method_handles + [baseline_handle],
-        loc="upper left",
-        bbox_to_anchor=(1.02, 1.0),
-        borderaxespad=0.0,
+        handles=mode_handles + style_handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.12),
+        ncol=min(4, len(mode_handles) + len(style_handles)),
         fontsize=9,
+        frameon=False,
     )
 
     figure_footer(fig, model, base_image)
 
     output_path = refresh_chart_path(SCRIPT_DIR, model, base_image, execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fig.tight_layout(rect=(0, 0, 0.78, 1))
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
     save_figure(fig, output_path)
 
 
