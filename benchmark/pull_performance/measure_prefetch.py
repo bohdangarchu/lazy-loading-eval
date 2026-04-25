@@ -18,7 +18,7 @@ from shared.services import clear_stargz_cache, collect_stargz_journal_since
 from shared.model import cleanup_pull_experiment
 from pull_performance.prepare import prepare_chunks, prepare_2dfs_stargz, prepare_2dfs_stargz_zstd
 from pull_performance.images import pull_name_2dfs_stargz, pull_name_2dfs_stargz_zstd
-from pull_performance.paths import prefetch_csv_path, prefetch_chart_path, prefetch_charts_dir
+from pull_performance.paths import prefetch_csv_path, prefetch_chart_path, prefetch_charts_run_dir
 from pull_performance.measure_stargz_config import (
     _read_base_config, _apply_overrides, apply_stargz_config,
 )
@@ -26,19 +26,16 @@ from pull_performance.measure_stargz_config import (
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXPERIMENTS = [
-    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),
-    # ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),
-    ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),
+    # ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"), # 60 mb per split
+    ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"), # 271 mb per split
+    # ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),
 ]
 MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
-ALLOTMENTS = [2, 4]
+ALLOTMENTS = [2, 4, 6, 8]
 N_CHUNKS = 10  # number of chunks to build the image with (always max)
 
 # Config overrides to enable prefetch for this experiment.
-PREFETCH_CONFIG_OVERRIDES = {
-    "noprefetch": False,
-    # "prefetch_size": 3 * 1024 * 1024 * 1024 # 3 GB
-}
+PREFETCH_CONFIG_OVERRIDES = {"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False}
 NOPREFETCH_CONFIG_OVERRIDES = {"noprefetch": True}
 
 DOWNLOAD_COLOR = "#1f77b4"
@@ -284,7 +281,7 @@ def measure(chunk_paths: list[str], source_image: str, cfg) -> list[PullPrefetch
 # ── output ─────────────────────────────────────────────────────────
 
 
-def save_csv(results: list[PullPrefetchResult], model: str, base_image: str) -> None:
+def save_csv(results: list[PullPrefetchResult], model: str, base_image: str, execution_ts: str) -> None:
     rows = []
     for r in results:
         ref = r.pull_start_s
@@ -306,11 +303,11 @@ def save_csv(results: list[PullPrefetchResult], model: str, base_image: str) -> 
     if not rows:
         log.info("No prefetch data to save.")
         return
-    write_csv(prefetch_csv_path(SCRIPT_DIR, model, base_image), list(rows[0].keys()), rows)
+    write_csv(prefetch_csv_path(SCRIPT_DIR, model, base_image, execution_ts), list(rows[0].keys()), rows)
 
 
-def plot(results: list[PullPrefetchResult], model: str, base_image: str) -> None:
-    os.makedirs(prefetch_charts_dir(SCRIPT_DIR), exist_ok=True)
+def plot(results: list[PullPrefetchResult], model: str, base_image: str, execution_ts: str) -> None:
+    os.makedirs(prefetch_charts_run_dir(SCRIPT_DIR, execution_ts), exist_ok=True)
 
     for mode in MODES:
         mode_results = [r for r in results if r.mode == mode]
@@ -364,7 +361,7 @@ def plot(results: list[PullPrefetchResult], model: str, base_image: str) -> None
         fig.suptitle(f"Per-layer Prefetch Timeline — {mode}", fontsize=12)
         figure_footer(fig, model, base_image)
         fig.tight_layout()
-        save_figure(fig, prefetch_chart_path(SCRIPT_DIR, model, base_image, mode))
+        save_figure(fig, prefetch_chart_path(SCRIPT_DIR, model, base_image, mode, execution_ts))
 
 
 # ── main ───────────────────────────────────────────────────────────
@@ -412,12 +409,13 @@ def verify(chunk_paths: list[str], source_image: str, cfg) -> None:
 
 def main():
     log.set_verbose(VERBOSE)
+    execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     for model, base_image in EXPERIMENTS:
         chunk_paths = prepare_chunks(model, N_CHUNKS)
         results = measure(chunk_paths, base_image, CFG)
-        save_csv(results, model, base_image)
-        plot(results, model, base_image)
+        save_csv(results, model, base_image, execution_ts)
+        plot(results, model, base_image, execution_ts)
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
 
 

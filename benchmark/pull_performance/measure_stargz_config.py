@@ -14,7 +14,7 @@ import numpy as np
 from shared import log
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure
 from pull_performance.paths import (
-    stargz_config_charts_dir, stargz_config_csv_path, stargz_config_chart_path, stargz_config_log_path,
+    stargz_config_charts_run_dir, stargz_config_csv_path, stargz_config_chart_path, stargz_config_log_path,
 )
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
@@ -161,12 +161,11 @@ def _measure_config_option(
 
 
 def measure(
-    chunk_paths: list[str], source_image: str, cfg, model: str, base_image: str,
+    chunk_paths: list[str], source_image: str, cfg, model: str, base_image: str, execution_ts: str,
 ) -> dict[tuple[str, str], list[tuple[int, int, float, float]]]:
     # results[(mode, config_label)] = list of (run, n, pull_t, run_t)
     results: dict[tuple[str, str], list[tuple[int, int, float, float]]] = {}
 
-    execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_config = _read_base_config()
 
     def _prepare_all_images():
@@ -208,8 +207,9 @@ def save_csv(
     results: dict[tuple[str, str], list[tuple[int, int, float, float]]],
     model: str,
     base_image: str,
+    execution_ts: str,
 ) -> None:
-    output_path = stargz_config_csv_path(SCRIPT_DIR, model, base_image)
+    output_path = stargz_config_csv_path(SCRIPT_DIR, model, base_image, execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
 
@@ -248,8 +248,9 @@ def plot(
     results: dict[tuple[str, str], list[tuple[int, int, float, float]]],
     model: str,
     base_image: str,
+    execution_ts: str,
 ) -> None:
-    os.makedirs(stargz_config_charts_dir(SCRIPT_DIR), exist_ok=True)
+    os.makedirs(stargz_config_charts_run_dir(SCRIPT_DIR, execution_ts), exist_ok=True)
 
     config_labels = [label for _, label in CONFIG_OPTIONS]
     splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
@@ -306,7 +307,7 @@ def plot(
         figure_footer(fig, model, base_image)
         fig.tight_layout()
 
-        output_path = stargz_config_chart_path(SCRIPT_DIR, model, base_image, mode)
+        output_path = stargz_config_chart_path(SCRIPT_DIR, model, base_image, mode, execution_ts)
         save_figure(fig, output_path)
 
 
@@ -315,6 +316,7 @@ def plot(
 
 def main():
     log.set_verbose(VERBOSE)
+    execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log.info(f"Modes: {MODES}")
     log.info(f"Config options: {[label for _, label in CONFIG_OPTIONS]}")
     log.info(f"Splits (total): {CFG.stargz_config_n_splits}")
@@ -330,10 +332,10 @@ def main():
         prepare_local_registry(base_image, registry(CFG))
 
         chunk_paths = prepare_chunks(model, CFG.stargz_config_n_splits)
-        results = measure(chunk_paths, base_image, CFG, model, base_image)
+        results = measure(chunk_paths, base_image, CFG, model, base_image, execution_ts)
 
-        save_csv(results, model, base_image)
-        plot(results, model, base_image)
+        save_csv(results, model, base_image, execution_ts)
+        plot(results, model, base_image, execution_ts)
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
 
 

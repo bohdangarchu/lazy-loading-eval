@@ -12,7 +12,7 @@ import numpy as np
 
 from shared import log
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, save_figure, write_csv
-from pull_performance.paths import refresh_csv_path, refresh_chart_path
+from pull_performance.paths import refresh_csv_path, refresh_chart_path, refresh_charts_run_dir
 from shared.config import load_config
 from shared.registry import (
     prepare_local_registry, clear_registry, registry, image_slug,
@@ -290,8 +290,9 @@ def save_results_csv(
     results: dict[str, list[tuple[int, int, float, float, float, float]]],
     model: str,
     base_image: str,
+    execution_ts: str,
 ) -> None:
-    path = refresh_csv_path(SCRIPT_DIR, model, base_image)
+    path = refresh_csv_path(SCRIPT_DIR, model, base_image, execution_ts)
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     fieldnames = ["run", "n_refreshed"]
@@ -325,6 +326,7 @@ def plot(
     results: dict[str, list[tuple[int, int, float, float, float]]],
     model: str,
     base_image: str,
+    execution_ts: str,
 ) -> None:
     k_values = list(range(1, CFG.refresh_n_splits + 1))
     x = np.arange(len(k_values))
@@ -382,7 +384,7 @@ def plot(
 
     figure_footer(fig, model, base_image)
 
-    output_path = refresh_chart_path(SCRIPT_DIR, model, base_image)
+    output_path = refresh_chart_path(SCRIPT_DIR, model, base_image, execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout()
     save_figure(fig, output_path)
@@ -394,6 +396,7 @@ def plot(
 def main():
     log.set_verbose(VERBOSE)
     ensure_buildkit()
+    execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log.info(f"Modes: {MODES}")
     log.info(f"CFG.refresh_n_splits: {CFG.refresh_n_splits}")
     log.info(f"CFG.refresh_n_runs: {CFG.refresh_n_runs}")
@@ -417,8 +420,8 @@ def main():
         clear_registry(CFG, preserve_base=True)
 
         print_results(results)
-        save_results_csv(results, model, base_image)
-        plot(results, model, base_image)
+        save_results_csv(results, model, base_image, execution_ts)
+        plot(results, model, base_image, execution_ts)
 
 
 if __name__ == "__main__":

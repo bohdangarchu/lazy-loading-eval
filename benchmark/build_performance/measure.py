@@ -11,10 +11,10 @@ import psutil
 
 from shared import log
 from shared.build_result import BuildResult
-from shared.paths import now_ts
 from build_performance.paths import (
     build_csv_path, build_charts_dir, build_chart_path,
-    resource_csv_path, resource_chart_path, resource_cpu_charts_dir, resource_ram_charts_dir,
+    resource_csv_path, resource_chart_path,
+    resource_cpu_charts_run_dir, resource_ram_charts_run_dir,
 )
 from shared.config import load_config
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure, write_csv
@@ -316,7 +316,7 @@ def plot_resource(
 
 def plot_resource_individual(
     samples: list[tuple[int, float, float, str]], model: str, max_splits: int,
-    base_image: str,
+    base_image: str, execution_ts: str,
 ) -> None:
     if not samples:
         return
@@ -341,9 +341,8 @@ def plot_resource_individual(
     mode_label = {mode.replace("-", "_"): mode for mode in MODES}
     model_slug = model.replace("/", "--")
     img_slug = image_slug(base_image)
-    ts = now_ts()
-    cpu_dir = resource_cpu_charts_dir(SCRIPT_DIR)
-    ram_dir = resource_ram_charts_dir(SCRIPT_DIR)
+    cpu_dir = resource_cpu_charts_run_dir(SCRIPT_DIR, execution_ts)
+    ram_dir = resource_ram_charts_run_dir(SCRIPT_DIR, execution_ts)
     os.makedirs(cpu_dir, exist_ok=True)
     os.makedirs(ram_dir, exist_ok=True)
 
@@ -355,7 +354,7 @@ def plot_resource_individual(
         mem_vals = [p[2] for p in points]
 
         mode_name = mode_label.get(mk, mk)
-        file_stem = f"{model_slug}_{img_slug}_{mk}_run{run + 1}_splits{n}_{ts}"
+        file_stem = f"{model_slug}_{img_slug}_{mk}_run{run + 1}_splits{n}"
 
         def _add_run_footer(fig) -> None:
             figure_footer(fig, model, base_image)
@@ -395,6 +394,7 @@ def plot_resource_individual(
 
 def main():
     log.set_verbose(VERBOSE)
+    execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     for model, base_image in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
@@ -411,7 +411,7 @@ def main():
             samples = monitor.stop()
             save_resource_csv(samples, model, CFG.build_max_splits, base_image)
             plot_resource(samples, model, CFG.build_max_splits, base_image)
-            plot_resource_individual(samples, model, CFG.build_max_splits, base_image)
+            plot_resource_individual(samples, model, CFG.build_max_splits, base_image, execution_ts)
 
         splits = sorted(set(r["splits"] for r in results))
         log.result("\n=== Comparison (median across runs) ===")

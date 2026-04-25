@@ -22,11 +22,23 @@ def config_results_dir(base_dir: str) -> str:
 def config_charts_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "charts", "config")
 
+def config_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(config_results_dir(base_dir), execution_ts)
+
+def config_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(config_charts_dir(base_dir), execution_ts)
+
 def rebuild_results_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "results", "rebuild")
 
 def rebuild_charts_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "charts", "rebuild")
+
+def rebuild_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(rebuild_results_dir(base_dir), execution_ts)
+
+def rebuild_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(rebuild_charts_dir(base_dir), execution_ts)
 
 def compression_results_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "results", "compression")
@@ -52,6 +64,12 @@ def resource_cpu_charts_dir(base_dir: str) -> str:
 def resource_ram_charts_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "charts", "resource", "ram")
 
+def resource_cpu_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(resource_cpu_charts_dir(base_dir), execution_ts)
+
+def resource_ram_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(resource_ram_charts_dir(base_dir), execution_ts)
+
 
 # ── output file paths ──────────────────────────────────────────────
 
@@ -67,11 +85,11 @@ def resource_csv_path(base_dir: str, model: str, base_image: str, max_splits: in
 def resource_chart_path(base_dir: str, model: str, base_image: str, max_splits: int) -> str:
     return os.path.join(resource_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_resource_splits_{max_splits}_{now_ts()}.png")
 
-def rebuild_csv_path(base_dir: str, model: str, base_image: str, n: int) -> str:
-    return os.path.join(rebuild_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild_n{n}_{now_ts()}.csv")
+def rebuild_csv_path(base_dir: str, model: str, base_image: str, n: int, execution_ts: str) -> str:
+    return os.path.join(rebuild_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild_n{n}.csv")
 
-def rebuild_chart_path(base_dir: str, model: str, base_image: str, n: int) -> str:
-    return os.path.join(rebuild_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild_n{n}_{now_ts()}.png")
+def rebuild_chart_path(base_dir: str, model: str, base_image: str, n: int, execution_ts: str) -> str:
+    return os.path.join(rebuild_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild_n{n}.png")
 
 def compression_csv_path(base_dir: str, model: str, base_image: str, max_splits: int) -> str:
     return os.path.join(compression_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_splits_{max_splits}_{now_ts()}.csv")
@@ -79,10 +97,10 @@ def compression_csv_path(base_dir: str, model: str, base_image: str, max_splits:
 def compression_chart_path(base_dir: str, model: str, base_image: str, max_splits: int) -> str:
     return os.path.join(compression_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_splits_{max_splits}_{now_ts()}.png")
 
-def measure_config_csv_path(base_dir: str, model: str, base_image: str, mode: str, n_splits: int) -> str:
+def measure_config_csv_path(base_dir: str, model: str, base_image: str, mode: str, n_splits: int, execution_ts: str) -> str:
     mode_slug = mode.replace("-", "_")
-    return os.path.join(config_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_splits_{n_splits}_{now_ts()}.csv")
+    return os.path.join(config_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_splits_{n_splits}.csv")
 
-def measure_config_chart_path(base_dir: str, model: str, base_image: str, mode: str, n_splits: int) -> str:
+def measure_config_chart_path(base_dir: str, model: str, base_image: str, mode: str, n_splits: int, execution_ts: str) -> str:
     mode_slug = mode.replace("-", "_")
-    return os.path.join(config_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_splits_{n_splits}_{now_ts()}.png")
+    return os.path.join(config_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_splits_{n_splits}.png")

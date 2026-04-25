@@ -1,7 +1,5 @@
 import os
 
-from shared.paths import now_ts
-
 
 def _model_slug(model: str) -> str:
     return model.replace("/", "--")
@@ -22,11 +20,23 @@ def pull_results_dir(base_dir: str) -> str:
 def pull_charts_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "charts", "pull")
 
+def pull_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_results_dir(base_dir), execution_ts)
+
+def pull_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_charts_dir(base_dir), execution_ts)
+
 def refresh_results_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "results", "refresh")
 
 def refresh_charts_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "charts", "refresh")
+
+def refresh_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(refresh_results_dir(base_dir), execution_ts)
+
+def refresh_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(refresh_charts_dir(base_dir), execution_ts)
 
 def stargz_config_results_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "results", "stargz-config")
@@ -34,41 +44,23 @@ def stargz_config_results_dir(base_dir: str) -> str:
 def stargz_config_charts_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "charts", "stargz-config")
 
+def stargz_config_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(stargz_config_results_dir(base_dir), execution_ts)
+
+def stargz_config_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(stargz_config_charts_dir(base_dir), execution_ts)
+
 def config_results_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "results", "config")
 
 def config_charts_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "charts", "config")
 
+def config_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(config_results_dir(base_dir), execution_ts)
 
-# ── output file paths ──────────────────────────────────────────────
-
-def pull_csv_path(base_dir: str, model: str, base_image: str, n_splits: int) -> str:
-    return os.path.join(pull_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_pull_{n_splits}_{now_ts()}.csv")
-
-def pull_chart_path(base_dir: str, model: str, base_image: str, n_splits: int) -> str:
-    return os.path.join(pull_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_pull_{n_splits}_{now_ts()}.png")
-
-def refresh_csv_path(base_dir: str, model: str, base_image: str) -> str:
-    return os.path.join(refresh_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh_{now_ts()}.csv")
-
-def refresh_chart_path(base_dir: str, model: str, base_image: str) -> str:
-    return os.path.join(refresh_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh_{now_ts()}.png")
-
-def stargz_config_csv_path(base_dir: str, model: str, base_image: str) -> str:
-    return os.path.join(stargz_config_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{now_ts()}.csv")
-
-def stargz_config_chart_path(base_dir: str, model: str, base_image: str, mode: str) -> str:
-    mode_slug = mode.replace("-", "_")
-    return os.path.join(stargz_config_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{now_ts()}.png")
-
-def build_config_csv_path(base_dir: str, model: str, base_image: str, mode: str) -> str:
-    mode_slug = mode.replace("-", "_")
-    return os.path.join(config_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{now_ts()}.csv")
-
-def build_config_chart_path(base_dir: str, model: str, base_image: str, mode: str) -> str:
-    mode_slug = mode.replace("-", "_")
-    return os.path.join(config_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{now_ts()}.png")
+def config_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(config_charts_dir(base_dir), execution_ts)
 
 def prefetch_results_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "results", "prefetch")
@@ -76,12 +68,48 @@ def prefetch_results_dir(base_dir: str) -> str:
 def prefetch_charts_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "charts", "prefetch")
 
-def prefetch_csv_path(base_dir: str, model: str, base_image: str) -> str:
-    return os.path.join(prefetch_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{now_ts()}.csv")
+def prefetch_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_results_dir(base_dir), execution_ts)
 
-def prefetch_chart_path(base_dir: str, model: str, base_image: str, mode: str) -> str:
+def prefetch_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_charts_dir(base_dir), execution_ts)
+
+
+# ── output file paths ──────────────────────────────────────────────
+
+def pull_csv_path(base_dir: str, model: str, base_image: str, n_splits: int, execution_ts: str) -> str:
+    return os.path.join(pull_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_pull_{n_splits}.csv")
+
+def pull_chart_path(base_dir: str, model: str, base_image: str, n_splits: int, execution_ts: str) -> str:
+    return os.path.join(pull_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_pull_{n_splits}.png")
+
+def refresh_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(refresh_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh.csv")
+
+def refresh_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(refresh_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh.png")
+
+def stargz_config_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(stargz_config_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}.csv")
+
+def stargz_config_chart_path(base_dir: str, model: str, base_image: str, mode: str, execution_ts: str) -> str:
     mode_slug = mode.replace("-", "_")
-    return os.path.join(prefetch_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{now_ts()}.png")
+    return os.path.join(stargz_config_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}.png")
+
+def build_config_csv_path(base_dir: str, model: str, base_image: str, mode: str, execution_ts: str) -> str:
+    mode_slug = mode.replace("-", "_")
+    return os.path.join(config_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}.csv")
+
+def build_config_chart_path(base_dir: str, model: str, base_image: str, mode: str, execution_ts: str) -> str:
+    mode_slug = mode.replace("-", "_")
+    return os.path.join(config_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}.png")
+
+def prefetch_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}.csv")
+
+def prefetch_chart_path(base_dir: str, model: str, base_image: str, mode: str, execution_ts: str) -> str:
+    mode_slug = mode.replace("-", "_")
+    return os.path.join(prefetch_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}.png")
 
 def stargz_config_logs_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "logs", "stargz-config")

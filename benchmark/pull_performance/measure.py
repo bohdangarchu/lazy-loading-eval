@@ -261,9 +261,10 @@ def save_csv(
     results: dict[str, list[tuple[int, int, float, float]]],
     model: str,
     base_image: str,
+    execution_ts: str,
 ) -> None:
     splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
-    output_path = pull_csv_path(SCRIPT_DIR, model, base_image, len(splits))
+    output_path = pull_csv_path(SCRIPT_DIR, model, base_image, len(splits), execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -288,6 +289,7 @@ def plot(
     results: dict[str, list[tuple[int, int, float, float]]],
     model: str,
     base_image: str,
+    execution_ts: str,
 ) -> None:
     splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
     x = np.arange(len(splits))
@@ -330,7 +332,7 @@ def plot(
 
     figure_footer(fig, model, base_image)
 
-    output_path = pull_chart_path(SCRIPT_DIR, model, base_image, len(splits))
+    output_path = pull_chart_path(SCRIPT_DIR, model, base_image, len(splits), execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout()
     save_figure(fig, output_path)
@@ -342,6 +344,7 @@ def plot(
 def main():
     log.set_verbose(VERBOSE)
     ensure_buildkit()
+    execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log.info(f"Modes: {MODES}")
     log.info(f"Splits (2dfs/stargz): {CFG.pull_n_splits}")
     log.info(f"Splits (base): {CFG.pull_base_splits}")
@@ -358,8 +361,8 @@ def main():
         results = measure(chunk_paths, CFG.pull_base_splits, base_image, CFG)
 
         print_results(results)
-        save_csv(results, model, base_image)
-        plot(results, model, base_image)
+        save_csv(results, model, base_image, execution_ts)
+        plot(results, model, base_image, execution_ts)
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
 
 

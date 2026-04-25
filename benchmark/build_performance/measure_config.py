@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from shared import log
 from shared.charts import figure_footer, save_figure
-from build_performance.paths import config_charts_dir, measure_config_csv_path, measure_config_chart_path
+from build_performance.paths import config_charts_run_dir, measure_config_csv_path, measure_config_chart_path
 from shared.build_result import BuildResult
 from shared.config import load_config
 from shared.registry import (
@@ -125,8 +125,9 @@ def save_csv(
     results: dict[str, list[BuildResult]],
     model: str,
     base_image: str,
+    execution_ts: str,
 ) -> None:
-    output_path = measure_config_csv_path(SCRIPT_DIR, model, base_image, MODE, len(splits))
+    output_path = measure_config_csv_path(SCRIPT_DIR, model, base_image, MODE, len(splits), execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     header = ["splits"]
@@ -151,9 +152,10 @@ def plot(
     results: dict[str, ResultList],
     model: str,
     base_image: str,
+    execution_ts: str,
 ) -> None:
     splits = [n for n, _ in next(iter(results.values()))]
-    os.makedirs(config_charts_dir(SCRIPT_DIR), exist_ok=True)
+    os.makedirs(config_charts_run_dir(SCRIPT_DIR, execution_ts), exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(8, 5))
     for flags, flag_results in results.items():
@@ -168,12 +170,13 @@ def plot(
     figure_footer(fig, model, base_image)
     fig.tight_layout()
 
-    output_path = measure_config_chart_path(SCRIPT_DIR, model, base_image, MODE, len(splits))
+    output_path = measure_config_chart_path(SCRIPT_DIR, model, base_image, MODE, len(splits), execution_ts)
     save_figure(fig, output_path)
 
 
 def main():
     log.set_verbose(VERBOSE)
+    execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log.info(f"Mode: {MODE}")
     log.info(f"Flag options: {[f'{label} ({flags})' for flags, label in FLAG_OPTIONS]}")
 
@@ -195,8 +198,8 @@ def main():
             row = "  ".join(f"{brs[flags][i].total_s:>{col}.2f}" for flags, _ in FLAG_OPTIONS)
             log.result(f"{n:>8}  {row}")
 
-        save_csv(splits, brs, model, base_image)
-        plot(results, model, base_image)
+        save_csv(splits, brs, model, base_image, execution_ts)
+        plot(results, model, base_image, execution_ts)
 
 
 if __name__ == "__main__":

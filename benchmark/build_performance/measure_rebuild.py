@@ -7,7 +7,7 @@ import numpy as np
 
 from shared import log
 from shared.build_result import BuildResult
-from build_performance.paths import rebuild_charts_dir, rebuild_csv_path, rebuild_chart_path
+from build_performance.paths import rebuild_charts_run_dir, rebuild_csv_path, rebuild_chart_path
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure, write_csv
 from shared.config import load_config
 from shared.artifacts import mutate_chunk
@@ -99,8 +99,8 @@ def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
     return results
 
 
-def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
-    path = rebuild_csv_path(SCRIPT_DIR, model, base_image, n)
+def save_csv(results: list[dict], model: str, n: int, base_image: str, execution_ts: str) -> None:
+    path = rebuild_csv_path(SCRIPT_DIR, model, base_image, n, execution_ts)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fieldnames = ["run", "r", "direction", "method", "rebuild_s",
                   "pull_s", "context_transfer_s", "build_s", "export_s"]
@@ -115,8 +115,8 @@ def save_csv(results: list[dict], model: str, n: int, base_image: str) -> None:
     write_csv(path, fieldnames, rows)
 
 
-def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
-    os.makedirs(rebuild_charts_dir(SCRIPT_DIR), exist_ok=True)
+def plot(results: list[dict], model: str, n: int, base_image: str, execution_ts: str) -> None:
+    os.makedirs(rebuild_charts_run_dir(SCRIPT_DIR, execution_ts), exist_ok=True)
 
     n_modes = len(MODES)
     bar_width = 0.8 / n_modes
@@ -157,12 +157,13 @@ def plot(results: list[dict], model: str, n: int, base_image: str) -> None:
     figure_footer(fig, model, base_image)
     fig.tight_layout()
 
-    path = rebuild_chart_path(SCRIPT_DIR, model, base_image, n)
+    path = rebuild_chart_path(SCRIPT_DIR, model, base_image, n, execution_ts)
     save_figure(fig, path)
 
 
 def main():
     log.set_verbose(VERBOSE)
+    execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     for model, base_image in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
@@ -175,8 +176,8 @@ def main():
 
         results = measure_rebuilds(chunk_paths, methods)
 
-        save_csv(results, model, CFG.rebuild_n_splits, base_image)
-        plot(results, model, CFG.rebuild_n_splits, base_image)
+        save_csv(results, model, CFG.rebuild_n_splits, base_image, execution_ts)
+        plot(results, model, CFG.rebuild_n_splits, base_image, execution_ts)
 
         log.result(f"\n{'run':>4}  {'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild':>8}  {'pull':>6}  {'ctx':>6}  {'build':>6}  {'export':>6}")
         log.result("-" * 84)

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from shared import log
 from shared.charts import figure_footer, save_figure
-from pull_performance.paths import config_charts_dir, build_config_csv_path, build_config_chart_path
+from pull_performance.paths import config_charts_run_dir, build_config_csv_path, build_config_chart_path
 from shared.artifacts import write_2dfs_json
 from shared.config import load_config
 from shared.registry import (
@@ -155,8 +155,9 @@ def save_csv(
     results: dict[str, list[tuple[int, float, float]]],
     model: str,
     base_image: str,
+    execution_ts: str,
 ) -> None:
-    output_path = build_config_csv_path(SCRIPT_DIR, model, base_image, MODE)
+    output_path = build_config_csv_path(SCRIPT_DIR, model, base_image, MODE, execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     header = ["splits"]
@@ -180,8 +181,9 @@ def plot(
     results: dict[str, list[tuple[int, float, float]]],
     model: str,
     base_image: str,
+    execution_ts: str,
 ) -> None:
-    os.makedirs(config_charts_dir(SCRIPT_DIR), exist_ok=True)
+    os.makedirs(config_charts_run_dir(SCRIPT_DIR, execution_ts), exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(8, 5))
     for flags, flag_results in results.items():
@@ -197,7 +199,7 @@ def plot(
     figure_footer(fig, model, base_image)
     fig.tight_layout()
 
-    output_path = build_config_chart_path(SCRIPT_DIR, model, base_image, MODE)
+    output_path = build_config_chart_path(SCRIPT_DIR, model, base_image, MODE, execution_ts)
     save_figure(fig, output_path)
 
 
@@ -206,6 +208,7 @@ def plot(
 
 def main():
     log.set_verbose(VERBOSE)
+    execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log.info(f"Mode: {MODE}")
     log.info(f"Flag options: {[f'{label} ({flags})' for flags, label in FLAG_OPTIONS]}")
     log.info(f"Splits: {NUM_SPLITS}")
@@ -230,8 +233,8 @@ def main():
             )
             log.result(f"{n:>8}  {row}")
 
-        save_csv(results, model, base_image)
-        plot(results, model, base_image)
+        save_csv(results, model, base_image, execution_ts)
+        plot(results, model, base_image, execution_ts)
 
 
 if __name__ == "__main__":
