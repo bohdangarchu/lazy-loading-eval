@@ -82,3 +82,11 @@ def prefetch_csv_path(base_dir: str, model: str, base_image: str) -> str:
 def prefetch_chart_path(base_dir: str, model: str, base_image: str, mode: str) -> str:
     mode_slug = mode.replace("-", "_")
     return os.path.join(prefetch_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{now_ts()}.png")
+
+def stargz_config_logs_dir(base_dir: str) -> str:
+    return os.path.join(base_dir, "logs", "stargz-config")
+
+def stargz_config_log_path(base_dir: str, model: str, base_image: str, mode: str, config_label: str, n: int, run: int) -> str:
+    mode_slug = mode.replace("-", "_")
+    label_slug = config_label.replace(" ", "_").replace(",", "").replace("/", "_")
+    return os.path.join(stargz_config_logs_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{label_slug}_{n}allotments_run{run}_{now_ts()}.json")

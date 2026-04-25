@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 import re
 import subprocess
@@ -13,12 +14,12 @@ import numpy as np
 from shared import log
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure
 from pull_performance.paths import (
-    stargz_config_charts_dir, stargz_config_csv_path, stargz_config_chart_path,
+    stargz_config_charts_dir, stargz_config_csv_path, stargz_config_chart_path, stargz_config_log_path,
 )
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
 from pull_performance.measure import _timed_pull, _timed_run, _run_cmd
-from shared.services import clear_stargz_cache
+from shared.services import clear_stargz_cache, save_stargz_run_log
 from pull_performance.prepare import (
     prepare_2dfs_stargz, prepare_2dfs_stargz_zstd, prepare_chunks,
 )
@@ -30,8 +31,8 @@ STARGZ_CONFIG_PATH = "/etc/containerd-stargz-grpc/config.toml"
 
 EXPERIMENTS = [
     # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
-    ("openai-community/gpt2-medium", "docker.io/library/python:3.12-slim"),   # ~1.52 GB    ~50 MB
-    # ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
+    # ("openai-community/gpt2-medium", "docker.io/library/python:3.12-slim"),   # ~1.52 GB    ~50 MB
+    ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
     # ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),    # ~6 GB    ~50 MB
 ]
 MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
@@ -127,6 +128,7 @@ def _prepare_mode(mode: str, chunk_paths: list[str], source_image: str, cfg) -> 
 
 def _measure_config_option(
     mode: str, source_image: str, cfg,
+    config_label: str, run_idx: int, model: str, base_image: str,
 ) -> list[tuple[int, float, float]]:
     results = []
     for n in cfg.stargz_config_base_splits:
@@ -135,6 +137,7 @@ def _measure_config_option(
         clear_stargz_cache()
 
         image = _pull_name(mode, source_image, cfg, n)
+        pull_start_s = time.time()
         pull_t = _timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", "--use-containerd-labels", image])
         log.result(f"  pull: {pull_t:.2f}s")
 
@@ -143,7 +146,10 @@ def _measure_config_option(
             "sudo", "ctr-remote", "run", "--rm", "--snapshotter=stargz",
             image, name, *_run_cmd(n),
         ])
+        run_end_s = time.time()
         log.result(f"  run: {run_t:.2f}s")
+
+        save_stargz_run_log(pull_start_s, run_end_s, stargz_config_log_path(SCRIPT_DIR, model, base_image, mode, config_label, n, run_idx))
 
         results.append((n, pull_t, run_t))
         log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
@@ -155,7 +161,7 @@ def _measure_config_option(
 
 
 def measure(
-    chunk_paths: list[str], source_image: str, cfg,
+    chunk_paths: list[str], source_image: str, cfg, model: str, base_image: str,
 ) -> dict[tuple[str, str], list[tuple[int, int, float, float]]]:
     # results[(mode, config_label)] = list of (run, n, pull_t, run_t)
     results: dict[tuple[str, str], list[tuple[int, int, float, float]]] = {}
@@ -183,7 +189,9 @@ def measure(
                 for run in range(cfg.stargz_config_n_runs):
                     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
                              f"=== Run {run + 1}/{cfg.stargz_config_n_runs} | {mode} | {label} ===")
-                    for n, pull_t, run_t in _measure_config_option(mode, source_image, cfg):
+                    for n, pull_t, run_t in _measure_config_option(
+                        mode, source_image, cfg, label, run, model, base_image,
+                    ):
                         results[key].append((run, n, pull_t, run_t))
     finally:
         log.info("\n=== Restoring base stargz config ===")
@@ -321,7 +329,7 @@ def main():
         prepare_local_registry(base_image, registry(CFG))
 
         chunk_paths = prepare_chunks(model, CFG.stargz_config_n_splits)
-        results = measure(chunk_paths, base_image, CFG)
+        results = measure(chunk_paths, base_image, CFG, model, base_image)
 
         save_csv(results, model, base_image)
         plot(results, model, base_image)
