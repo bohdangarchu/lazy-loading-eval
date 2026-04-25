@@ -6,7 +6,7 @@ def _model_slug(model: str) -> str:
 
 
 def now_ts() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 # ── directory helpers ──────────────────────────────────────────────

@@ -128,7 +128,7 @@ def _prepare_mode(mode: str, chunk_paths: list[str], source_image: str, cfg) -> 
 
 def _measure_config_option(
     mode: str, source_image: str, cfg,
-    config_label: str, run_idx: int, model: str, base_image: str,
+    config_label: str, run_idx: int, model: str, base_image: str, execution_ts: str,
 ) -> list[tuple[int, float, float]]:
     results = []
     for n in cfg.stargz_config_base_splits:
@@ -149,7 +149,7 @@ def _measure_config_option(
         run_end_s = time.time()
         log.result(f"  run: {run_t:.2f}s")
 
-        save_stargz_run_log(pull_start_s, run_end_s, stargz_config_log_path(SCRIPT_DIR, model, base_image, mode, config_label, n, run_idx))
+        save_stargz_run_log(pull_start_s, run_end_s, stargz_config_log_path(SCRIPT_DIR, model, base_image, mode, config_label, n, run_idx, execution_ts))
 
         results.append((n, pull_t, run_t))
         log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
@@ -166,6 +166,7 @@ def measure(
     # results[(mode, config_label)] = list of (run, n, pull_t, run_t)
     results: dict[tuple[str, str], list[tuple[int, int, float, float]]] = {}
 
+    execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_config = _read_base_config()
 
     def _prepare_all_images():
@@ -190,7 +191,7 @@ def measure(
                     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
                              f"=== Run {run + 1}/{cfg.stargz_config_n_runs} | {mode} | {label} ===")
                     for n, pull_t, run_t in _measure_config_option(
-                        mode, source_image, cfg, label, run, model, base_image,
+                        mode, source_image, cfg, label, run, model, base_image, execution_ts,
                     ):
                         results[key].append((run, n, pull_t, run_t))
     finally:

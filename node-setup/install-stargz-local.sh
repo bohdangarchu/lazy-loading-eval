@@ -1,17 +1,7 @@
 #!/bin/bash
 set -euox pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "usage: $0 <path-to-stargz-snapshotter-source>"
-  exit 1
-fi
-
-if [[ $EUID -eq 0 ]]; then
-  echo "do not run as root — script will sudo only the steps that need it"
-  exit 1
-fi
-
-SRC_DIR="$(realpath "$1")"
+SRC_DIR="/home/garchu/workspace/2dfs-custom/stargz-snapshotter"
 
 BIN_DIR="/usr/local/bin"
 SOCKET_DIR="/run/containerd-stargz-grpc"
