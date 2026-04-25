@@ -31,13 +31,15 @@ EXPERIMENTS = [
     ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),
 ]
 MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
-ALLOTMENTS = [2, 4, 6, 8, 10]
+ALLOTMENTS = [2, 4]
 N_CHUNKS = 10  # number of chunks to build the image with (always max)
 
 # Config overrides to enable prefetch for this experiment.
 PREFETCH_CONFIG_OVERRIDES = {
     "noprefetch": False,
+    # "prefetch_size": 3 * 1024 * 1024 * 1024 # 3 GB
 }
+NOPREFETCH_CONFIG_OVERRIDES = {"noprefetch": True}
 
 DOWNLOAD_COLOR = "#1f77b4"
 DECOMPRESS_COLOR = "#2ca02c"
@@ -69,8 +71,9 @@ class LayerPrefetchEvent:
 class PullPrefetchResult:
     mode: str
     n_allotments: int
-    pull_start_s: float     # seconds since epoch
-    pull_end_s: float       # seconds since epoch
+    pull_start_s: float              # seconds since epoch
+    pull_end_s: float                # seconds since epoch
+    noprefetch_pull_duration_s: float  # duration of a plain pull (no prefetch)
     layers: list[LayerPrefetchEvent]
 
 
@@ -188,11 +191,33 @@ def _rpull(image: str) -> None:
     )
 
 
-def _measure_one(mode: str, n: int, source_image: str, cfg) -> PullPrefetchResult:
-    image = _pull_name(mode, source_image, cfg, n)
-    log.info(f"  Clearing stargz cache...")
-    clear_stargz_cache()
+def _rpull_noprefetch(image: str) -> None:
+    subprocess.run(
+        ["sudo", "ctr-remote", "images", "rpull", "--plain-http", image],
+        check=True, capture_output=not log.VERBOSE,
+    )
 
+
+def _measure_one(mode: str, n: int, source_image: str, cfg, base_config: str, prefetch_config_content: str) -> PullPrefetchResult:
+    image = _pull_name(mode, source_image, cfg, n)
+
+    # Noprefetch pull for baseline duration
+    apply_stargz_config(_apply_overrides(base_config, NOPREFETCH_CONFIG_OVERRIDES))
+    log.info(f"  Clearing stargz cache (noprefetch)...")
+    clear_stargz_cache()
+    log.info(f"  Pulling noprefetch {mode} ({n} allotments): {image}")
+    np_start = time.time()
+    _rpull_noprefetch(image)
+    noprefetch_pull_duration_s = time.time() - np_start
+    log.info(f"  Noprefetch pull done in {noprefetch_pull_duration_s:.1f}s")
+
+    log.info(f"  Sleeping {cfg.pull_cooldown}s...")
+    time.sleep(cfg.pull_cooldown)
+
+    # Prefetch pull
+    apply_stargz_config(prefetch_config_content)
+    log.info(f"  Clearing stargz cache (prefetch)...")
+    clear_stargz_cache()
     log.info(f"  Pulling {mode} ({n} allotments): {image}")
     pull_start_s = time.time()
     _rpull(image)
@@ -213,6 +238,7 @@ def _measure_one(mode: str, n: int, source_image: str, cfg) -> PullPrefetchResul
         n_allotments=n,
         pull_start_s=pull_start_s,
         pull_end_s=pull_end_s,
+        noprefetch_pull_duration_s=noprefetch_pull_duration_s,
         layers=events,
     )
 
@@ -229,12 +255,10 @@ def _prepare_mode(mode: str, chunk_paths: list[str], source_image: str, cfg) -> 
 def measure(chunk_paths: list[str], source_image: str, cfg) -> list[PullPrefetchResult]:
     results = []
     base_config = _read_base_config()
-    config_content = _apply_overrides(base_config, PREFETCH_CONFIG_OVERRIDES)
+    prefetch_config_content = _apply_overrides(base_config, PREFETCH_CONFIG_OVERRIDES)
 
     try:
         clear_stargz_cache()
-        log.info("\n=== Applying prefetch stargz config ===")
-        apply_stargz_config(config_content)
 
         for mode in MODES:
             log.info(f"\n=== Preparing mode: {mode} ===")
@@ -244,7 +268,7 @@ def measure(chunk_paths: list[str], source_image: str, cfg) -> list[PullPrefetch
             for n in ALLOTMENTS:
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 log.info(f"\n[{ts}] === {mode}: {n} allotments ===")
-                result = _measure_one(mode, n, source_image, cfg)
+                result = _measure_one(mode, n, source_image, cfg, base_config, prefetch_config_content)
                 results.append(result)
                 log.info(f"\nSleeping {cfg.pull_cooldown}s...")
                 time.sleep(cfg.pull_cooldown)
@@ -277,6 +301,7 @@ def save_csv(results: list[PullPrefetchResult], model: str, base_image: str) -> 
                 "decompress_ms": f"{ev.decompress_ms:.1f}",
                 "prefetch_size_bytes": ev.prefetch_size_bytes,
                 "pull_end_rel_s": f"{r.pull_end_s - ref:.3f}",
+                "noprefetch_pull_duration_s": f"{r.noprefetch_pull_duration_s:.3f}",
             })
     if not rows:
         log.info("No prefetch data to save.")
@@ -318,6 +343,7 @@ def plot(results: list[PullPrefetchResult], model: str, base_image: str) -> None
                         color=DECOMPRESS_COLOR, alpha=0.85)
 
             ax.axvline(x=result.pull_end_s - ref, color="red", linestyle="--", linewidth=1.2)
+            ax.axvline(x=result.noprefetch_pull_duration_s, color="orange", linestyle="--", linewidth=1.2)
 
             layer_labels = [
                 f"{ev.layer_sha[7:19]} ({ev.prefetch_size_bytes // 1024 // 1024}MB)"
@@ -331,8 +357,9 @@ def plot(results: list[PullPrefetchResult], model: str, base_image: str) -> None
 
         dl_patch = mpatches.Patch(color=DOWNLOAD_COLOR, alpha=0.85, label="download")
         dc_patch = mpatches.Patch(color=DECOMPRESS_COLOR, alpha=0.85, label="decompress")
-        pull_end_line = mlines.Line2D([], [], color="red", linestyle="--", label="pull end")
-        axes[0][0].legend(handles=[dl_patch, dc_patch, pull_end_line], loc="upper right", fontsize=8)
+        pull_end_line = mlines.Line2D([], [], color="red", linestyle="--", label="pull end (prefetch)")
+        noprefetch_end_line = mlines.Line2D([], [], color="orange", linestyle="--", label="pull end (no prefetch)")
+        axes[0][0].legend(handles=[dl_patch, dc_patch, pull_end_line, noprefetch_end_line], loc="upper right", fontsize=8)
 
         fig.suptitle(f"Per-layer Prefetch Timeline — {mode}", fontsize=12)
         figure_footer(fig, model, base_image)
