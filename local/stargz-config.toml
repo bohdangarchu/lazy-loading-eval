@@ -1,4 +1,4 @@
-noprefetch = false
+noprefetch = true
 no_background_fetch = true
 disable_verification = true
 prefetch_async_size = 0

@@ -25,9 +25,8 @@ from pull_performance.measure import _next_container_name
 
 EXPERIMENTS = [
     # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    # ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~663 MB     ~700 MB
-    # ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
-    ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),    # ~6.85 GB     ~3.4 GB
+    ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
+    # ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),    # ~6.85 GB     ~3.4 GB
 ]
 CFG = load_config()
 VERBOSE = True
@@ -238,49 +237,73 @@ def measure_refresh(
     cfg,
     all_digests_per_mode: dict[str, list[dict[int, str]]],
 ) -> dict[str, list[tuple[int, int, float, float, float, float]]]:
-    """results[mode] = list of (run, k, pull_t, baseline_t, layer_refresh_t, file_access_t)"""
+    """results[mode] = list of (run, k, pull_t, baseline_t, layer_refresh_t, file_access_t)
+
+    baseline_t is shared across sibling modes (same _build_mode): bg-fetch only
+    affects refresh-layer, so the cold-cache file access on v0 is the same
+    measurement. We record it once per (build_mode, run, k) on the first sibling
+    and reuse the value for the rest. pull_t stays per-variant.
+    """
     results: dict[str, list[tuple[int, int, float, float, float, float]]] = {m: [] for m in MODES}
 
-    for mode in MODES:
-        all_digests = all_digests_per_mode[mode]
+    build_groups: dict[str, list[str]] = {}
+    for m in MODES:
+        build_groups.setdefault(_build_mode(m), []).append(m)
+
+    for build_mode, sibling_modes in build_groups.items():
+        all_digests = all_digests_per_mode[sibling_modes[0]]
 
         for run in range(CFG.refresh_n_runs):
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
-                     f"=== {mode} run {run + 1}/{CFG.refresh_n_runs} ===")
+                     f"=== {build_mode} run {run + 1}/{CFG.refresh_n_runs} ===")
             for k in range(1, CFG.refresh_n_splits + 1):
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-                log.info(f"\n[{ts}] === {mode}: refresh {k} layer(s) ===")
+                log.info(f"\n[{ts}] === {build_mode}: refresh {k} layer(s) ===")
 
-                clear_stargz_cache()
+                baseline_t: float | None = None
 
-                v0_pull = _pull_name_refresh(source_image, cfg, mode, 0)
-                log.info(f"Pulling v0: {v0_pull}")
-                pull_t = _timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", v0_pull])
-                log.result(f"  pull: {pull_t:.2f}s")
+                for sibling_idx, mode in enumerate(sibling_modes):
+                    clear_stargz_cache()
 
-                name = _next_container_name(f"refresh-{mode.replace('-', '')}")
-                _start_container(v0_pull, name)
+                    v0_pull = _pull_name_refresh(source_image, cfg, mode, 0)
+                    log.info(f"Pulling v0: {v0_pull}")
+                    pull_t = _timed_pull(
+                        ["sudo", "ctr-remote", "images", "rpull", "--plain-http", v0_pull]
+                    )
+                    log.result(f"  pull ({mode}): {pull_t:.2f}s")
 
-                baseline_t = _exec_timed(name, CFG.refresh_n_splits)
-                log.result(f"  baseline access: {baseline_t:.2f}s")
+                    name = _next_container_name(f"refresh-{mode.replace('-', '')}")
+                    _start_container(v0_pull, name)
 
-                with_bg_fetch = _is_bg_fetch_mode(mode)
-                t0 = time.perf_counter()
-                for i in range(k):
-                    old_digest = all_digests[0][i]
-                    new_digest = all_digests[i + 1][i]
-                    _refresh_layer(old_digest, new_digest, with_bg_fetch=with_bg_fetch)
-                layer_refresh_t = time.perf_counter() - t0
-                log.result(f"  refresh-layer ({k} layers): {layer_refresh_t:.2f}s")
+                    baseline_now = _exec_timed(name, CFG.refresh_n_splits)
+                    if sibling_idx == 0:
+                        baseline_t = baseline_now
+                        log.result(f"  baseline access: {baseline_t:.2f}s")
+                    else:
+                        log.info(
+                            f"  warmup access for {mode}: {baseline_now:.2f}s "
+                            f"(reusing shared baseline {baseline_t:.2f}s from {sibling_modes[0]})"
+                        )
 
-                file_access_t = _exec_timed(name, CFG.refresh_n_splits)
-                log.result(f"  post-refresh file access ({k} layers): {file_access_t:.2f}s")
+                    with_bg_fetch = _is_bg_fetch_mode(mode)
+                    t0 = time.perf_counter()
+                    for i in range(k):
+                        old_digest = all_digests[0][i]
+                        new_digest = all_digests[i + 1][i]
+                        _refresh_layer(old_digest, new_digest, with_bg_fetch=with_bg_fetch)
+                    layer_refresh_t = time.perf_counter() - t0
+                    log.result(f"  refresh-layer ({k} layers, {mode}): {layer_refresh_t:.2f}s")
 
-                _stop_container(name)
-                log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
-                time.sleep(cfg.pull_cooldown)
+                    file_access_t = _exec_timed(name, k)
+                    log.result(f"  post-refresh file access ({k} refreshed files, {mode}): {file_access_t:.2f}s")
 
-                results[mode].append((run, k, pull_t, baseline_t, layer_refresh_t, file_access_t))
+                    _stop_container(name)
+                    log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
+                    time.sleep(cfg.pull_cooldown)
+
+                    results[mode].append(
+                        (run, k, pull_t, baseline_t, layer_refresh_t, file_access_t)
+                    )
 
     return results
 
@@ -354,15 +377,20 @@ def plot(
 
     fig, ax = plt.subplots(figsize=(10, 6.5))
 
+    drawn_baselines: set[str] = set()
     for i, (mode, entries) in enumerate(results.items()):
         color = MODE_COLORS[mode]
         offset = (i - (n_modes - 1) / 2) * width
 
-        # Dashed baseline line (median baseline across all k, per mode)
-        all_baselines = [b for _, _, _, b, _, _ in entries]
-        if all_baselines:
-            med_baseline = float(np.median(all_baselines))
-            ax.axhline(med_baseline, color=color, linestyle="--", linewidth=1.0, alpha=0.6)
+        # Dashed baseline line: shared across sibling modes (same _build_mode),
+        # so draw once per build_mode using the first sibling's color.
+        bm = _build_mode(mode)
+        if bm not in drawn_baselines:
+            all_baselines = [b for _, _, _, b, _, _ in entries]
+            if all_baselines:
+                med_baseline = float(np.median(all_baselines))
+                ax.axhline(med_baseline, color=color, linestyle="--", linewidth=1.0, alpha=0.6)
+            drawn_baselines.add(bm)
 
         med_lr = []
         med_fa = []
