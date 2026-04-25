@@ -1,9 +1,11 @@
 MODE_COLORS: dict[str, str] = {
-    "2dfs":             "#1f77b4",
-    "2dfs-stargz":      "#ff7f0e",
-    "2dfs-stargz-zstd": "#9467bd",
-    "stargz":           "#2ca02c",
-    "base":             "#d62728",
+    "2dfs":                          "#1f77b4",
+    "2dfs-stargz":                   "#ff7f0e",
+    "2dfs-stargz-zstd":              "#9467bd",
+    "2dfs-stargz-with-bg-fetch":     "#e377c2", # refresh-layer
+    "2dfs-stargz-zstd-with-bg-fetch":"#8c564b", # refresh-layer
+    "stargz":                        "#2ca02c",
+    "base":                          "#d62728",
 }
 
 

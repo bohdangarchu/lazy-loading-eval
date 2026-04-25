@@ -24,14 +24,19 @@ from pull_performance.prepare import prepare_chunks
 from pull_performance.measure import _next_container_name
 
 EXPERIMENTS = [
-    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~1.4 GB     ~700 MB
-    ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),                      # ~3.09 GB     ~3.4 GB
-    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
+    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    # ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~663 MB     ~700 MB
+    # ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
+    ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),    # ~6.85 GB     ~3.4 GB
 ]
 CFG = load_config()
 VERBOSE = True
-MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
+MODES = [
+    "2dfs-stargz",
+    "2dfs-stargz-zstd",
+    "2dfs-stargz-with-bg-fetch",
+    "2dfs-stargz-zstd-with-bg-fetch",
+]
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -42,12 +47,12 @@ _ALLOTMENT_RE = re.compile(r"Stargz Allotment 0/(\d+) ([a-f0-9]{64})")
 
 
 def _build_name_refresh(source_image: str, cfg, mode: str, version_idx: int) -> str:
-    return f"{registry(cfg)}/{image_slug(source_image)}-{mode}-refresh:v{version_idx}"
+    return f"{registry(cfg)}/{image_slug(source_image)}-{_build_mode(mode)}-refresh:v{version_idx}"
 
 
 def _pull_name_refresh(source_image: str, cfg, mode: str, version_idx: int) -> str:
     end_col = CFG.refresh_n_splits - 1
-    return f"{registry(cfg)}/library/{image_slug(source_image)}-{mode}-refresh:v{version_idx}--0.0.0.{end_col}"
+    return f"{registry(cfg)}/library/{image_slug(source_image)}-{_build_mode(mode)}-refresh:v{version_idx}--0.0.0.{end_col}"
 
 
 # ── digest parsing ─────────────────────────────────────────────────────
@@ -61,18 +66,31 @@ def _parse_allotment_digests(output: str) -> dict[int, str]:
 # ── build helpers ──────────────────────────────────────────────────────
 
 
+def _is_bg_fetch_mode(mode: str) -> bool:
+    return mode.endswith("-with-bg-fetch")
+
+
+def _build_mode(mode: str) -> str:
+    """Strip bg-fetch suffix; build behavior is identical to the base mode."""
+    if _is_bg_fetch_mode(mode):
+        return mode[: -len("-with-bg-fetch")]
+    return mode
+
+
 def _extra_flags(mode: str) -> list[str]:
-    if mode == "2dfs-stargz":
+    base = _build_mode(mode)
+    if base == "2dfs-stargz":
         return ["--enable-stargz", "--stargz-chunk-size", "2097152"]
-    if mode == "2dfs-stargz-zstd":
+    if base == "2dfs-stargz-zstd":
         return ["--enable-stargz", "--use-zstd", "--stargz-chunk-size", "8388608"]
     raise ValueError(f"Unknown mode: {mode}")
 
 
 def _base_image(source_image: str, cfg, mode: str) -> str:
-    if mode == "2dfs-stargz":
+    base = _build_mode(mode)
+    if base == "2dfs-stargz":
         return stargz_base_image(source_image, cfg)
-    if mode == "2dfs-stargz-zstd":
+    if base == "2dfs-stargz-zstd":
         return zstd_base_image(source_image, cfg)
     raise ValueError(f"Unknown mode: {mode}")
 
@@ -202,14 +220,14 @@ def _stop_container(name: str) -> None:
                    capture_output=not log.VERBOSE)
 
 
-def _refresh_layer(old_digest: str, new_digest: str) -> None:
+def _refresh_layer(old_digest: str, new_digest: str, with_bg_fetch: bool = False) -> None:
     old = f"sha256:{old_digest}"
     new = f"sha256:{new_digest}"
     log.info(f"  refresh-layer {old[:19]}... -> {new[:19]}...")
-    subprocess.run(
-        ["sudo", "ctr-remote", "refresh-layer", old, new],
-        check=True, capture_output=not log.VERBOSE,
-    )
+    cmd = ["sudo", "ctr-remote", "refresh-layer", old, new]
+    if with_bg_fetch:
+        cmd.append("--with-background-fetch")
+    subprocess.run(cmd, check=True, capture_output=not log.VERBOSE)
 
 
 # ── measurement ────────────────────────────────────────────────────────
@@ -246,11 +264,12 @@ def measure_refresh(
                 baseline_t = _exec_timed(name, CFG.refresh_n_splits)
                 log.result(f"  baseline access: {baseline_t:.2f}s")
 
+                with_bg_fetch = _is_bg_fetch_mode(mode)
                 t0 = time.perf_counter()
                 for i in range(k):
                     old_digest = all_digests[0][i]
                     new_digest = all_digests[i + 1][i]
-                    _refresh_layer(old_digest, new_digest)
+                    _refresh_layer(old_digest, new_digest, with_bg_fetch=with_bg_fetch)
                 layer_refresh_t = time.perf_counter() - t0
                 log.result(f"  refresh-layer ({k} layers): {layer_refresh_t:.2f}s")
 
@@ -380,13 +399,19 @@ def plot(
                                              label=f"{m} – file access"))
     baseline_handle = Line2D([0], [0], color="gray", linestyle="--", linewidth=1.0,
                              label="baseline (dashed)")
-    ax.legend(handles=method_handles + [baseline_handle], loc="upper left")
+    ax.legend(
+        handles=method_handles + [baseline_handle],
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        borderaxespad=0.0,
+        fontsize=9,
+    )
 
     figure_footer(fig, model, base_image)
 
     output_path = refresh_chart_path(SCRIPT_DIR, model, base_image, execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 0.78, 1))
     save_figure(fig, output_path)
 
 
@@ -412,6 +437,11 @@ def main():
 
         clear_registry(CFG, preserve_base=True)
         for mode in MODES:
+            build_mode = _build_mode(mode)
+            if build_mode != mode and build_mode in all_digests_per_mode:
+                log.info(f"\n=== Reusing build from {build_mode} for {mode} ===")
+                all_digests_per_mode[mode] = all_digests_per_mode[build_mode]
+                continue
             log.info(f"\n=== Preparing mode: {mode} ===")
             all_digests_per_mode[mode] = prepare_refresh(chunk_paths, base_image, CFG, mode)
 
