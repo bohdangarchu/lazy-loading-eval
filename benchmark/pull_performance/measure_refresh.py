@@ -11,7 +11,7 @@ import numpy as np
 
 from shared import log
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, save_figure, write_csv
-from pull_performance.paths import refresh_csv_path, refresh_chart_path, refresh_charts_run_dir
+from pull_performance.paths import refresh_csv_path, refresh_chart_path
 from shared.config import load_config
 from shared.registry import (
     prepare_local_registry, clear_registry, registry, image_slug,
@@ -30,10 +30,10 @@ EXPERIMENTS = [
 CFG = load_config()
 VERBOSE = True
 MODES = [
-    "2dfs-stargz",
-    "2dfs-stargz-zstd",
     "2dfs-stargz-with-bg-fetch",
     "2dfs-stargz-zstd-with-bg-fetch",
+    "2dfs-stargz",
+    "2dfs-stargz-zstd",
 ]
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -45,12 +45,12 @@ _ALLOTMENT_RE = re.compile(r"Stargz Allotment 0/(\d+) ([a-f0-9]{64})")
 
 
 def _build_name_refresh(source_image: str, cfg, mode: str, version_idx: int) -> str:
-    return f"{registry(cfg)}/{image_slug(source_image)}-{_build_mode(mode)}-refresh:v{version_idx}"
+    return f"{registry(cfg)}/{image_slug(source_image)}-{mode}-refresh:v{version_idx}"
 
 
 def _pull_name_refresh(source_image: str, cfg, mode: str, version_idx: int) -> str:
     end_col = CFG.refresh_n_splits - 1
-    return f"{registry(cfg)}/library/{image_slug(source_image)}-{_build_mode(mode)}-refresh:v{version_idx}--0.0.0.{end_col}"
+    return f"{registry(cfg)}/library/{image_slug(source_image)}-{mode}-refresh:v{version_idx}--0.0.0.{end_col}"
 
 
 # ── digest parsing ─────────────────────────────────────────────────────
@@ -424,11 +424,6 @@ def main():
 
         clear_registry(CFG, preserve_base=True)
         for mode in MODES:
-            build_mode = _build_mode(mode)
-            if build_mode != mode and build_mode in all_digests_per_mode:
-                log.info(f"\n=== Reusing build from {build_mode} for {mode} ===")
-                all_digests_per_mode[mode] = all_digests_per_mode[build_mode]
-                continue
             log.info(f"\n=== Preparing mode: {mode} ===")
             all_digests_per_mode[mode] = prepare_refresh(chunk_paths, base_image, CFG, mode)
 
