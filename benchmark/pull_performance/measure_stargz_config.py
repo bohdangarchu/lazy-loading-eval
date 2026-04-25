@@ -29,17 +29,17 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STARGZ_CONFIG_PATH = "/etc/containerd-stargz-grpc/config.toml"
 
 EXPERIMENTS = [
-    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
+    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
     ("openai-community/gpt2-medium", "docker.io/library/python:3.12-slim"),   # ~1.52 GB    ~50 MB
-    ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
-    ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),    # ~6 GB    ~50 MB
+    # ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
+    # ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),    # ~6 GB    ~50 MB
 ]
 MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
-    ({"passthrough": True, "merge_worker_count": 10}, "passthrough-10"),
-    ({"passthrough": True, "merge_worker_count": 25}, "passthrough-25"),
-    ({"passthrough": True, "merge_worker_count": 50}, "passthrough-50"),
-    ({"passthrough": True, "merge_worker_count": 100}, "passthrough-100"),
+    ({"noprefetch": True, "prefetch_async_size": 0, "no_background_fetch": True}, "no prefetch"),
+    ({"noprefetch": False, "prefetch_async_size": 0, "no_background_fetch": True}, "prefetch"),
+    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True}, "prefetch, async"),
+    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False}, "prefetch, async, bg fetch"),
 ]
 CFG = load_config()
 VERBOSE = True
@@ -135,7 +135,7 @@ def _measure_config_option(
         clear_stargz_cache()
 
         image = _pull_name(mode, source_image, cfg, n)
-        pull_t = _timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", image])
+        pull_t = _timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", "--use-containerd-labels", image])
         log.result(f"  pull: {pull_t:.2f}s")
 
         name = f"run-stargz-cfg-{uuid.uuid4().hex[:8]}"
