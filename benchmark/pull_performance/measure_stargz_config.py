@@ -1,8 +1,6 @@
 import csv
 import json
 import os
-import re
-import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
@@ -18,6 +16,7 @@ from pull_performance.paths import (
 )
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
+from shared.stargz_config import read_base_config, apply_overrides, apply_stargz_config
 from pull_performance.measure import _timed_pull, _timed_run, _run_cmd
 from shared.services import clear_stargz_cache, save_stargz_run_log
 from pull_performance.prepare import (
@@ -27,7 +26,6 @@ from shared.model import cleanup_pull_experiment
 from pull_performance.images import pull_name_2dfs_stargz, pull_name_2dfs_stargz_zstd
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-STARGZ_CONFIG_PATH = "/etc/containerd-stargz-grpc/config.toml"
 
 EXPERIMENTS = [
     # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
@@ -44,59 +42,6 @@ CONFIG_OPTIONS: list[tuple[dict, str]] = [
 ]
 CFG = load_config()
 VERBOSE = True
-
-
-# ── TOML config helpers ────────────────────────────────────────────
-
-
-def _to_toml_value(v) -> str:
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    if isinstance(v, str):
-        return f'"{v}"'
-    return str(v)
-
-
-def _read_base_config() -> str:
-    result = subprocess.run(
-        ["sudo", "cat", STARGZ_CONFIG_PATH],
-        capture_output=True, text=True, check=True,
-    )
-    return result.stdout
-
-
-def _apply_overrides(base_content: str, overrides: dict) -> str:
-    """Replace existing key=value lines or append new ones for each override."""
-    content = base_content
-    for key, value in overrides.items():
-        toml_val = _to_toml_value(value)
-        pattern = re.compile(rf"^{re.escape(key)}\s*=.*$", re.MULTILINE)
-        replacement = f"{key} = {toml_val}"
-        if pattern.search(content):
-            content = pattern.sub(replacement, content)
-        else:
-            # Insert before the first section header so the key stays top-level.
-            section_match = re.search(r"^\[", content, re.MULTILINE)
-            if section_match:
-                idx = section_match.start()
-                content = content[:idx].rstrip("\n") + f"\n{replacement}\n\n" + content[idx:]
-            else:
-                content = content.rstrip("\n") + f"\n{replacement}\n"
-    return content
-
-
-def apply_stargz_config(config_content: str) -> None:
-    """Stop service, write config, start service (mirrors local/apply-config.sh)."""
-    current = _read_base_config()
-    log.info("--- applying stargz config ---")
-    log.info(f"BEFORE:\n{current}")
-    log.info(f"AFTER:\n{config_content}")
-    tmp = "/tmp/stargz-config-measure.toml"
-    with open(tmp, "w") as f:
-        f.write(config_content)
-    subprocess.run(["sudo", "systemctl", "stop", "stargz-snapshotter"], check=True)
-    subprocess.run(["sudo", "cp", tmp, STARGZ_CONFIG_PATH], check=True)
-    subprocess.run(["sudo", "systemctl", "start", "stargz-snapshotter"], check=True)
 
 
 # ── image naming ───────────────────────────────────────────────────
@@ -166,7 +111,7 @@ def measure(
     # results[(mode, config_label)] = list of (run, n, pull_t, run_t)
     results: dict[tuple[str, str], list[tuple[int, int, float, float]]] = {}
 
-    base_config = _read_base_config()
+    base_config = read_base_config()
 
     def _prepare_all_images():
         log.info("\n=== Preparing images ===")
@@ -180,7 +125,7 @@ def measure(
             log.info(f"\n=== Config option: {label} ===")
             clear_registry(cfg, preserve_base=True)
             _prepare_all_images()
-            config_content = _apply_overrides(base_config, overrides)
+            config_content = apply_overrides(base_config, overrides)
             apply_stargz_config(config_content)
 
             for mode in MODES:
