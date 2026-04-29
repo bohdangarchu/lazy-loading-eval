@@ -32,10 +32,10 @@ EXPERIMENTS = [
 ]
 MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
-    ({"noprefetch": True, "prefetch_async_size": 0, "no_background_fetch": True}, "no prefetch"),
-    ({"noprefetch": False, "prefetch_async_size": 0, "no_background_fetch": True}, "prefetch"),
-    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True}, "prefetch, async"),
-    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False}, "prefetch, async, bg fetch"),
+    ({"noprefetch": True, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True}, "no prefetch"),
+    ({"noprefetch": False, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True}, "prefetch"),
+    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True, "log_file_access": True}, "prefetch, async"),
+    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False, "log_file_access": True}, "prefetch, async, bg fetch"),
 ]
 CFG = load_config()
 VERBOSE = True
