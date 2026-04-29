@@ -3,7 +3,7 @@ set -e
 
 BINARIES="containerd-stargz-grpc ctr-remote"
 INSTALL_DIR="/usr/local/bin"
-BUILD_DIR="/home/garchu/workspace/2dfs/stargz-snapshotter/out"
+BUILD_DIR="/home/garchu/workspace/2dfs-custom/stargz-snapshotter/out"
 SERVICE="stargz-snapshotter.service"
 
 echo "Stopping $SERVICE..."
