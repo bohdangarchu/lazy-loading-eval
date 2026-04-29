@@ -132,6 +132,29 @@ def prefetch_span(events: list[LayerPrefetchEvent]) -> tuple[float, float] | Non
     return min(e.start_s for e in events), max(e.end_s for e in events)
 
 
+def bg_fetch_spans(entries: list[dict]) -> tuple[float, float] | None:
+    """Parse background_fetch_download span from journal entries."""
+    starts, ends = [], []
+    for entry in entries:
+        try:
+            msg = json.loads(entry.get("MESSAGE", ""))
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        if msg.get("metrics") != "latency" or msg.get("operation") != "background_fetch_download":
+            continue
+        if not msg.get("layer_sha"):
+            continue
+        ts_us = int(entry.get("__REALTIME_TIMESTAMP", 0))
+        end_s = ts_us / 1_000_000
+        vm = _VALUE_MS_RE.search(msg.get("msg", ""))
+        if not vm:
+            continue
+        ms = float(vm.group(1))
+        starts.append(end_s - ms / 1000)
+        ends.append(end_s)
+    return (min(starts), max(ends)) if starts else None
+
+
 # ── pull / prepare helpers ─────────────────────────────────────────
 
 
