@@ -3,8 +3,6 @@ import os
 import time
 import uuid
 from datetime import datetime
-from urllib.parse import urlencode
-from urllib.request import urlopen
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -12,6 +10,7 @@ import matplotlib.pyplot as plt
 from shared import log
 from shared.charts import figure_footer, save_figure, write_csv
 from shared.config import load_config
+from shared.prometheus import PROM_URL, active_window, is_alive, query_range
 from shared.registry import clear_registry, prepare_local_registry, registry
 from shared.services import clear_stargz_cache, save_stargz_run_log
 from shared.stargz_config import apply_overrides, apply_stargz_config, read_base_config
@@ -34,11 +33,16 @@ CONFIG_OVERRIDES = {
     "no_background_fetch": True,
     "log_file_access": True,
 }
-PROM_URL = "http://127.0.0.1:9090"
-
 PULL_COLOR = "#1f77b4"
 PREFETCH_COLOR = "#9467bd"
+ON_DEMAND_COLOR = "#d62728"
 RUN_COLOR = "#2ca02c"
+
+ON_DEMAND_QUERY = (
+    'sum(stargz_fs_operation_count'
+    '{operation_type="on_demand_remote_registry_fetch_count"})'
+)
+STARGZ_UP_QUERY = 'up{job="stargz"}'
 
 
 # ── paths ──────────────────────────────────────────────────────────
@@ -56,27 +60,7 @@ def _diag_logs_dir(execution_ts: str) -> str:
     return os.path.join(SCRIPT_DIR, "logs", "diagnostics", execution_ts)
 
 
-# ── prometheus ─────────────────────────────────────────────────────
-
-
-def _check_prometheus_alive() -> bool:
-    try:
-        with urlopen(f"{PROM_URL}/-/healthy", timeout=3) as r:
-            return r.status == 200
-    except Exception as e:
-        log.info(f"  prometheus not reachable at {PROM_URL}: {e}")
-        return False
-
-
-def _query_range(query: str, start_s: float, end_s: float, step: str = "1s") -> dict | None:
-    params = urlencode({"query": query, "start": f"{start_s}", "end": f"{end_s}", "step": step})
-    url = f"{PROM_URL}/api/v1/query_range?{params}"
-    try:
-        with urlopen(url, timeout=15) as r:
-            return json.load(r)
-    except Exception as e:
-        log.info(f"  query failed [{query}]: {e}")
-        return None
+# ── prometheus snapshot ────────────────────────────────────────────
 
 
 def _snapshot_prometheus(start_s: float, end_s: float, out_path: str) -> None:
@@ -88,7 +72,7 @@ def _snapshot_prometheus(start_s: float, end_s: float, out_path: str) -> None:
         "operation_latency_ms_count": "stargz_fs_operation_duration_milliseconds_count",
         "operation_latency_ms_sum": "stargz_fs_operation_duration_milliseconds_sum",
     }
-    results = {name: _query_range(q, start_s, end_s) for name, q in queries.items()}
+    results = {name: query_range(q, start_s, end_s) for name, q in queries.items()}
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as f:
         json.dump({"window": {"start_s": start_s, "end_s": end_s}, "queries": results}, f, indent=2)
@@ -99,12 +83,15 @@ def _snapshot_prometheus(start_s: float, end_s: float, out_path: str) -> None:
 
 
 def _plot_timeline(row: dict, model: str, base_image: str, out_path: str) -> None:
-    fig, ax = plt.subplots(figsize=(11, 3.2))
+    fig, ax = plt.subplots(figsize=(11, 3.5))
 
     bars = [("pull", row["pull_rel_start_s"], row["pull_rel_end_s"], PULL_COLOR)]
     if row["prefetch_rel_start_s"] != "":
         bars.append(("prefetch", float(row["prefetch_rel_start_s"]),
                      float(row["prefetch_rel_end_s"]), PREFETCH_COLOR))
+    if row["on_demand_rel_start_s"] != "":
+        bars.append(("on-demand fetch", float(row["on_demand_rel_start_s"]),
+                     float(row["on_demand_rel_end_s"]), ON_DEMAND_COLOR))
     bars.append(("run", float(row["run_rel_start_s"]), float(row["run_rel_end_s"]), RUN_COLOR))
 
     for i, (label, s, e, color) in enumerate(bars):
@@ -144,9 +131,10 @@ def main():
     log.result(f"  config:      {CONFIG_OVERRIDES}")
     log.result(f"  output ts:   {execution_ts}")
 
-    if not _check_prometheus_alive():
-        log.result("  WARNING: prometheus not reachable. Start it with local/start-prometheus.sh "
-                   "before running. Continuing — prometheus snapshot will be empty.")
+    if not is_alive():
+        log.result(f"  WARNING: prometheus not reachable at {PROM_URL}. Start it with "
+                   "local/start-prometheus.sh before running. Continuing — "
+                   "prometheus snapshot and on-demand bar will be empty.")
 
     log.info("Preparing chunks (reusing existing if present)...")
     prepare_local_registry(base_image, registry(cfg))
@@ -195,6 +183,13 @@ def main():
         else:
             log.result("  prefetch span: none")
 
+        od_span = active_window(ON_DEMAND_QUERY, pull_start_s, run_end_s + 30, target_up_query=STARGZ_UP_QUERY)
+        if od_span:
+            log.result(f"  on-demand fetch span: {od_span[0] - pull_start_s:.2f}s → "
+                       f"{od_span[1] - pull_start_s:.2f}s")
+        else:
+            log.result("  on-demand fetch span: none")
+
         logs_dir = _diag_logs_dir(execution_ts)
 
         # Journal
@@ -211,6 +206,8 @@ def main():
             "pull_end_s": pull_end_s,
             "prefetch_start_s": span[0] if span else None,
             "prefetch_end_s": span[1] if span else None,
+            "on_demand_start_s": od_span[0] if od_span else None,
+            "on_demand_end_s": od_span[1] if od_span else None,
             "run_start_s": run_start_s,
             "run_end_s": run_end_s,
             "execution_ts": execution_ts,
@@ -243,6 +240,8 @@ def main():
             "pull_rel_end_s": round(pull_end_s - ref, 3),
             "prefetch_rel_start_s": round(span[0] - ref, 3) if span else "",
             "prefetch_rel_end_s": round(span[1] - ref, 3) if span else "",
+            "on_demand_rel_start_s": round(od_span[0] - ref, 3) if od_span else "",
+            "on_demand_rel_end_s": round(od_span[1] - ref, 3) if od_span else "",
             "run_rel_start_s": round(run_start_s - ref, 3),
             "run_rel_end_s": round(run_end_s - ref, 3),
         }
