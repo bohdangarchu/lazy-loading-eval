@@ -43,7 +43,7 @@ def save_stargz_run_log(pull_start_s: float, run_end_s: float, log_path: str) ->
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     with open(log_path, "w") as f:
         json.dump(windowed, f, indent=2)
-    log.info(f"  Saved {len(windowed)} log entries → {os.path.basename(log_path)}")
+    log.info(f"  Saved {len(windowed)} log entries → {log_path}")
 
 
 def clear_2dfs_cache(cfg) -> None:

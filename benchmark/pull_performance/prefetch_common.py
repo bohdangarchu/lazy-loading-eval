@@ -134,13 +134,21 @@ def prefetch_span(events: list[LayerPrefetchEvent]) -> tuple[float, float] | Non
 
 def bg_fetch_spans(entries: list[dict]) -> tuple[float, float] | None:
     """Parse background_fetch_download span from journal entries."""
-    starts, ends = [], []
+    spans = operation_spans(entries, "background_fetch_download")
+    if not spans:
+        return None
+    return min(s for s, _ in spans), max(e for _, e in spans)
+
+
+def operation_spans(entries: list[dict], operation: str) -> list[tuple[float, float]]:
+    """Parse all (start_s, end_s) events for the given latency operation."""
+    spans = []
     for entry in entries:
         try:
             msg = json.loads(entry.get("MESSAGE", ""))
         except (json.JSONDecodeError, AttributeError):
             continue
-        if msg.get("metrics") != "latency" or msg.get("operation") != "background_fetch_download":
+        if msg.get("metrics") != "latency" or msg.get("operation") != operation:
             continue
         if not msg.get("layer_sha"):
             continue
@@ -150,9 +158,33 @@ def bg_fetch_spans(entries: list[dict]) -> tuple[float, float] | None:
         if not vm:
             continue
         ms = float(vm.group(1))
-        starts.append(end_s - ms / 1000)
-        ends.append(end_s)
-    return (min(starts), max(ends)) if starts else None
+        spans.append((end_s - ms / 1000, end_s))
+    return spans
+
+
+def passthrough_open_spans(
+    entries: list[dict],
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """Parse passthrough_open file_access events. Returns (cache_spans, on_demand_spans)."""
+    cache, on_demand = [], []
+    for entry in entries:
+        try:
+            msg = json.loads(entry.get("MESSAGE", ""))
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        if msg.get("metrics") != "file_access" or msg.get("operation") != "passthrough_open":
+            continue
+        if not msg.get("layer_sha"):
+            continue
+        ts_us = int(entry.get("__REALTIME_TIMESTAMP", 0))
+        end_s = ts_us / 1_000_000
+        try:
+            ms = float(msg.get("duration_ms"))
+        except (TypeError, ValueError):
+            continue
+        span = (end_s - ms / 1000, end_s)
+        (on_demand if msg.get("on_demand") else cache).append(span)
+    return cache, on_demand
 
 
 # ── pull / prepare helpers ─────────────────────────────────────────

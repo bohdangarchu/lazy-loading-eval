@@ -21,24 +21,25 @@ from pull_performance.paths import (
 )
 from pull_performance.prepare import prepare_chunks
 from pull_performance.prefetch_common import (
-    poll_until_prefetch_done, prefetch_span, bg_fetch_spans,
+    poll_until_prefetch_done, prefetch_span, bg_fetch_spans, passthrough_open_spans,
     pull_name, prepare_mode,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXPERIMENTS = [
-    ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
+    # ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
+    ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"), 
 ]
 MODES = ["2dfs-stargz"]
-BASE_SPLITS = [6, 8]
+BASE_SPLITS = [2, 4, 6, 8]
 N_SPLITS = 10
 N_RUNS = 1
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
-    ({"noprefetch": True, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True}, "no prefetch"),
-    # ({"noprefetch": False, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True}, "prefetch"),
-    # ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True, "log_file_access": True}, "prefetch, async"),
-    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False, "log_file_access": True}, "prefetch, async, bg fetch"),
+    # ({"noprefetch": True, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True}, "no prefetch"),
+    ({"noprefetch": False, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 60}, "prefetch"),
+    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 60}, "prefetch, async"),
+    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False, "log_file_access": True, "prefetch_timeout_sec": 60}, "prefetch, async, bg fetch"),
 ]
 CFG = load_config()
 VERBOSE = True
@@ -46,6 +47,8 @@ VERBOSE = True
 PULL_COLOR = "#1f77b4"
 PREFETCH_COLOR = "#9467bd"
 BG_DOWNLOAD_COLOR = "#ff7f0e"
+FILE_OPEN_ON_DEMAND_COLOR = "#d62728"
+FILE_OPEN_CACHE_COLOR = "#17becf"
 RUN_COLOR = "#2ca02c"
 
 
@@ -64,6 +67,8 @@ class PullPrefetchSpan:
     prefetch_end_s: float | None
     bg_download_start_s: float | None
     bg_download_end_s: float | None
+    file_open_cache_spans: list[tuple[float, float]]
+    file_open_on_demand_spans: list[tuple[float, float]]
     run_start_s: float
     run_end_s: float
 
@@ -119,9 +124,20 @@ def _measure_config_option(
         dl_span = bg_fetch_spans(raw_entries)
         if dl_span:
             log.result(f"  bg download span: {dl_span[0] - pull_start_s:.2f}s → {dl_span[1] - pull_start_s:.2f}s")
+        file_open_cache_spans, file_open_on_demand_spans = passthrough_open_spans(raw_entries)
+        log.result(f"  file_open cache: {len(file_open_cache_spans)}, on-demand: {len(file_open_on_demand_spans)}")
+        ends = [run_end_s]
+        if span:
+            ends.append(span[1])
+        if dl_span:
+            ends.append(dl_span[1])
+        if file_open_cache_spans:
+            ends.append(max(e for _, e in file_open_cache_spans))
+        if file_open_on_demand_spans:
+            ends.append(max(e for _, e in file_open_on_demand_spans))
         save_stargz_run_log(
             pull_start_s,
-            max(run_end_s, span[1] if span else run_end_s, dl_span[1] if dl_span else run_end_s),
+            max(ends),
             prefetch_pull_log_path(SCRIPT_DIR, model, base_image, mode, config_label, n, run_idx, execution_ts),
         )
 
@@ -136,6 +152,8 @@ def _measure_config_option(
             prefetch_end_s=span[1] if span else None,
             bg_download_start_s=dl_span[0] if dl_span else None,
             bg_download_end_s=dl_span[1] if dl_span else None,
+            file_open_cache_spans=file_open_cache_spans,
+            file_open_on_demand_spans=file_open_on_demand_spans,
             run_start_s=run_start_s,
             run_end_s=run_end_s,
         ))
@@ -192,12 +210,15 @@ def save_csv(
         "pull_rel_start_s", "pull_rel_end_s",
         "prefetch_rel_start_s", "prefetch_rel_end_s",
         "bg_download_rel_start_s", "bg_download_rel_end_s",
+        "file_open_cache_rel_events", "file_open_on_demand_rel_events",
         "run_rel_start_s", "run_rel_end_s",
     ]
     rows = []
     for (mode, label), entries in results.items():
         for s in entries:
             ref = s.pull_start_s
+            file_open_cache_str = "|".join(f"{a - ref:.3f}:{b - ref:.3f}" for a, b in s.file_open_cache_spans)
+            file_open_on_demand_str = "|".join(f"{a - ref:.3f}:{b - ref:.3f}" for a, b in s.file_open_on_demand_spans)
             rows.append({
                 "run": s.run,
                 "mode": mode,
@@ -209,6 +230,8 @@ def save_csv(
                 "prefetch_rel_end_s": f"{s.prefetch_end_s - ref:.3f}" if s.prefetch_end_s is not None else "",
                 "bg_download_rel_start_s": f"{s.bg_download_start_s - ref:.3f}" if s.bg_download_start_s is not None else "",
                 "bg_download_rel_end_s": f"{s.bg_download_end_s - ref:.3f}" if s.bg_download_end_s is not None else "",
+                "file_open_cache_rel_events": file_open_cache_str,
+                "file_open_on_demand_rel_events": file_open_on_demand_str,
                 "run_rel_start_s": f"{s.run_start_s - ref:.3f}",
                 "run_rel_end_s": f"{s.run_end_s - ref:.3f}",
             })
@@ -238,8 +261,15 @@ def plot(
     config_labels = [label for _, label in CONFIG_OPTIONS]
     splits = sorted({s.n_allotments for entries in results.values() for s in entries})
 
-    bar_h = 0.20
-    offsets = {"pull": -1.5 * bar_h, "prefetch": -0.5 * bar_h, "bg_download": 0.5 * bar_h, "run": 1.5 * bar_h}
+    bar_h = 0.14
+    offsets = {
+        "pull": -2.5 * bar_h,
+        "prefetch": -1.5 * bar_h,
+        "bg_download": -0.5 * bar_h,
+        "file_open_on_demand": 0.5 * bar_h,
+        "file_open_cache": 1.5 * bar_h,
+        "run": 2.5 * bar_h,
+    }
 
     for mode in MODES:
         n_cols = len(config_labels)
@@ -278,6 +308,16 @@ def plot(
                             left=s.bg_download_start_s - ref, height=bar_h * 0.9,
                             color=BG_DOWNLOAD_COLOR, edgecolor=BG_DOWNLOAD_COLOR)
 
+                for ev_start, ev_end in s.file_open_on_demand_spans:
+                    ax.barh(y + offsets["file_open_on_demand"], ev_end - ev_start,
+                            left=ev_start - ref, height=bar_h * 0.9,
+                            color=FILE_OPEN_ON_DEMAND_COLOR, edgecolor=FILE_OPEN_ON_DEMAND_COLOR)
+
+                for ev_start, ev_end in s.file_open_cache_spans:
+                    ax.barh(y + offsets["file_open_cache"], ev_end - ev_start,
+                            left=ev_start - ref, height=bar_h * 0.9,
+                            color=FILE_OPEN_CACHE_COLOR, edgecolor=FILE_OPEN_CACHE_COLOR)
+
                 run_left = s.run_start_s - ref
                 run_w = s.run_end_s - s.run_start_s
                 ax.barh(y + offsets["run"], run_w, left=run_left, height=bar_h * 0.9,
@@ -288,6 +328,8 @@ def plot(
                     s.run_end_s - ref,
                     (s.prefetch_end_s - ref) if s.prefetch_end_s is not None else 0.0,
                     (s.bg_download_end_s - ref) if s.bg_download_end_s is not None else 0.0,
+                    max((e - ref for _, e in s.file_open_cache_spans), default=0.0),
+                    max((e - ref for _, e in s.file_open_on_demand_spans), default=0.0),
                 )
                 x_max = max(x_max, row_max)
 
@@ -306,6 +348,8 @@ def plot(
             mpatches.Patch(color=PULL_COLOR, label="pull"),
             mpatches.Patch(color=PREFETCH_COLOR, label="prefetch"),
             mpatches.Patch(color=BG_DOWNLOAD_COLOR, label="bg download"),
+            mpatches.Patch(color=FILE_OPEN_ON_DEMAND_COLOR, label="file open (on-demand)"),
+            mpatches.Patch(color=FILE_OPEN_CACHE_COLOR, label="file open (cache)"),
             mpatches.Patch(color=RUN_COLOR, label="run"),
         ]
         axes[0][-1].legend(handles=legend_handles, loc="lower right", fontsize=8)
