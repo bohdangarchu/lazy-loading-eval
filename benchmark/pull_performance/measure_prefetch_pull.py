@@ -1,4 +1,5 @@
 import os
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass
@@ -36,7 +37,7 @@ BASE_SPLITS = [2, 4, 6, 8]
 N_SPLITS = 10
 N_RUNS = 1
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
-    # ({"noprefetch": True, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True}, "no prefetch"),
+    ({"noprefetch": True, "no_background_fetch": True, "log_file_access": True}, "no prefetch"),
     ({"noprefetch": False, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 60}, "prefetch"),
     ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 60}, "prefetch, async"),
     ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False, "log_file_access": True, "prefetch_timeout_sec": 60}, "prefetch, async, bg fetch"),
@@ -49,6 +50,7 @@ PREFETCH_COLOR = "#9467bd"
 BG_DOWNLOAD_COLOR = "#d5d5d5"
 FILE_OPEN_ON_DEMAND_COLOR = "#d62728"
 FILE_OPEN_CACHE_COLOR = "#17becf"
+CREATE_COLOR = "#a9cce3"
 RUN_COLOR = "#f5b7b1"
 LAYER_CMAP = plt.get_cmap("tab10")  # per-layer color (shared by prefetch + file_open)
 
@@ -71,8 +73,10 @@ class PullPrefetchSpan:
     bg_download_end_s: float | None
     file_open_cache_spans: list[tuple[str, float, float]]
     file_open_on_demand_spans: list[tuple[str, float, float]]
-    run_start_s: float
-    run_end_s: float
+    create_start_s: float
+    create_end_s: float
+    task_start_s: float
+    task_end_s: float
 
 
 # ── prepare ────────────────────────────────────────────────────────
@@ -106,13 +110,27 @@ def _measure_config_option(
         log.result(f"  pull: {pull_t:.2f}s")
 
         name = f"run-stargz-pull-{uuid.uuid4().hex[:8]}"
-        run_start_s = time.time()
-        run_t = _timed_run([
-            "sudo", "ctr-remote", "run", "--rm", "--snapshotter=stargz",
-            image, name, *_run_cmd(n),
+        create_start_s = time.time()
+        create_t = _timed_run([
+            "sudo", "ctr-remote", "c", "create", "--snapshotter=stargz",
+            "--", image, name, *_run_cmd(n),
         ])
-        run_end_s = run_start_s + run_t
-        log.result(f"  run: {run_t:.2f}s")
+        create_end_s = create_start_s + create_t
+        log.result(f"  create: {create_t:.2f}s")
+
+        task_start_s = time.time()
+        task_t = _timed_run(["sudo", "ctr-remote", "t", "start", name])
+        task_end_s = task_start_s + task_t
+        log.result(f"  task: {task_t:.2f}s")
+
+        subprocess.run(
+            ["sudo", "ctr-remote", "t", "kill", "-s", "9", name],
+            check=False, capture_output=True,
+        )
+        subprocess.run(
+            ["sudo", "ctr-remote", "c", "rm", name],
+            check=True, capture_output=not log.VERBOSE,
+        )
 
         # Wait for any background prefetch to settle, then parse the journal.
         events = poll_until_prefetch_done(pull_start_s)
@@ -128,7 +146,7 @@ def _measure_config_option(
             log.result(f"  bg download span: {dl_span[0] - pull_start_s:.2f}s → {dl_span[1] - pull_start_s:.2f}s")
         file_open_cache_spans, file_open_on_demand_spans = passthrough_open_spans(raw_entries)
         log.result(f"  file_open cache: {len(file_open_cache_spans)}, on-demand: {len(file_open_on_demand_spans)}")
-        ends = [run_end_s]
+        ends = [task_end_s]
         if span:
             ends.append(span[1])
         if dl_span:
@@ -157,8 +175,10 @@ def _measure_config_option(
             bg_download_end_s=dl_span[1] if dl_span else None,
             file_open_cache_spans=file_open_cache_spans,
             file_open_on_demand_spans=file_open_on_demand_spans,
-            run_start_s=run_start_s,
-            run_end_s=run_end_s,
+            create_start_s=create_start_s,
+            create_end_s=create_end_s,
+            task_start_s=task_start_s,
+            task_end_s=task_end_s,
         ))
         log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
         time.sleep(cfg.pull_cooldown)
@@ -214,7 +234,8 @@ def save_csv(
         "prefetch_rel_start_s", "prefetch_rel_end_s",
         "bg_download_rel_start_s", "bg_download_rel_end_s",
         "file_open_cache_rel_events", "file_open_on_demand_rel_events",
-        "run_rel_start_s", "run_rel_end_s",
+        "create_rel_start_s", "create_rel_end_s",
+        "task_rel_start_s", "task_rel_end_s",
     ]
     rows = []
     for (mode, label), entries in results.items():
@@ -235,8 +256,10 @@ def save_csv(
                 "bg_download_rel_end_s": f"{s.bg_download_end_s - ref:.3f}" if s.bg_download_end_s is not None else "",
                 "file_open_cache_rel_events": file_open_cache_str,
                 "file_open_on_demand_rel_events": file_open_on_demand_str,
-                "run_rel_start_s": f"{s.run_start_s - ref:.3f}",
-                "run_rel_end_s": f"{s.run_end_s - ref:.3f}",
+                "create_rel_start_s": f"{s.create_start_s - ref:.3f}",
+                "create_rel_end_s": f"{s.create_end_s - ref:.3f}",
+                "task_rel_start_s": f"{s.task_start_s - ref:.3f}",
+                "task_rel_end_s": f"{s.task_end_s - ref:.3f}",
             })
     if not rows:
         log.info("No data to save.")
@@ -249,7 +272,7 @@ def _median_span(entries: list[PullPrefetchSpan], n: int) -> PullPrefetchSpan | 
     runs = [s for s in entries if s.n_allotments == n]
     if not runs:
         return None
-    runs.sort(key=lambda s: s.run_end_s - s.pull_start_s)
+    runs.sort(key=lambda s: s.task_end_s - s.pull_start_s)
     return runs[len(runs) // 2]
 
 
@@ -266,15 +289,15 @@ def plot(
 
     bar_h = 0.14
     prefetch_slot_h = 5 * bar_h  # per-layer micro-lanes for prefetch (up to 10 layers)
-    # Slot stack (top→bottom): pull(1), prefetch(5), file_open(1), bg(1), run(1) → total 9*bar_h
+    # Slot stack (top→bottom): prefetch(5), file_open(1), bg(1), pull+run(1) → total 8*bar_h
     offsets = {
-        "pull": -4.0 * bar_h,
-        "prefetch": -1.0 * bar_h,
-        "file_open": 2.0 * bar_h,
-        "bg_download": 3.0 * bar_h,
-        "run": 4.0 * bar_h,
+        "prefetch": -1.5 * bar_h,
+        "file_open": 1.5 * bar_h,
+        "bg_download": 2.5 * bar_h,
+        "run": 3.5 * bar_h,
     }
-    row_spacing = 9 * bar_h + 0.3  # row stack height + gap
+    offsets["pull"] = offsets["run"]
+    row_spacing = 8 * bar_h + 0.3  # row stack height + gap
 
     for mode in MODES:
         n_cols = len(config_labels)
@@ -322,8 +345,9 @@ def plot(
                 prefetch_events = sorted(s.prefetch_layer_events, key=lambda e: e[1])
                 if prefetch_events:
                     n_layers = len(prefetch_events)
-                    sub_h = prefetch_slot_h / n_layers
-                    slot_top = y + offsets["prefetch"] - prefetch_slot_h / 2
+                    sub_h = min(bar_h, prefetch_slot_h / n_layers)
+                    stack_h = n_layers * sub_h
+                    slot_top = y + offsets["prefetch"] - stack_h / 2
                     for i, (sha, ev_start, ev_end) in enumerate(prefetch_events):
                         sub_y = slot_top + (i + 0.5) * sub_h
                         c = layer_color.get(sha, PREFETCH_COLOR)
@@ -350,14 +374,19 @@ def plot(
                             left=s.bg_download_start_s - ref, height=bar_h * 0.9,
                             color=BG_DOWNLOAD_COLOR, edgecolor=BG_DOWNLOAD_COLOR)
 
-                run_left = s.run_start_s - ref
-                run_w = s.run_end_s - s.run_start_s
-                ax.barh(y + offsets["run"], run_w, left=run_left, height=bar_h * 0.9,
+                create_left = s.create_start_s - ref
+                create_w = s.create_end_s - s.create_start_s
+                ax.barh(y + offsets["run"], create_w, left=create_left, height=bar_h * 0.9,
+                        color=CREATE_COLOR, edgecolor=CREATE_COLOR)
+
+                task_left = s.task_start_s - ref
+                task_w = s.task_end_s - s.task_start_s
+                ax.barh(y + offsets["run"], task_w, left=task_left, height=bar_h * 0.9,
                         color=RUN_COLOR, edgecolor=RUN_COLOR)
 
                 row_max = max(
                     s.pull_end_s - ref,
-                    s.run_end_s - ref,
+                    s.task_end_s - ref,
                     (s.prefetch_end_s - ref) if s.prefetch_end_s is not None else 0.0,
                     (s.bg_download_end_s - ref) if s.bg_download_end_s is not None else 0.0,
                     max((e - ref for _, _, e in s.file_open_cache_spans), default=0.0),
@@ -379,7 +408,8 @@ def plot(
         legend_handles = [
             mpatches.Patch(color=PULL_COLOR, label="pull"),
             mpatches.Patch(color=BG_DOWNLOAD_COLOR, label="bg download"),
-            mpatches.Patch(color=RUN_COLOR, label="run"),
+            mpatches.Patch(color=CREATE_COLOR, label="create"),
+            mpatches.Patch(color=RUN_COLOR, label="start"),
             mpatches.Patch(facecolor="lightgray", edgecolor="black",
                            hatch="\\\\", linewidth=0.4, label="prefetch (\\\\)"),
             mpatches.Patch(facecolor="lightgray", edgecolor="black",
