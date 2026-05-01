@@ -44,12 +44,13 @@ CONFIG_OPTIONS: list[tuple[dict, str]] = [
 CFG = load_config()
 VERBOSE = True
 
-PULL_COLOR = "#1f77b4"
+PULL_COLOR = "#ffd966"
 PREFETCH_COLOR = "#9467bd"
-BG_DOWNLOAD_COLOR = "#ff7f0e"
+BG_DOWNLOAD_COLOR = "#d5d5d5"
 FILE_OPEN_ON_DEMAND_COLOR = "#d62728"
 FILE_OPEN_CACHE_COLOR = "#17becf"
-RUN_COLOR = "#2ca02c"
+RUN_COLOR = "#f5b7b1"
+LAYER_CMAP = plt.get_cmap("tab10")  # per-layer color (shared by prefetch + file_open)
 
 
 # ── data structures ────────────────────────────────────────────────
@@ -65,10 +66,11 @@ class PullPrefetchSpan:
     pull_end_s: float
     prefetch_start_s: float | None
     prefetch_end_s: float | None
+    prefetch_layer_events: list[tuple[str, float, float]]
     bg_download_start_s: float | None
     bg_download_end_s: float | None
-    file_open_cache_spans: list[tuple[float, float]]
-    file_open_on_demand_spans: list[tuple[float, float]]
+    file_open_cache_spans: list[tuple[str, float, float]]
+    file_open_on_demand_spans: list[tuple[str, float, float]]
     run_start_s: float
     run_end_s: float
 
@@ -132,9 +134,9 @@ def _measure_config_option(
         if dl_span:
             ends.append(dl_span[1])
         if file_open_cache_spans:
-            ends.append(max(e for _, e in file_open_cache_spans))
+            ends.append(max(e for _, _, e in file_open_cache_spans))
         if file_open_on_demand_spans:
-            ends.append(max(e for _, e in file_open_on_demand_spans))
+            ends.append(max(e for _, _, e in file_open_on_demand_spans))
         save_stargz_run_log(
             pull_start_s,
             max(ends),
@@ -150,6 +152,7 @@ def _measure_config_option(
             pull_end_s=pull_end_s,
             prefetch_start_s=span[0] if span else None,
             prefetch_end_s=span[1] if span else None,
+            prefetch_layer_events=[(e.layer_sha, e.start_s, e.end_s) for e in events],
             bg_download_start_s=dl_span[0] if dl_span else None,
             bg_download_end_s=dl_span[1] if dl_span else None,
             file_open_cache_spans=file_open_cache_spans,
@@ -217,8 +220,8 @@ def save_csv(
     for (mode, label), entries in results.items():
         for s in entries:
             ref = s.pull_start_s
-            file_open_cache_str = "|".join(f"{a - ref:.3f}:{b - ref:.3f}" for a, b in s.file_open_cache_spans)
-            file_open_on_demand_str = "|".join(f"{a - ref:.3f}:{b - ref:.3f}" for a, b in s.file_open_on_demand_spans)
+            file_open_cache_str = "|".join(f"{sha[:12]}:{a - ref:.3f}:{b - ref:.3f}" for sha, a, b in s.file_open_cache_spans)
+            file_open_on_demand_str = "|".join(f"{sha[:12]}:{a - ref:.3f}:{b - ref:.3f}" for sha, a, b in s.file_open_on_demand_spans)
             rows.append({
                 "run": s.run,
                 "mode": mode,
@@ -262,20 +265,22 @@ def plot(
     splits = sorted({s.n_allotments for entries in results.values() for s in entries})
 
     bar_h = 0.14
+    prefetch_slot_h = 5 * bar_h  # per-layer micro-lanes for prefetch (up to 10 layers)
+    # Slot stack (top→bottom): pull(1), prefetch(5), file_open(1), bg(1), run(1) → total 9*bar_h
     offsets = {
-        "pull": -2.5 * bar_h,
-        "prefetch": -1.5 * bar_h,
-        "bg_download": -0.5 * bar_h,
-        "file_open_on_demand": 0.5 * bar_h,
-        "file_open_cache": 1.5 * bar_h,
-        "run": 2.5 * bar_h,
+        "pull": -4.0 * bar_h,
+        "prefetch": -1.0 * bar_h,
+        "file_open": 2.0 * bar_h,
+        "bg_download": 3.0 * bar_h,
+        "run": 4.0 * bar_h,
     }
+    row_spacing = 9 * bar_h + 0.3  # row stack height + gap
 
     for mode in MODES:
         n_cols = len(config_labels)
         fig, axes = plt.subplots(
             1, n_cols,
-            figsize=(max(14, 4 * n_cols), max(3.5, 0.7 * len(splits) + 1.5)),
+            figsize=(max(14, 4 * n_cols), max(3.5, row_spacing * len(splits) + 1.5)),
             squeeze=False,
             sharey=True,
         )
@@ -285,7 +290,8 @@ def plot(
             ax = axes[0][col_idx]
             entries = results.get((mode, label), [])
 
-            for y, n in enumerate(splits):
+            for y_idx, n in enumerate(splits):
+                y = y_idx * row_spacing
                 s = _median_span(entries, n)
                 if s is None:
                     continue
@@ -296,27 +302,53 @@ def plot(
                 ax.barh(y + offsets["pull"], pull_w, left=pull_left, height=bar_h * 0.9,
                         color=PULL_COLOR, edgecolor=PULL_COLOR)
 
-                if s.prefetch_start_s is not None and s.prefetch_end_s is not None:
-                    pf_left = s.prefetch_start_s - ref
-                    pf_w = s.prefetch_end_s - s.prefetch_start_s
-                    ax.barh(y + offsets["prefetch"], pf_w, left=pf_left, height=bar_h * 0.9,
-                            color=PREFETCH_COLOR, edgecolor=PREFETCH_COLOR)
+                # Build per-layer color map from union of prefetch + file_open events,
+                # ordered by first-seen time. Same color is used for that layer in both
+                # the prefetch micro-lane and the file_open lane.
+                first_seen: dict[str, float] = {}
+                for sha, start, _ in s.prefetch_layer_events:
+                    if sha and (sha not in first_seen or start < first_seen[sha]):
+                        first_seen[sha] = start
+                for sha, start, _ in s.file_open_cache_spans:
+                    if sha and (sha not in first_seen or start < first_seen[sha]):
+                        first_seen[sha] = start
+                for sha, start, _ in s.file_open_on_demand_spans:
+                    if sha and (sha not in first_seen or start < first_seen[sha]):
+                        first_seen[sha] = start
+                ordered_layers = [sha for sha, _ in sorted(first_seen.items(), key=lambda kv: kv[1])]
+                layer_color = {sha: LAYER_CMAP(i % LAYER_CMAP.N) for i, sha in enumerate(ordered_layers)}
+
+                # Per-layer prefetch micro-lanes (hatch = backslash).
+                prefetch_events = sorted(s.prefetch_layer_events, key=lambda e: e[1])
+                if prefetch_events:
+                    n_layers = len(prefetch_events)
+                    sub_h = prefetch_slot_h / n_layers
+                    slot_top = y + offsets["prefetch"] - prefetch_slot_h / 2
+                    for i, (sha, ev_start, ev_end) in enumerate(prefetch_events):
+                        sub_y = slot_top + (i + 0.5) * sub_h
+                        c = layer_color.get(sha, PREFETCH_COLOR)
+                        ax.barh(sub_y, ev_end - ev_start, left=ev_start - ref,
+                                height=sub_h * 0.9,
+                                color=c, edgecolor="black", hatch="\\\\", linewidth=0.4)
+
+                # Single shared file_open lane: color = layer, hatch = event type.
+                for sha, ev_start, ev_end in s.file_open_cache_spans:
+                    c = layer_color.get(sha, FILE_OPEN_CACHE_COLOR)
+                    ax.barh(y + offsets["file_open"], ev_end - ev_start,
+                            left=ev_start - ref, height=bar_h * 0.9,
+                            color=c, edgecolor="black", hatch="//", linewidth=0.4)
+
+                for sha, ev_start, ev_end in s.file_open_on_demand_spans:
+                    c = layer_color.get(sha, FILE_OPEN_ON_DEMAND_COLOR)
+                    ax.barh(y + offsets["file_open"], ev_end - ev_start,
+                            left=ev_start - ref, height=bar_h * 0.9,
+                            color=c, edgecolor="black", hatch="xx", linewidth=0.4)
 
                 if s.bg_download_start_s is not None and s.bg_download_end_s is not None:
                     ax.barh(y + offsets["bg_download"],
                             s.bg_download_end_s - s.bg_download_start_s,
                             left=s.bg_download_start_s - ref, height=bar_h * 0.9,
                             color=BG_DOWNLOAD_COLOR, edgecolor=BG_DOWNLOAD_COLOR)
-
-                for ev_start, ev_end in s.file_open_on_demand_spans:
-                    ax.barh(y + offsets["file_open_on_demand"], ev_end - ev_start,
-                            left=ev_start - ref, height=bar_h * 0.9,
-                            color=FILE_OPEN_ON_DEMAND_COLOR, edgecolor=FILE_OPEN_ON_DEMAND_COLOR)
-
-                for ev_start, ev_end in s.file_open_cache_spans:
-                    ax.barh(y + offsets["file_open_cache"], ev_end - ev_start,
-                            left=ev_start - ref, height=bar_h * 0.9,
-                            color=FILE_OPEN_CACHE_COLOR, edgecolor=FILE_OPEN_CACHE_COLOR)
 
                 run_left = s.run_start_s - ref
                 run_w = s.run_end_s - s.run_start_s
@@ -328,12 +360,12 @@ def plot(
                     s.run_end_s - ref,
                     (s.prefetch_end_s - ref) if s.prefetch_end_s is not None else 0.0,
                     (s.bg_download_end_s - ref) if s.bg_download_end_s is not None else 0.0,
-                    max((e - ref for _, e in s.file_open_cache_spans), default=0.0),
-                    max((e - ref for _, e in s.file_open_on_demand_spans), default=0.0),
+                    max((e - ref for _, _, e in s.file_open_cache_spans), default=0.0),
+                    max((e - ref for _, _, e in s.file_open_on_demand_spans), default=0.0),
                 )
                 x_max = max(x_max, row_max)
 
-            ax.set_yticks(range(len(splits)))
+            ax.set_yticks([i * row_spacing for i in range(len(splits))])
             ax.set_yticklabels([str(s) for s in splits])
             ax.set_xlabel("Time since pull start (s)")
             ax.set_title(label, fontsize=10)
@@ -346,13 +378,20 @@ def plot(
 
         legend_handles = [
             mpatches.Patch(color=PULL_COLOR, label="pull"),
-            mpatches.Patch(color=PREFETCH_COLOR, label="prefetch"),
             mpatches.Patch(color=BG_DOWNLOAD_COLOR, label="bg download"),
-            mpatches.Patch(color=FILE_OPEN_ON_DEMAND_COLOR, label="file open (on-demand)"),
-            mpatches.Patch(color=FILE_OPEN_CACHE_COLOR, label="file open (cache)"),
             mpatches.Patch(color=RUN_COLOR, label="run"),
+            mpatches.Patch(facecolor="lightgray", edgecolor="black",
+                           hatch="\\\\", linewidth=0.4, label="prefetch (\\\\)"),
+            mpatches.Patch(facecolor="lightgray", edgecolor="black",
+                           hatch="//", linewidth=0.4, label="file open cache (//)"),
+            mpatches.Patch(facecolor="lightgray", edgecolor="black",
+                           hatch="xx", linewidth=0.4, label="file open on-demand (xx)"),
         ]
-        axes[0][-1].legend(handles=legend_handles, loc="lower right", fontsize=8)
+        fig.legend(
+            handles=legend_handles, loc="lower right",
+            bbox_to_anchor=(0.99, 0.01), ncol=len(legend_handles),
+            fontsize=8, frameon=False,
+        )
 
         fig.suptitle(
             f"Pull / Prefetch / Run timeline by stargz config ({mode}, "
