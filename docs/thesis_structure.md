@@ -16,7 +16,7 @@ Optimizing Model Distribution in Containerized Distributed Machine Learning Syst
 - OCI image format, layers, content-addressable storage
 - BuildKit architecture and sequential layer pipeline
 - containerd, snapshotters, ctr, nerdctl, different components, how client and daemon communicate
-- Stargz/eStargz — TOC, lazy pull, build cost
+- Stargz/eStargz — TOC, lazy pull, build cost, config options
 - fuse
 - zstandard
 - 2DFS — allotments, semantic pull
@@ -38,10 +38,49 @@ Optimizing Model Distribution in Containerized Distributed Machine Learning Syst
 
 ## 4. System Design
 - functional requirements
+    - Build
+        - Builder produces a single image that is both 2dfs-allotment-addressable and stargz-lazy-loadable in one pipeline (no separate conversion pass)
+        - Build accepts arguments to tune stargz compression level and chunk size
+        - Builder reuses cached layers across gzip and stargz modes without collisions
+        - Builder supports zstd compression for layer blobs
+    - Distribution
+        - Client pulls the image lazily using conventional containerd clients — all layers are included, only TOCs are downloaded eagerly, file contents fetched on demand
+        - Allotment tag (`image:tag--r1.c1.r2.c2`) selects which layers receive prefetch annotations (does not restrict which layers are included)
+        - Registry still supports non-stargz images and preserves existing tdfs allotment delivery behaviour
+        - Registry preserves estargz annotations
+    - Update / refresh
+        - A single layer (e.g. model weights) can be refreshed in-place without rebuilding upstream layers and stopping the container
+        - After refresh, layer contents are available for lazy access
+        - Layer refresh provides an option to enable background fetch which loads the new layer contents in the background
 - non functional requirements
+    - Performance
+        - Build overhead of stargz+2dfs vs. plain 2dfs build is bounded by stargz layer conversion overhead
+        - Cold-start latency (pull → container ready) lower than full eager pull for partial-access workloads
+        - Layer refresh completes in O(1) — TOC fetch only
+        - Background fetch after refresh saturates available bandwidth without starving foreground requests
+    - Resource efficiency
+        - Builder memory usage stays bounded regardless of input image / layer size (no full-layer in-memory buffering)
+        - Lazy pull fetches only bytes actually accessed (no over-fetch beyond TOC + prefetch set)
+        - Registry storage overhead vs. plain OCI is small (annotations + TOC, not duplicated blobs)
 - system architecture
+    - component overview + diagram + mark what has been added/updated
+    - image format
+        - updated image format with stargz annotations
+        - image size 
+    - 2dfs builder
+        - cache hierarchy (`blobs/`, `uncompressed-keys/`, `index/`) with a gzip/stargz discriminator to prevent cross-mode collisions
+        - compression options: gzip and zstd
+        - streaming layer construction to keep builder memory bounded
+    - 2dfs registry
+        - under stargz, allotments select the prefetch set rather than restricting which layers are included
+        - backward-compatible serving for non-stargz images
+    - client-side stack
+        - prefetch behavior fix within the snapshotter
+        - layer refresh 
+            - background fetch
+            - TOC replacement, fuse adjustment etc
 
-## 4. Implementation Details
+## 5. Implementation Details
 - stargz integration in 2dfs builder: 
     - stargz build integration, size calculation, prefetch landmark removal 
     - build arguments
@@ -52,7 +91,7 @@ Optimizing Model Distribution in Containerized Distributed Machine Learning Syst
 - 2dfs-registry
     - estargz annotations
     - size optimization
-    - cconfig values
+    - config values
     - all layers included
     - prefetch annotations
 - Layer refresh: 
@@ -60,7 +99,7 @@ Optimizing Model Distribution in Containerized Distributed Machine Learning Syst
     - refresh workflow
     - background fetch after refresh
 
-## 5. Evaluation
+## 6. Evaluation
 - Benchmark suite design and methodology
 - Benchmarking hardware. cloudlab
 - Build performance
@@ -72,6 +111,6 @@ Optimizing Model Distribution in Containerized Distributed Machine Learning Syst
 - Pull performance: lazy pull, cold vs. warm
 - End-to-end: split computing scenario
 
-## 6. Discussion & Conclusions
+## 7. Discussion & Conclusions
 
-## 7. Future Work
+## 8. Future Work
