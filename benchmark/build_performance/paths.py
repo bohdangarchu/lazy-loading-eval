@@ -64,6 +64,18 @@ def resource_cpu_charts_dir(base_dir: str) -> str:
 def resource_ram_charts_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "charts", "resource", "ram")
 
+def build_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, capacity: int) -> str:
+    return os.path.join(
+        base_dir, "artifacts", "build", execution_ts,
+        f"{_model_slug(model)}_{_image_slug(base_image)}", f"cap_{capacity}",
+    )
+
+def rebuild_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str) -> str:
+    return os.path.join(
+        base_dir, "artifacts", "rebuild", execution_ts,
+        f"{_model_slug(model)}_{_image_slug(base_image)}", "full",
+    )
+
 def resource_cpu_charts_run_dir(base_dir: str, execution_ts: str) -> str:
     return os.path.join(resource_cpu_charts_dir(base_dir), execution_ts)
 
@@ -73,17 +85,20 @@ def resource_ram_charts_run_dir(base_dir: str, execution_ts: str) -> str:
 
 # ── output file paths ──────────────────────────────────────────────
 
-def build_csv_path(base_dir: str, model: str, base_image: str) -> str:
-    return os.path.join(build_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{now_ts()}.csv")
+def build_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(build_results_dir(base_dir), execution_ts, f"{_model_slug(model)}_{_image_slug(base_image)}.csv")
 
-def build_chart_path(base_dir: str, model: str, base_image: str) -> str:
-    return os.path.join(build_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_stages_{now_ts()}.png")
+def build_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(build_charts_dir(base_dir), execution_ts, f"{_model_slug(model)}_{_image_slug(base_image)}_stages.png")
 
-def resource_csv_path(base_dir: str, model: str, base_image: str) -> str:
-    return os.path.join(resource_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_resource_{now_ts()}.csv")
+def resource_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(resource_results_dir(base_dir), execution_ts, f"{_model_slug(model)}_{_image_slug(base_image)}_resource.csv")
 
-def resource_chart_path(base_dir: str, model: str, base_image: str) -> str:
-    return os.path.join(resource_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_resource_{now_ts()}.png")
+def resource_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(
+        resource_charts_dir(base_dir), "total", execution_ts,
+        f"{_model_slug(model)}_{_image_slug(base_image)}_resource.png",
+    )
 
 def rebuild_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(rebuild_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild.csv")

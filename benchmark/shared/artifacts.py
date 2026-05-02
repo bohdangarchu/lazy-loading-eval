@@ -1,9 +1,31 @@
 import json
 import os
+import shutil
 
 import numpy as np
 
 from shared import paths
+
+
+def snapshot_artifacts(work_dir: str, dest_dir: str) -> None:
+    os.makedirs(dest_dir, exist_ok=True)
+    for src in (
+        paths.tdfs_json_path(work_dir),
+        paths.stargz_dockerfile_path(work_dir),
+        paths.base_dockerfile_path(work_dir),
+    ):
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(dest_dir, os.path.basename(src)))
+
+
+def clear_artifacts(work_dir: str) -> None:
+    for p in (
+        paths.tdfs_json_path(work_dir),
+        paths.stargz_dockerfile_path(work_dir),
+        paths.base_dockerfile_path(work_dir),
+    ):
+        if os.path.exists(p):
+            os.remove(p)
 
 
 def mutate_chunk(path: str) -> None:

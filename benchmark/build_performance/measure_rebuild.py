@@ -7,10 +7,10 @@ import numpy as np
 
 from shared import log
 from shared.build_result import BuildResult
-from build_performance.paths import rebuild_charts_run_dir, rebuild_csv_path, rebuild_chart_path
+from build_performance.paths import rebuild_charts_run_dir, rebuild_csv_path, rebuild_chart_path, rebuild_artifacts_dir
 from shared.charts import MODE_COLORS, figure_footer, save_figure, write_csv
 from shared.config import load_config
-from shared.artifacts import mutate_chunk
+from shared.artifacts import mutate_chunk, snapshot_artifacts, clear_artifacts
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -23,9 +23,9 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXPERIMENTS = [
     ("openai-community/gpt2",        "docker.io/library/python:3.12-slim", 12),  # ~0.5GB     ~50 MB
-    ("facebook/opt-350m",            "docker.io/tensorflow/tensorflow",    12),  # ~1.4 GB     ~700 MB
-    ("Qwen/Qwen2-1.5B",              "docker.io/ollama/ollama",            12),  # ~3.09 GB     ~3.4 GB
-    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama",           12),  # ~6.0 GB     ~3.4 GB
+    # ("facebook/opt-350m",            "docker.io/tensorflow/tensorflow",    12),  # ~1.4 GB     ~700 MB
+    # ("Qwen/Qwen2-1.5B",              "docker.io/ollama/ollama",            12),  # ~3.09 GB     ~3.4 GB
+    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama",           12),  # ~6.0 GB     ~3.4 GB
 ]
 CFG = load_config()
 VERBOSE = True
@@ -135,8 +135,8 @@ def plot(results: list[dict], model: str, base_image: str, max_allowed_splits: i
 
     ax_ttb.set_ylabel("Total rebuild time (s)")
     fig.suptitle(f"Incremental rebuild performance (mean ± std, n={CFG.rebuild_n_runs} runs)")
-    figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
     fig.tight_layout()
+    figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
 
     path = rebuild_chart_path(SCRIPT_DIR, model, base_image, execution_ts)
     save_figure(fig, path)
@@ -154,6 +154,10 @@ def main():
 
         log.info(f"Preparing model at full capacity ({max_allowed_splits} layers)...")
         chunk_paths = prepare(model, max_allowed_splits, max_allowed_splits, base_image, CFG)
+        snapshot_artifacts(
+            SCRIPT_DIR,
+            rebuild_artifacts_dir(SCRIPT_DIR, execution_ts, model, base_image),
+        )
 
         results = measure_rebuilds(chunk_paths, methods, max_allowed_splits)
 
@@ -165,6 +169,8 @@ def main():
         for row in results:
             log.result(f"{row['run']:>4}  {row['mutation_pct']:>3}%  {row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  "
                        f"{row['total_s']:>8.2f}")
+
+    clear_artifacts(SCRIPT_DIR)
 
 
 if __name__ == "__main__":

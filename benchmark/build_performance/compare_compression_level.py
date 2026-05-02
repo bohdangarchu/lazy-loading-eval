@@ -95,7 +95,7 @@ def run_level(key: str, label: str, level: str) -> list[tuple[int, RunResult]]:
     results = []
     for n in range(1, MAX_SPLITS + 1):
         log.info(f"\n=== Preparing {n} split(s) ===")
-        clear_chunks()
+        clear_chunks(MODEL)
         prepare(MODEL, n, SOURCE_IMAGE, CFG)
         br = build_one(n, level)
         size = get_image_size()

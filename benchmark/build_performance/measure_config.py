@@ -103,7 +103,7 @@ def measure(model: str, max_splits: int, source_image: str) -> dict[str, ResultL
     for i, (flags, label) in enumerate(FLAG_OPTIONS):
         log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === {MODE} {label} ({flags}) ===")
         _clear_cache()
-        clear_chunks()
+        clear_chunks(model)
 
         flag_results: ResultList = []
         for n in range(1, max_splits + 1):

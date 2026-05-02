@@ -12,12 +12,14 @@ import psutil
 from shared import log
 from shared.build_result import BuildResult
 from build_performance.paths import (
-    build_csv_path, build_charts_dir, build_chart_path,
+    build_csv_path, build_chart_path,
     resource_csv_path, resource_chart_path,
     resource_cpu_charts_run_dir, resource_ram_charts_run_dir,
+    build_artifacts_dir,
 )
+from shared.artifacts import snapshot_artifacts, clear_artifacts
 from shared.config import load_config
-from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure, write_csv
+from shared.charts import MODE_COLORS, figure_footer, bar_group_xticks, save_figure, write_csv
 from shared.registry import prepare_local_registry, registry, image_slug
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -104,7 +106,7 @@ def _run_one(mode: str, n: int, cfg, source_image: str) -> BuildResult:
 
 def measure_builds(
     model: str, max_allowed_splits: int, source_image: str, cfg=CFG,
-    monitor: ResourceMonitor | None = None,
+    monitor: ResourceMonitor | None = None, execution_ts: str = "",
 ) -> list[dict]:
     results: list[dict] = []
 
@@ -113,8 +115,13 @@ def measure_builds(
         for cap in CAPACITIES:
             num_layers = num_layers_for_capacity(cap, max_allowed_splits)
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing capacity={cap}% ({num_layers} layer(s)) ===")
-            clear_chunks()
+            clear_chunks(model)
             prepare(model, max_allowed_splits, num_layers, source_image, cfg)
+            if execution_ts:
+                snapshot_artifacts(
+                    SCRIPT_DIR,
+                    build_artifacts_dir(SCRIPT_DIR, execution_ts, model, source_image, cap),
+                )
             for i, mode in enumerate(MODES):
                 monitor_key = mode.replace("-", "_")
                 if monitor:
@@ -140,8 +147,8 @@ def measure_builds(
     return results
 
 
-def save_csv(results: list[dict], model: str, base_image: str) -> None:
-    output_path = build_csv_path(SCRIPT_DIR, model, base_image)
+def save_csv(results: list[dict], model: str, base_image: str, execution_ts: str) -> None:
+    output_path = build_csv_path(SCRIPT_DIR, model, base_image, execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fieldnames = ["run", "capacity", "num_layers", "mode", "total_s"]
     rows = [{
@@ -151,9 +158,8 @@ def save_csv(results: list[dict], model: str, base_image: str) -> None:
     write_csv(output_path, fieldnames, rows)
 
 
-def plot(results: list[dict], model: str, base_image: str, max_allowed_splits: int) -> None:
+def plot(results: list[dict], model: str, base_image: str, max_allowed_splits: int, execution_ts: str) -> None:
     capacities = sorted(set(r["capacity"] for r in results))
-    os.makedirs(build_charts_dir(SCRIPT_DIR), exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(max(8, len(capacities) * 2), 5))
 
@@ -173,16 +179,17 @@ def plot(results: list[dict], model: str, base_image: str, max_allowed_splits: i
     ax.set_title(f"Build performance (mean ± std, n={CFG.build_n_runs} runs)")
     ax.legend(loc="best", fontsize="small")
     ax.grid(True, linestyle="--", alpha=0.5)
-    figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
     fig.tight_layout()
-    path = build_chart_path(SCRIPT_DIR, model, base_image)
+    figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
+    path = build_chart_path(SCRIPT_DIR, model, base_image, execution_ts)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     save_figure(fig, path)
 
 
 def save_resource_csv(
-    samples: list[tuple[int, float, float, str]], model: str, base_image: str,
+    samples: list[tuple[int, float, float, str]], model: str, base_image: str, execution_ts: str,
 ) -> None:
-    output_path = resource_csv_path(SCRIPT_DIR, model, base_image)
+    output_path = resource_csv_path(SCRIPT_DIR, model, base_image, execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -194,7 +201,7 @@ def save_resource_csv(
 
 def plot_resource(
     samples: list[tuple[int, float, float, str]], model: str, base_image: str,
-    max_allowed_splits: int,
+    max_allowed_splits: int, execution_ts: str,
 ) -> None:
     if not samples:
         return
@@ -255,22 +262,22 @@ def plot_resource(
             mem_run_medians_by_cap.append(run_mem_medians)
 
         offsets = [pos + i * bar_width for pos in x]
-        cpu_bar_heights = [float(np.median(v)) if v else 0.0 for v in cpu_run_medians_by_cap]
-        mem_bar_heights = [float(np.median(v)) if v else 0.0 for v in mem_run_medians_by_cap]
+        cpu_bar_heights = [float(np.mean(v)) if v else 0.0 for v in cpu_run_medians_by_cap]
+        mem_bar_heights = [float(np.mean(v)) if v else 0.0 for v in mem_run_medians_by_cap]
+        cpu_errs = [float(np.std(v, ddof=0)) if v else 0.0 for v in cpu_run_medians_by_cap]
+        mem_errs = [float(np.std(v, ddof=0)) if v else 0.0 for v in mem_run_medians_by_cap]
+        bar_centers = [off + bar_width / 2 for off in offsets]
 
-        ax_cpu.bar(offsets, cpu_bar_heights, bar_width, label=labels[mk],
-                   color=colors[mk], edgecolor="black", linewidth=0.5)
-        ax_mem.bar(offsets, mem_bar_heights, bar_width, label=labels[mk],
-                   color=colors[mk], edgecolor="black", linewidth=0.5)
-
-        for off, run_vals_cpu, run_vals_mem in zip(offsets, cpu_run_medians_by_cap, mem_run_medians_by_cap):
-            x_center = off + bar_width / 2
-            add_run_dots(ax_cpu, x_center, run_vals_cpu)
-            add_run_dots(ax_mem, x_center, run_vals_mem)
+        ax_cpu.bar(offsets, cpu_bar_heights, bar_width, yerr=cpu_errs, label=labels[mk],
+                   color=colors[mk], edgecolor="black", linewidth=0.5,
+                   error_kw={"ecolor": "black", "capsize": 3, "elinewidth": 1})
+        ax_mem.bar(offsets, mem_bar_heights, bar_width, yerr=mem_errs, label=labels[mk],
+                   color=colors[mk], edgecolor="black", linewidth=0.5,
+                   error_kw={"ecolor": "black", "capsize": 3, "elinewidth": 1})
 
     bar_group_xticks(ax_cpu, len(capacities), n_modes, bar_width, x_labels)
     ax_cpu.set_ylabel("CPU Usage (%)")
-    ax_cpu.set_title(f"Resource usage during builds (median, n={CFG.build_n_runs} runs, dots = individual runs)")
+    ax_cpu.set_title(f"Resource usage during builds (mean ± std, n={CFG.build_n_runs} runs)")
     ax_cpu.legend(fontsize="small")
     ax_cpu.grid(True, linestyle="--", alpha=0.5, axis="y")
 
@@ -280,11 +287,10 @@ def plot_resource(
     ax_mem.legend(fontsize="small")
     ax_mem.grid(True, linestyle="--", alpha=0.5, axis="y")
 
-    figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
-
-    output_path = resource_chart_path(SCRIPT_DIR, model, base_image)
+    output_path = resource_chart_path(SCRIPT_DIR, model, base_image, execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout()
+    figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
     save_figure(fig, output_path)
 
 
@@ -346,10 +352,9 @@ def plot_resource_individual(
         ax.set_ylabel("CPU (%)")
         ax.set_title("CPU usage over time")
         ax.grid(True, linestyle="--", alpha=0.5)
-        _add_run_footer(fig)
         fig.tight_layout()
-        fig.subplots_adjust(bottom=0.18)
-        save_figure(fig, os.path.join(cpu_dir, f"{file_stem}.png"))
+        _add_run_footer(fig)
+        save_figure(fig, os.path.join(cpu_dir, f"{file_stem}.png"), log_path=False)
 
         fig, ax = plt.subplots(figsize=(8, 3))
         ax.plot(t_sec, mem_vals, color=MODE_COLORS.get(mode_name, "#888888"), linewidth=1)
@@ -357,10 +362,12 @@ def plot_resource_individual(
         ax.set_ylabel("Memory (MB)")
         ax.set_title("RAM usage over time")
         ax.grid(True, linestyle="--", alpha=0.5)
-        _add_run_footer(fig)
         fig.tight_layout()
-        fig.subplots_adjust(bottom=0.18)
-        save_figure(fig, os.path.join(ram_dir, f"{file_stem}.png"))
+        _add_run_footer(fig)
+        save_figure(fig, os.path.join(ram_dir, f"{file_stem}.png"), log_path=False)
+
+    log.result(f"Per-run CPU charts saved to {cpu_dir}/")
+    log.result(f"Per-run RAM charts saved to {ram_dir}/")
 
 
 def main():
@@ -376,12 +383,12 @@ def main():
             monitor = ResourceMonitor()
             monitor.start()
 
-        results = measure_builds(model, max_allowed_splits, base_image, CFG, monitor=monitor)
+        results = measure_builds(model, max_allowed_splits, base_image, CFG, monitor=monitor, execution_ts=execution_ts)
 
         if monitor:
             samples = monitor.stop()
-            save_resource_csv(samples, model, base_image)
-            plot_resource(samples, model, base_image, max_allowed_splits)
+            save_resource_csv(samples, model, base_image, execution_ts)
+            plot_resource(samples, model, base_image, max_allowed_splits, execution_ts)
             plot_resource_individual(samples, model, base_image, execution_ts, max_allowed_splits)
 
         capacities = sorted(set(r["capacity"] for r in results))
@@ -397,8 +404,10 @@ def main():
                 row_vals.append(f"{np.median(group):>{col}.2f}" if group else f"{'N/A':>{col}}")
             log.result(f"{cap:>9}%  {'  '.join(row_vals)}")
 
-        save_csv(results, model, base_image)
-        plot(results, model, base_image, max_allowed_splits)
+        save_csv(results, model, base_image, execution_ts)
+        plot(results, model, base_image, max_allowed_splits, execution_ts)
+
+    clear_artifacts(SCRIPT_DIR)
 
 
 if __name__ == "__main__":

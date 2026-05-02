@@ -17,11 +17,19 @@ def figure_footer(
     text = f"model: {model}\nbase image: {base_image}"
     if max_allowed_splits is not None:
         text += f"\nmax_allowed_splits: {max_allowed_splits}"
+    n_lines = text.count("\n") + 1
+    fig_h_in = fig.get_size_inches()[1]
+    footer_in = (n_lines * fontsize * 1.4) / 72.0
+    pad_in = 0.35
+    footer_block_frac = (footer_in + pad_in) / fig_h_in
+    current_bottom = fig.subplotpars.bottom
+    new_bottom = min(0.55, current_bottom + footer_block_frac)
+    fig.subplots_adjust(bottom=new_bottom)
     fig.text(
-        0.01, 0.01,
+        0.01, (footer_in + pad_in / 2) / fig_h_in,
         text,
         fontsize=fontsize,
-        verticalalignment="bottom",
+        verticalalignment="top",
         family="monospace",
     )
 
@@ -42,13 +50,14 @@ def bar_group_xticks(
     ax.set_xticklabels(labels)
 
 
-def save_figure(fig, path: str, dpi: int = 150) -> None:
+def save_figure(fig, path: str, dpi: int = 150, log_path: bool = True) -> None:
     """savefig + close + log. Caller is responsible for tight_layout."""
     import matplotlib.pyplot as plt
     from shared import log
     fig.savefig(path, dpi=dpi)
     plt.close(fig)
-    log.result(f"Chart saved to {path}")
+    if log_path:
+        log.result(f"Chart saved to {path}")
 
 
 def write_csv(path: str, fieldnames: list[str], rows: list[dict]) -> None:
