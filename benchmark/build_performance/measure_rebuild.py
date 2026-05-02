@@ -8,7 +8,7 @@ import numpy as np
 from shared import log
 from shared.build_result import BuildResult
 from build_performance.paths import rebuild_charts_run_dir, rebuild_csv_path, rebuild_chart_path
-from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure, write_csv
+from shared.charts import MODE_COLORS, figure_footer, save_figure, write_csv
 from shared.config import load_config
 from shared.artifacts import mutate_chunk
 from shared.registry import prepare_local_registry, registry, image_slug
@@ -84,14 +84,10 @@ def measure_rebuilds(chunk_paths: list[str], methods: list, max_allowed_splits: 
                         "r": r,
                         "direction": direction,
                         "method": method_name,
-                        "rebuild_s": br.total_s,
-                        "pull_s": br.pull_s,
-                        "context_transfer_s": br.context_transfer_s,
-                        "build_s": br.build_s,
-                        "export_s": br.export_s,
+                        "total_s": br.total_s,
                     })
 
-                    log.result(f"Rebuild time: {br.total_s:.2f}s")
+                    log.result(f"Total time: {br.total_s:.2f}s")
                     log.info(f"\nSleeping {CFG.build_cooldown}s before next...")
                     time.sleep(CFG.build_cooldown)
 
@@ -101,15 +97,10 @@ def measure_rebuilds(chunk_paths: list[str], methods: list, max_allowed_splits: 
 def save_csv(results: list[dict], model: str, base_image: str, execution_ts: str) -> None:
     path = rebuild_csv_path(SCRIPT_DIR, model, base_image, execution_ts)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    fieldnames = ["run", "mutation_pct", "r", "direction", "method", "rebuild_s",
-                  "pull_s", "context_transfer_s", "build_s", "export_s"]
+    fieldnames = ["run", "mutation_pct", "r", "direction", "method", "total_s"]
     rows = [{
         **row,
-        "rebuild_s": f"{row['rebuild_s']:.4f}",
-        "pull_s": f"{row['pull_s']:.4f}",
-        "context_transfer_s": f"{row['context_transfer_s']:.4f}",
-        "build_s": f"{row['build_s']:.4f}",
-        "export_s": f"{row['export_s']:.4f}",
+        "total_s": f"{row['total_s']:.4f}",
     } for row in results]
     write_csv(path, fieldnames, rows)
 
@@ -117,42 +108,33 @@ def save_csv(results: list[dict], model: str, base_image: str, execution_ts: str
 def plot(results: list[dict], model: str, base_image: str, max_allowed_splits: int, execution_ts: str) -> None:
     os.makedirs(rebuild_charts_run_dir(SCRIPT_DIR, execution_ts), exist_ok=True)
 
-    n_modes = len(MODES)
-    bar_width = 0.8 / n_modes
-
     fig, (ax_ttb, ax_btt) = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
 
     for ax, direction, title in [
         (ax_ttb, "top_to_bottom", "Top to Bottom"),
         (ax_btt, "bottom_to_top", "Bottom to Top"),
     ]:
-        for i, mode in enumerate(MODES):
-            for j, pct in enumerate(MUTATION_PERCENTS):
-                group = [
-                    row for row in results
+        for mode in MODES:
+            means = []
+            stds = []
+            for pct in MUTATION_PERCENTS:
+                vals = [
+                    row["total_s"] for row in results
                     if row["direction"] == direction and row["method"] == mode and row["mutation_pct"] == pct
                 ]
-                rebuild_vals = [row["rebuild_s"] - row["pull_s"] for row in group]
-                if not rebuild_vals:
-                    continue
+                means.append(float(np.mean(vals)) if vals else float("nan"))
+                stds.append(float(np.std(vals, ddof=0)) if vals else 0.0)
+            ax.errorbar(MUTATION_PERCENTS, means, yerr=stds, label=mode, color=MODE_COLORS[mode],
+                        marker="o", capsize=3, linewidth=1.5)
 
-                x = j + i * bar_width
-                x_center = x + bar_width / 2
-                median_val = float(np.median(rebuild_vals))
-                label = mode if j == 0 else None
-                ax.bar(x, median_val, bar_width, color=MODE_COLORS[mode], label=label,
-                       edgecolor="black", linewidth=0.5)
-
-                add_run_dots(ax, x_center, rebuild_vals)
-
-        bar_group_xticks(ax, len(MUTATION_PERCENTS), n_modes, bar_width, [f"{p}" for p in MUTATION_PERCENTS])
+        ax.set_xticks(MUTATION_PERCENTS)
         ax.set_xlabel("% of splits updated")
         ax.set_title(f"{title}")
         ax.legend(fontsize="small")
-        ax.grid(True, linestyle="--", alpha=0.5, axis="y")
+        ax.grid(True, linestyle="--", alpha=0.5)
 
-    ax_ttb.set_ylabel("Rebuild time (s)")
-    fig.suptitle(f"Incremental rebuild performance (median, {CFG.rebuild_n_runs} runs, dots = individual runs)")
+    ax_ttb.set_ylabel("Total rebuild time (s)")
+    fig.suptitle(f"Incremental rebuild performance (mean ± std, n={CFG.rebuild_n_runs} runs)")
     figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
     fig.tight_layout()
 
@@ -178,12 +160,11 @@ def main():
         save_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, max_allowed_splits, execution_ts)
 
-        log.result(f"\n{'run':>4}  {'pct':>4}  {'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild':>8}  {'pull':>6}  {'ctx':>6}  {'build':>6}  {'export':>6}")
-        log.result("-" * 92)
+        log.result(f"\n{'run':>4}  {'pct':>4}  {'r':>4}  {'direction':<16}  {'method':<14}  {'total':>8}")
+        log.result("-" * 60)
         for row in results:
             log.result(f"{row['run']:>4}  {row['mutation_pct']:>3}%  {row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  "
-                       f"{row['rebuild_s']:>8.2f}  {row['pull_s']:>6.2f}  {row['context_transfer_s']:>6.2f}  "
-                       f"{row['build_s']:>6.2f}  {row['export_s']:>6.2f}")
+                       f"{row['total_s']:>8.2f}")
 
 
 if __name__ == "__main__":

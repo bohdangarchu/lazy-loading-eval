@@ -130,10 +130,6 @@ def measure_builds(
                     "num_layers": num_layers,
                     "mode": mode,
                     "total_s": br.total_s,
-                    "pull_s": br.pull_s,
-                    "ctx_s": br.context_transfer_s,
-                    "build_s": br.build_s,
-                    "export_s": br.export_s,
                 })
 
                 is_last = (i == len(MODES) - 1) and (cap == CAPACITIES[-1]) and (run == cfg.build_n_runs - 1)
@@ -147,14 +143,10 @@ def measure_builds(
 def save_csv(results: list[dict], model: str, base_image: str) -> None:
     output_path = build_csv_path(SCRIPT_DIR, model, base_image)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fieldnames = ["run", "capacity", "num_layers", "mode", "total_s", "pull_s", "ctx_s", "build_s", "export_s"]
+    fieldnames = ["run", "capacity", "num_layers", "mode", "total_s"]
     rows = [{
         **row,
         "total_s": f"{row['total_s']:.4f}",
-        "pull_s": f"{row['pull_s']:.4f}",
-        "ctx_s": f"{row['ctx_s']:.4f}",
-        "build_s": f"{row['build_s']:.4f}",
-        "export_s": f"{row['export_s']:.4f}",
     } for row in results]
     write_csv(output_path, fieldnames, rows)
 
@@ -163,48 +155,26 @@ def plot(results: list[dict], model: str, base_image: str, max_allowed_splits: i
     capacities = sorted(set(r["capacity"] for r in results))
     os.makedirs(build_charts_dir(SCRIPT_DIR), exist_ok=True)
 
-    n_modes = len(MODES)
-    n_caps = len(capacities)
-    bar_width = 0.8 / n_modes
-    stage_colors = {"pull": "#4e79a7", "build": "#e15759"}
+    fig, ax = plt.subplots(figsize=(max(8, len(capacities) * 2), 5))
 
-    fig, ax = plt.subplots(figsize=(max(8, n_caps * 3), 5))
+    for mode in MODES:
+        means = []
+        stds = []
+        for cap in capacities:
+            vals = [r["total_s"] for r in results if r["mode"] == mode and r["capacity"] == cap]
+            means.append(float(np.mean(vals)) if vals else float("nan"))
+            stds.append(float(np.std(vals, ddof=0)) if vals else 0.0)
+        ax.errorbar(capacities, means, yerr=stds, label=mode, color=MODE_COLORS[mode],
+                    marker="o", capsize=3, linewidth=1.5)
 
-    for i, mode in enumerate(MODES):
-        for j, cap in enumerate(capacities):
-            group = [r for r in results if r["mode"] == mode and r["capacity"] == cap]
-            x = j + i * bar_width
-            x_center = x + bar_width / 2
-
-            median_total = float(np.median([r["total_s"] for r in group])) if group else 0.0
-            median_pull = float(np.median([r["pull_s"] for r in group])) if group else 0.0
-            median_build = median_total - median_pull
-
-            ax.bar(x, median_pull, bar_width, bottom=0.0, color=stage_colors["pull"],
-                   label="pull" if (i == 0 and j == 0) else None,
-                   edgecolor="white", linewidth=0.5)
-            ax.bar(x, median_build, bar_width, bottom=median_pull, color=stage_colors["build"],
-                   label="build" if (i == 0 and j == 0) else None,
-                   edgecolor="white", linewidth=0.5)
-
-            add_run_dots(ax, x_center, [r["total_s"] for r in group])
-
-    bar_group_xticks(ax, n_caps, n_modes, bar_width, [f"{c}" for c in capacities])
+    ax.set_xticks(capacities)
     ax.set_xlabel("Split capacity (%)")
-    ax.set_ylabel("Time (s)")
-    ax.set_title(f"Build stages breakdown (median, n={CFG.build_n_runs} runs, dots = individual runs)")
-
-    for j in range(n_caps):
-        for i, mode in enumerate(MODES):
-            x = j + i * bar_width + bar_width / 2
-            ax.text(x, -0.02, mode, ha="center", va="top", fontsize=6, rotation=45,
-                    transform=ax.get_xaxis_transform())
-
-    ax.legend(loc="upper right", fontsize="small")
-    ax.grid(True, linestyle="--", alpha=0.5, axis="y")
+    ax.set_ylabel("Total build time (s)")
+    ax.set_title(f"Build performance (mean ± std, n={CFG.build_n_runs} runs)")
+    ax.legend(loc="best", fontsize="small")
+    ax.grid(True, linestyle="--", alpha=0.5)
     figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
     fig.tight_layout()
-    fig.subplots_adjust(bottom=0.18)
     path = build_chart_path(SCRIPT_DIR, model, base_image)
     save_figure(fig, path)
 
