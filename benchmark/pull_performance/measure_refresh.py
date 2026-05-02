@@ -23,8 +23,8 @@ from pull_performance.prepare import prepare_chunks
 from pull_performance.measure import _next_container_name
 
 EXPERIMENTS = [
-    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
+    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    # ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
     # ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),    # ~6.85 GB     ~3.4 GB
 ]
 CFG = load_config()
@@ -286,19 +286,26 @@ def measure_refresh(
 
 
 def print_results(results: dict[str, list[tuple[int, int, float, float, float]]]) -> None:
-    log.result("\n=== Refresh Performance Results (median across runs) ===")
-    log.result(f"{'k':>4}  {'mode':<20}  {'pull':>8}  {'layer_refresh':>14}  {'file_access':>12}")
-    log.result("-" * 64)
+    log.result(f"\n=== Refresh Performance Results (mean ± stddev, n={CFG.refresh_n_runs} runs) ===")
+    log.result(
+        f"{'k':>4}  {'mode':<32}  "
+        f"{'layer_refresh_mean':>18}  {'layer_refresh_std':>18}  "
+        f"{'file_access_mean':>18}  {'file_access_std':>18}"
+    )
+    log.result("-" * 116)
     for mode, entries in results.items():
         for k in range(1, CFG.refresh_n_splits + 1):
-            group = [(pull_t, lr_t, fa_t)
-                     for _, kk, pull_t, lr_t, fa_t in entries if kk == k]
+            group = [(lr_t, fa_t)
+                     for _, kk, _, lr_t, fa_t in entries if kk == k]
             if not group:
                 continue
-            med_pull = float(np.median([g[0] for g in group]))
-            med_lr = float(np.median([g[1] for g in group]))
-            med_fa = float(np.median([g[2] for g in group]))
-            log.result(f"{k:>4}  {mode:<20}  {med_pull:>8.2f}  {med_lr:>14.2f}  {med_fa:>12.2f}")
+            lr_arr = np.array([g[0] for g in group])
+            fa_arr = np.array([g[1] for g in group])
+            log.result(
+                f"{k:>4}  {mode:<32}  "
+                f"{lr_arr.mean():>18.2f}  {lr_arr.std(ddof=0):>18.2f}  "
+                f"{fa_arr.mean():>18.2f}  {fa_arr.std(ddof=0):>18.2f}"
+            )
 
 
 def save_results_csv(
@@ -332,6 +339,25 @@ def save_results_csv(
                     row[f"{slug}_layer_refresh_s"] = row[f"{slug}_file_access_s"] = ""
             rows.append(row)
 
+    # Summary rows: mean and stddev across runs, per (mode, k)
+    for stat_name, stat_fn in (("mean", np.mean), ("std", lambda a: np.std(a, ddof=0))):
+        for k in range(1, CFG.refresh_n_splits + 1):
+            row = {"run": stat_name, "n_refreshed": k}
+            for mode, entries in results.items():
+                slug = mode.replace("-", "_")
+                group = [(p, lr, fa) for _, kk, p, lr, fa in entries if kk == k]
+                if group:
+                    p_arr = np.array([g[0] for g in group])
+                    lr_arr = np.array([g[1] for g in group])
+                    fa_arr = np.array([g[2] for g in group])
+                    row[f"{slug}_pull_s"] = f"{float(stat_fn(p_arr)):.4f}"
+                    row[f"{slug}_layer_refresh_s"] = f"{float(stat_fn(lr_arr)):.4f}"
+                    row[f"{slug}_file_access_s"] = f"{float(stat_fn(fa_arr)):.4f}"
+                else:
+                    row[f"{slug}_pull_s"] = ""
+                    row[f"{slug}_layer_refresh_s"] = row[f"{slug}_file_access_s"] = ""
+            rows.append(row)
+
     write_csv(path, fieldnames, rows)
 
 
@@ -352,26 +378,34 @@ def plot(
         color = MODE_COLORS[mode]
         offset = (i - (n_modes - 1) / 2) * width
 
-        med_lr = []
-        med_fa = []
+        mean_lr = []
+        std_lr = []
+        mean_fa = []
+        std_fa = []
         for j, k in enumerate(k_values):
             lr_group = [lr for _, kk, _, lr, _ in entries if kk == k]
             fa_group = [fa for _, kk, _, _, fa in entries if kk == k]
-            med_lr.append(float(np.median(lr_group)) if lr_group else 0.0)
-            med_fa.append(float(np.median(fa_group)) if fa_group else 0.0)
+            lr_arr = np.array(lr_group) if lr_group else np.array([0.0])
+            fa_arr = np.array(fa_group) if fa_group else np.array([0.0])
+            mean_lr.append(float(lr_arr.mean()))
+            std_lr.append(float(lr_arr.std(ddof=0)))
+            mean_fa.append(float(fa_arr.mean()))
+            std_fa.append(float(fa_arr.std(ddof=0)))
             x_center = x[j] + offset + width / 2
             total_group = [lr + fa for lr, fa in zip(lr_group, fa_group)]
             add_run_dots(ax, x_center, total_group)
 
-        ax.bar(x + offset, med_lr, width, color=color,
-               edgecolor=color, linewidth=0.5, alpha=1.0, label=f"{mode} (layer refresh)")
-        ax.bar(x + offset, med_fa, width, bottom=med_lr, color=color,
-               edgecolor=color, linewidth=0.5, alpha=0.45, label=f"{mode} (file access)")
+        ax.bar(x + offset, mean_lr, width, yerr=std_lr, capsize=3,
+               color=color, edgecolor=color, linewidth=0.5, alpha=1.0,
+               label=f"{mode} (layer refresh)")
+        ax.bar(x + offset, mean_fa, width, bottom=mean_lr, yerr=std_fa, capsize=3,
+               color=color, edgecolor=color, linewidth=0.5, alpha=0.45,
+               label=f"{mode} (file access)")
 
     ax.set_xlabel("Number of layers refreshed")
     ax.set_ylabel("Access time (s)")
     ax.set_title(
-        f"refresh-layer total time (median, n={CFG.refresh_n_runs} runs, dots = individual run totals)"
+        f"refresh-layer total time (mean ± stddev, n={CFG.refresh_n_runs} runs, dots = individual run totals)"
     )
     ax.set_xticks(x)
     ax.set_xticklabels(k_values)

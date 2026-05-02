@@ -17,3 +17,4 @@ insecure = true
 [fuse]
 passthrough = true
 merge_worker_count = 10
+merge_buffer_size = 419430400
