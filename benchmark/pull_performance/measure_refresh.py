@@ -104,7 +104,7 @@ def _build_version(
     target = _build_name_refresh(source_image, cfg, mode, version_idx)
     base = _base_image(source_image, cfg, mode)
 
-    write_2dfs_json(chunk_paths, SCRIPT_DIR)
+    write_2dfs_json([[p] for p in chunk_paths], SCRIPT_DIR)
     cmd = tdfs_cmd(cfg, SCRIPT_DIR) + [
         "build", "--platforms", "linux/amd64",
         *_extra_flags(mode),

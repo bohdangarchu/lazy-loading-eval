@@ -41,7 +41,7 @@ def _build_and_push_2dfs_image(
     extra_flags: list[str],
     label: str,
 ) -> None:
-    write_2dfs_json(chunk_paths, SCRIPT_DIR)
+    write_2dfs_json([[p] for p in chunk_paths], SCRIPT_DIR)
     cmd = tdfs_cmd(cfg, SCRIPT_DIR) + [
         "build",
         "--platforms", "linux/amd64",
@@ -92,7 +92,7 @@ def _build_and_push_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, 
 
 
 def _build_and_push_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
-    create_stargz_dockerfile(chunk_paths, stargz_base_image(source_image, cfg), SCRIPT_DIR)
+    create_stargz_dockerfile([[p] for p in chunk_paths], stargz_base_image(source_image, cfg), SCRIPT_DIR)
     target = build_name_stargz(source_image, cfg)
 
     # force-compression=true makes sure the split layers are converted to stargz
@@ -112,7 +112,7 @@ def _build_and_push_stargz(chunk_paths: list[str], source_image: str, cfg: EnvCo
 
 def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_image: str, cfg: EnvConfig) -> None:
     for r in base_splits:
-        create_base_dockerfile(chunk_paths[:r], plain_base_image(source_image, cfg), SCRIPT_DIR)
+        create_base_dockerfile([[p] for p in chunk_paths[:r]], plain_base_image(source_image, cfg), SCRIPT_DIR)
         target = build_name_base(source_image, cfg, r)
 
         cmd = [

@@ -29,15 +29,21 @@ from build_performance.prepare import prepare, clear_chunks
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXPERIMENTS = [
-    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~1.4 GB     ~700 MB
-    ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),                      # ~3.09 GB     ~3.4 GB
-    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
+    ("openai-community/gpt2",        "docker.io/library/python:3.12-slim", 12),  # ~0.5GB     ~50 MB
+    # ("facebook/opt-350m",            "docker.io/tensorflow/tensorflow",    12),  # ~1.4 GB     ~700 MB
+    # ("Qwen/Qwen2-1.5B",              "docker.io/ollama/ollama",            12),  # ~3.09 GB     ~3.4 GB
+    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama",           12),  # ~6.0 GB     ~3.4 GB
 ]
 CFG = load_config()
 VERBOSE = True
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
-# MODES = ["2dfs-stargz"]
+CAPACITIES = [0, 25, 50, 75, 100]
+
+
+def num_layers_for_capacity(capacity: int, max_allowed_splits: int) -> int:
+    if capacity <= 0:
+        return 1
+    return max(1, max_allowed_splits * capacity // 100)
 
 
 class ResourceMonitor:
@@ -97,29 +103,31 @@ def _run_one(mode: str, n: int, cfg, source_image: str) -> BuildResult:
 
 
 def measure_builds(
-    model: str, max_splits: int, source_image: str, cfg=CFG,
+    model: str, max_allowed_splits: int, source_image: str, cfg=CFG,
     monitor: ResourceMonitor | None = None,
 ) -> list[dict]:
     results: list[dict] = []
 
     for run in range(cfg.build_n_runs):
         log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{cfg.build_n_runs} ===")
-        for n in range(1, max_splits + 1):
-            log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing {n} split(s) ===")
+        for cap in CAPACITIES:
+            num_layers = num_layers_for_capacity(cap, max_allowed_splits)
+            log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing capacity={cap}% ({num_layers} layer(s)) ===")
             clear_chunks()
-            prepare(model, n, source_image, cfg)
+            prepare(model, max_allowed_splits, num_layers, source_image, cfg)
             for i, mode in enumerate(MODES):
                 monitor_key = mode.replace("-", "_")
                 if monitor:
-                    monitor.set_mode(f"{monitor_key}_splits_{n}_run_{run}")
-                log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === {mode}: {n} split(s) ===")
+                    monitor.set_mode(f"{monitor_key}_cap_{cap}_run_{run}")
+                log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === {mode}: capacity={cap}% ({num_layers} layer(s)) ===")
                 _clear_cache(mode, cfg)
-                br = _run_one(mode, n, cfg, source_image)
+                br = _run_one(mode, num_layers, cfg, source_image)
                 if monitor:
                     monitor.set_mode("idle")
                 results.append({
                     "run": run,
-                    "splits": n,
+                    "capacity": cap,
+                    "num_layers": num_layers,
                     "mode": mode,
                     "total_s": br.total_s,
                     "pull_s": br.pull_s,
@@ -128,7 +136,7 @@ def measure_builds(
                     "export_s": br.export_s,
                 })
 
-                is_last = (i == len(MODES) - 1) and (n == max_splits) and (run == cfg.build_n_runs - 1)
+                is_last = (i == len(MODES) - 1) and (cap == CAPACITIES[-1]) and (run == cfg.build_n_runs - 1)
                 if not is_last:
                     log.info(f"\nSleeping {cfg.build_cooldown}s before next...")
                     time.sleep(cfg.build_cooldown)
@@ -139,7 +147,7 @@ def measure_builds(
 def save_csv(results: list[dict], model: str, base_image: str) -> None:
     output_path = build_csv_path(SCRIPT_DIR, model, base_image)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fieldnames = ["run", "splits", "mode", "total_s", "pull_s", "ctx_s", "build_s", "export_s"]
+    fieldnames = ["run", "capacity", "num_layers", "mode", "total_s", "pull_s", "ctx_s", "build_s", "export_s"]
     rows = [{
         **row,
         "total_s": f"{row['total_s']:.4f}",
@@ -151,20 +159,20 @@ def save_csv(results: list[dict], model: str, base_image: str) -> None:
     write_csv(output_path, fieldnames, rows)
 
 
-def plot(results: list[dict], model: str, base_image: str) -> None:
-    splits = sorted(set(r["splits"] for r in results))
+def plot(results: list[dict], model: str, base_image: str, max_allowed_splits: int) -> None:
+    capacities = sorted(set(r["capacity"] for r in results))
     os.makedirs(build_charts_dir(SCRIPT_DIR), exist_ok=True)
 
     n_modes = len(MODES)
-    n_splits = len(splits)
+    n_caps = len(capacities)
     bar_width = 0.8 / n_modes
     stage_colors = {"pull": "#4e79a7", "build": "#e15759"}
 
-    fig, ax = plt.subplots(figsize=(max(8, n_splits * 3), 5))
+    fig, ax = plt.subplots(figsize=(max(8, n_caps * 3), 5))
 
     for i, mode in enumerate(MODES):
-        for j, n in enumerate(splits):
-            group = [r for r in results if r["mode"] == mode and r["splits"] == n]
+        for j, cap in enumerate(capacities):
+            group = [r for r in results if r["mode"] == mode and r["capacity"] == cap]
             x = j + i * bar_width
             x_center = x + bar_width / 2
 
@@ -179,15 +187,14 @@ def plot(results: list[dict], model: str, base_image: str) -> None:
                    label="build" if (i == 0 and j == 0) else None,
                    edgecolor="white", linewidth=0.5)
 
-            # overlay individual run dots at total_s
             add_run_dots(ax, x_center, [r["total_s"] for r in group])
 
-    bar_group_xticks(ax, n_splits, n_modes, bar_width, [str(n) for n in splits])
-    ax.set_xlabel("Number of splits")
+    bar_group_xticks(ax, n_caps, n_modes, bar_width, [f"{c}" for c in capacities])
+    ax.set_xlabel("Split capacity (%)")
     ax.set_ylabel("Time (s)")
     ax.set_title(f"Build stages breakdown (median, n={CFG.build_n_runs} runs, dots = individual runs)")
 
-    for j in range(n_splits):
+    for j in range(n_caps):
         for i, mode in enumerate(MODES):
             x = j + i * bar_width + bar_width / 2
             ax.text(x, -0.02, mode, ha="center", va="top", fontsize=6, rotation=45,
@@ -195,18 +202,17 @@ def plot(results: list[dict], model: str, base_image: str) -> None:
 
     ax.legend(loc="upper right", fontsize="small")
     ax.grid(True, linestyle="--", alpha=0.5, axis="y")
-    figure_footer(fig, model, base_image)
+    figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.18)
-    path = build_chart_path(SCRIPT_DIR, model, base_image, n_splits)
+    path = build_chart_path(SCRIPT_DIR, model, base_image)
     save_figure(fig, path)
 
 
 def save_resource_csv(
-    samples: list[tuple[int, float, float, str]], model: str, max_splits: int,
-    base_image: str,
+    samples: list[tuple[int, float, float, str]], model: str, base_image: str,
 ) -> None:
-    output_path = resource_csv_path(SCRIPT_DIR, model, base_image, max_splits)
+    output_path = resource_csv_path(SCRIPT_DIR, model, base_image)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -217,8 +223,8 @@ def save_resource_csv(
 
 
 def plot_resource(
-    samples: list[tuple[int, float, float, str]], model: str, max_splits: int,
-    base_image: str,
+    samples: list[tuple[int, float, float, str]], model: str, base_image: str,
+    max_allowed_splits: int,
 ) -> None:
     if not samples:
         return
@@ -227,101 +233,98 @@ def plot_resource(
     colors = {mode.replace("-", "_"): MODE_COLORS[mode] for mode in MODES}
     labels = {mode.replace("-", "_"): mode for mode in MODES}
 
-    # Group samples by (base_mode, n_splits, run) → list of cpu/mem values
-    cpu_by_split_run: dict[int, dict[str, dict[int, list[float]]]] = defaultdict(
+    cpu_by_cap_run: dict[int, dict[str, dict[int, list[float]]]] = defaultdict(
         lambda: defaultdict(lambda: defaultdict(list))
     )
-    mem_by_split_run: dict[int, dict[str, dict[int, list[float]]]] = defaultdict(
+    mem_by_cap_run: dict[int, dict[str, dict[int, list[float]]]] = defaultdict(
         lambda: defaultdict(lambda: defaultdict(list))
     )
 
     for _, cpu, mem, mode in samples:
         if mode == "idle":
             continue
-        # mode format: "{base}_splits_{n}_run_{run}"
+        # mode format: "{base}_cap_{cap}_run_{run}"
         run_parts = mode.rsplit("_run_", 1)
         if len(run_parts) != 2 or not run_parts[1].isdigit():
             continue
         run = int(run_parts[1])
-        split_parts = run_parts[0].rsplit("_splits_", 1)
-        if len(split_parts) != 2 or not split_parts[1].isdigit():
+        cap_parts = run_parts[0].rsplit("_cap_", 1)
+        if len(cap_parts) != 2 or not cap_parts[1].isdigit():
             continue
-        base = split_parts[0]
-        n = int(split_parts[1])
-        cpu_by_split_run[n][base][run].append(cpu)
-        mem_by_split_run[n][base][run].append(mem)
+        base = cap_parts[0]
+        cap = int(cap_parts[1])
+        cpu_by_cap_run[cap][base][run].append(cpu)
+        mem_by_cap_run[cap][base][run].append(mem)
 
-    split_counts = sorted(cpu_by_split_run.keys())
-    if not split_counts:
+    capacities = sorted(cpu_by_cap_run.keys())
+    if not capacities:
         return
 
-    x_labels = [str(n) for n in split_counts]
-    x = range(len(split_counts))
+    x_labels = [f"{c}" for c in capacities]
+    x = range(len(capacities))
     n_modes = len(monitor_keys)
     bar_width = 0.8 / n_modes
 
-    fig, (ax_cpu, ax_mem) = plt.subplots(2, 1, figsize=(max(8, len(split_counts) * 2), 8))
+    fig, (ax_cpu, ax_mem) = plt.subplots(2, 1, figsize=(max(8, len(capacities) * 2), 8))
 
     for i, mk in enumerate(monitor_keys):
-        cpu_run_medians_by_split = []
-        mem_run_medians_by_split = []
-        for n in split_counts:
+        cpu_run_medians_by_cap = []
+        mem_run_medians_by_cap = []
+        for cap in capacities:
             run_cpu_medians = [
                 float(np.median(vals))
-                for vals in cpu_by_split_run[n].get(mk, {}).values()
+                for vals in cpu_by_cap_run[cap].get(mk, {}).values()
                 if vals
             ]
             run_mem_medians = [
                 float(np.median(vals))
-                for vals in mem_by_split_run[n].get(mk, {}).values()
+                for vals in mem_by_cap_run[cap].get(mk, {}).values()
                 if vals
             ]
-            cpu_run_medians_by_split.append(run_cpu_medians)
-            mem_run_medians_by_split.append(run_mem_medians)
+            cpu_run_medians_by_cap.append(run_cpu_medians)
+            mem_run_medians_by_cap.append(run_mem_medians)
 
         offsets = [pos + i * bar_width for pos in x]
-        cpu_bar_heights = [float(np.median(v)) if v else 0.0 for v in cpu_run_medians_by_split]
-        mem_bar_heights = [float(np.median(v)) if v else 0.0 for v in mem_run_medians_by_split]
+        cpu_bar_heights = [float(np.median(v)) if v else 0.0 for v in cpu_run_medians_by_cap]
+        mem_bar_heights = [float(np.median(v)) if v else 0.0 for v in mem_run_medians_by_cap]
 
         ax_cpu.bar(offsets, cpu_bar_heights, bar_width, label=labels[mk],
                    color=colors[mk], edgecolor="black", linewidth=0.5)
         ax_mem.bar(offsets, mem_bar_heights, bar_width, label=labels[mk],
                    color=colors[mk], edgecolor="black", linewidth=0.5)
 
-        # overlay individual run dots
-        for off, run_vals_cpu, run_vals_mem in zip(offsets, cpu_run_medians_by_split, mem_run_medians_by_split):
+        for off, run_vals_cpu, run_vals_mem in zip(offsets, cpu_run_medians_by_cap, mem_run_medians_by_cap):
             x_center = off + bar_width / 2
             add_run_dots(ax_cpu, x_center, run_vals_cpu)
             add_run_dots(ax_mem, x_center, run_vals_mem)
 
-    bar_group_xticks(ax_cpu, len(split_counts), n_modes, bar_width, x_labels)
+    bar_group_xticks(ax_cpu, len(capacities), n_modes, bar_width, x_labels)
     ax_cpu.set_ylabel("CPU Usage (%)")
     ax_cpu.set_title(f"Resource usage during builds (median, n={CFG.build_n_runs} runs, dots = individual runs)")
     ax_cpu.legend(fontsize="small")
     ax_cpu.grid(True, linestyle="--", alpha=0.5, axis="y")
 
-    bar_group_xticks(ax_mem, len(split_counts), n_modes, bar_width, x_labels)
-    ax_mem.set_xlabel("Number of splits")
+    bar_group_xticks(ax_mem, len(capacities), n_modes, bar_width, x_labels)
+    ax_mem.set_xlabel("Split capacity (%)")
     ax_mem.set_ylabel("Memory Usage (MB)")
     ax_mem.legend(fontsize="small")
     ax_mem.grid(True, linestyle="--", alpha=0.5, axis="y")
 
-    figure_footer(fig, model, base_image)
+    figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
 
-    output_path = resource_chart_path(SCRIPT_DIR, model, base_image, max_splits)
+    output_path = resource_chart_path(SCRIPT_DIR, model, base_image)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout()
     save_figure(fig, output_path)
 
 
 def plot_resource_individual(
-    samples: list[tuple[int, float, float, str]], model: str, max_splits: int,
-    base_image: str, execution_ts: str,
+    samples: list[tuple[int, float, float, str]], model: str, base_image: str,
+    execution_ts: str, max_allowed_splits: int,
 ) -> None:
     if not samples:
         return
 
-    # Collect time-series per (mode_key, n_splits, run)
     series: dict[tuple[str, int, int], list[tuple[int, float, float]]] = defaultdict(list)
 
     for ts_ms, cpu, mem, mode in samples:
@@ -331,12 +334,12 @@ def plot_resource_individual(
         if len(run_parts) != 2 or not run_parts[1].isdigit():
             continue
         run = int(run_parts[1])
-        split_parts = run_parts[0].rsplit("_splits_", 1)
-        if len(split_parts) != 2 or not split_parts[1].isdigit():
+        cap_parts = run_parts[0].rsplit("_cap_", 1)
+        if len(cap_parts) != 2 or not cap_parts[1].isdigit():
             continue
-        base = split_parts[0]
-        n = int(split_parts[1])
-        series[(base, n, run)].append((ts_ms, cpu, mem))
+        base = cap_parts[0]
+        cap = int(cap_parts[1])
+        series[(base, cap, run)].append((ts_ms, cpu, mem))
 
     mode_label = {mode.replace("-", "_"): mode for mode in MODES}
     model_slug = model.replace("/", "--")
@@ -346,7 +349,7 @@ def plot_resource_individual(
     os.makedirs(cpu_dir, exist_ok=True)
     os.makedirs(ram_dir, exist_ok=True)
 
-    for (mk, n, run), points in sorted(series.items()):
+    for (mk, cap, run), points in sorted(series.items()):
         points.sort(key=lambda p: p[0])
         t0 = points[0][0]
         t_sec = [(p[0] - t0) / 1000.0 for p in points]
@@ -354,20 +357,19 @@ def plot_resource_individual(
         mem_vals = [p[2] for p in points]
 
         mode_name = mode_label.get(mk, mk)
-        file_stem = f"{model_slug}_{img_slug}_{mk}_run{run + 1}_splits{n}"
+        file_stem = f"{model_slug}_{img_slug}_{mk}_run{run + 1}_cap{cap}"
 
         def _add_run_footer(fig) -> None:
-            figure_footer(fig, model, base_image)
+            figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
             fig.text(
                 0.99, 0.01,
-                f"mode: {mode_name}  |  run: {run + 1}  |  splits: {n}",
+                f"mode: {mode_name}  |  run: {run + 1}  |  capacity: {cap}%",
                 fontsize=8,
                 verticalalignment="bottom",
                 horizontalalignment="right",
                 family="monospace",
             )
 
-        # CPU chart
         fig, ax = plt.subplots(figsize=(8, 3))
         ax.plot(t_sec, cpu_vals, color=MODE_COLORS.get(mode_name, "#888888"), linewidth=1)
         ax.set_xlabel("Time (s)")
@@ -379,7 +381,6 @@ def plot_resource_individual(
         fig.subplots_adjust(bottom=0.18)
         save_figure(fig, os.path.join(cpu_dir, f"{file_stem}.png"))
 
-        # RAM chart
         fig, ax = plt.subplots(figsize=(8, 3))
         ax.plot(t_sec, mem_vals, color=MODE_COLORS.get(mode_name, "#888888"), linewidth=1)
         ax.set_xlabel("Time (s)")
@@ -396,8 +397,8 @@ def main():
     log.set_verbose(VERBOSE)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    for model, base_image in EXPERIMENTS:
-        log.result(f"\n===== Experiment: {model} / {base_image} =====")
+    for model, base_image, max_allowed_splits in EXPERIMENTS:
+        log.result(f"\n===== Experiment: {model} / {base_image} (max_allowed_splits={max_allowed_splits}) =====")
         prepare_local_registry(base_image, registry(CFG))
 
         monitor = None
@@ -405,29 +406,29 @@ def main():
             monitor = ResourceMonitor()
             monitor.start()
 
-        results = measure_builds(model, CFG.build_max_splits, base_image, CFG, monitor=monitor)
+        results = measure_builds(model, max_allowed_splits, base_image, CFG, monitor=monitor)
 
         if monitor:
             samples = monitor.stop()
-            save_resource_csv(samples, model, CFG.build_max_splits, base_image)
-            plot_resource(samples, model, CFG.build_max_splits, base_image)
-            plot_resource_individual(samples, model, CFG.build_max_splits, base_image, execution_ts)
+            save_resource_csv(samples, model, base_image)
+            plot_resource(samples, model, base_image, max_allowed_splits)
+            plot_resource_individual(samples, model, base_image, execution_ts, max_allowed_splits)
 
-        splits = sorted(set(r["splits"] for r in results))
+        capacities = sorted(set(r["capacity"] for r in results))
         log.result("\n=== Comparison (median across runs) ===")
         col = 16
         header_modes = "  ".join(f"{m:>{col}}" for m in MODES)
-        log.result(f"{'splits':>8}  {header_modes}")
-        log.result("-" * (10 + (col + 2) * len(MODES)))
-        for n in splits:
+        log.result(f"{'capacity':>10}  {header_modes}")
+        log.result("-" * (12 + (col + 2) * len(MODES)))
+        for cap in capacities:
             row_vals = []
             for m in MODES:
-                group = [r["total_s"] for r in results if r["mode"] == m and r["splits"] == n]
+                group = [r["total_s"] for r in results if r["mode"] == m and r["capacity"] == cap]
                 row_vals.append(f"{np.median(group):>{col}.2f}" if group else f"{'N/A':>{col}}")
-            log.result(f"{n:>8}  {'  '.join(row_vals)}")
+            log.result(f"{cap:>9}%  {'  '.join(row_vals)}")
 
         save_csv(results, model, base_image)
-        plot(results, model, base_image)
+        plot(results, model, base_image, max_allowed_splits)
 
 
 if __name__ == "__main__":

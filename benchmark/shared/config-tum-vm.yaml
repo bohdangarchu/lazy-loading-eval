@@ -18,14 +18,11 @@ build_cooldown: 5
 pull_cooldown: 5
 
 # build_performance/measure.py
-build_max_splits: 10
 build_n_runs: 3
 build_with_resource: true
 
 # build_performance/measure_rebuild.py
-rebuild_n_splits: 10
 rebuild_n_runs: 3
-rebuild_r_values: [2, 4, 6, 8, 10]
 
 # pull_performance/measure.py
 pull_n_splits: 10

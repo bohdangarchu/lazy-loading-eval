@@ -70,7 +70,7 @@ def _pull_name(source_image: str, cfg, label: str, n: int) -> str:
 
 
 def _prepare_option(chunk_paths: list[str], source_image: str, cfg, flags: str, label: str) -> None:
-    write_2dfs_json(chunk_paths, SCRIPT_DIR)
+    write_2dfs_json([[p] for p in chunk_paths], SCRIPT_DIR)
     target = _build_name(source_image, cfg, label)
 
     if MODE == "2dfs-stargz":

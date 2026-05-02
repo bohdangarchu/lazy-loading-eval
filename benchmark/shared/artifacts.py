@@ -15,15 +15,33 @@ def mutate_chunk(path: str) -> None:
         data.tofile(f)
 
 
-def write_2dfs_json(chunk_paths: list[str], work_dir: str) -> None:
+def chunks_to_groups(chunk_paths: list[str], num_layers: int) -> list[list[str]]:
+    # Partition `chunk_paths` into `num_layers` consecutive groups for split-capacity
+    # benchmarks. When len(chunks) is not divisible by num_layers (only the 75%-
+    # capacity case in the build sweep, e.g. 12 chunks → 9 layers), front-loaded
+    # np.array_split semantics apply: the first `len % num_layers` groups carry
+    # ceil(len/num_layers) chunks each, the rest carry floor. Total bytes per build
+    # are unchanged; only intra-layer chunk counts vary.
+    n = len(chunk_paths)
+    base, extra = divmod(n, num_layers)
+    groups: list[list[str]] = []
+    idx = 0
+    for i in range(num_layers):
+        size = base + (1 if i < extra else 0)
+        groups.append(chunk_paths[idx:idx + size])
+        idx += size
+    return groups
+
+
+def write_2dfs_json(groups: list[list[str]], work_dir: str) -> None:
     allotments = [
         {
-            "src": os.path.relpath(p, work_dir),
-            "dst": f"/chunk{i + 1}.bin",
+            "src": [os.path.relpath(p, work_dir) for p in group],
+            "dst": [f"/{os.path.basename(p)}" for p in group],
             "row": 0,
             "col": i,
         }
-        for i, p in enumerate(chunk_paths)
+        for i, group in enumerate(groups)
     ]
     data = {"allotments": allotments}
     out_path = paths.tdfs_json_path(work_dir)
@@ -31,23 +49,21 @@ def write_2dfs_json(chunk_paths: list[str], work_dir: str) -> None:
         json.dump(data, f, indent=4)
 
 
-def create_stargz_dockerfile(chunk_paths: list[str], base_image: str, work_dir: str) -> None:
+def create_stargz_dockerfile(groups: list[list[str]], base_image: str, work_dir: str) -> None:
     lines = [f"FROM {base_image}"]
-    for p in chunk_paths:
-        rel = os.path.relpath(p, work_dir)
-        name = os.path.basename(p)
-        lines.append(f"COPY {rel} /{name}")
+    for group in groups:
+        rels = " ".join(os.path.relpath(p, work_dir) for p in group)
+        lines.append(f"COPY {rels} /")
     out_path = paths.stargz_dockerfile_path(work_dir)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
 
-def create_base_dockerfile(chunk_paths: list[str], base_image: str, work_dir: str) -> None:
+def create_base_dockerfile(groups: list[list[str]], base_image: str, work_dir: str) -> None:
     lines = [f"FROM {base_image}"]
-    for p in chunk_paths:
-        rel = os.path.relpath(p, work_dir)
-        name = os.path.basename(p)
-        lines.append(f"COPY {rel} /{name}")
+    for group in groups:
+        rels = " ".join(os.path.relpath(p, work_dir) for p in group)
+        lines.append(f"COPY {rels} /")
     out_path = paths.base_dockerfile_path(work_dir)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

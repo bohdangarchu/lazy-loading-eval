@@ -76,20 +76,20 @@ def resource_ram_charts_run_dir(base_dir: str, execution_ts: str) -> str:
 def build_csv_path(base_dir: str, model: str, base_image: str) -> str:
     return os.path.join(build_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_{now_ts()}.csv")
 
-def build_chart_path(base_dir: str, model: str, base_image: str, n_splits: int) -> str:
-    return os.path.join(build_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_stages_{n_splits}_{now_ts()}.png")
+def build_chart_path(base_dir: str, model: str, base_image: str) -> str:
+    return os.path.join(build_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_stages_{now_ts()}.png")
 
-def resource_csv_path(base_dir: str, model: str, base_image: str, max_splits: int) -> str:
-    return os.path.join(resource_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_resource_splits_{max_splits}_{now_ts()}.csv")
+def resource_csv_path(base_dir: str, model: str, base_image: str) -> str:
+    return os.path.join(resource_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_resource_{now_ts()}.csv")
 
-def resource_chart_path(base_dir: str, model: str, base_image: str, max_splits: int) -> str:
-    return os.path.join(resource_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_resource_splits_{max_splits}_{now_ts()}.png")
+def resource_chart_path(base_dir: str, model: str, base_image: str) -> str:
+    return os.path.join(resource_charts_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_resource_{now_ts()}.png")
 
-def rebuild_csv_path(base_dir: str, model: str, base_image: str, n: int, execution_ts: str) -> str:
-    return os.path.join(rebuild_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild_n{n}.csv")
+def rebuild_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(rebuild_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild.csv")
 
-def rebuild_chart_path(base_dir: str, model: str, base_image: str, n: int, execution_ts: str) -> str:
-    return os.path.join(rebuild_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild_n{n}.png")
+def rebuild_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(rebuild_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild.png")
 
 def compression_csv_path(base_dir: str, model: str, base_image: str, max_splits: int) -> str:
     return os.path.join(compression_results_dir(base_dir), f"{_model_slug(model)}_{_image_slug(base_image)}_splits_{max_splits}_{now_ts()}.csv")

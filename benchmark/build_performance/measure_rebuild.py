@@ -22,16 +22,17 @@ from build_performance.prepare import prepare
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXPERIMENTS = [
-    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    ("facebook/opt-350m", "docker.io/tensorflow/tensorflow"),                # ~1.4 GB     ~700 MB
-    ("Qwen/Qwen2-1.5B", "docker.io/ollama/ollama"),                      # ~3.09 GB     ~3.4 GB
-    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
+    ("openai-community/gpt2",        "docker.io/library/python:3.12-slim", 12),  # ~0.5GB     ~50 MB
+    ("facebook/opt-350m",            "docker.io/tensorflow/tensorflow",    12),  # ~1.4 GB     ~700 MB
+    ("Qwen/Qwen2-1.5B",              "docker.io/ollama/ollama",            12),  # ~3.09 GB     ~3.4 GB
+    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama",           12),  # ~6.0 GB     ~3.4 GB
 ]
 CFG = load_config()
 VERBOSE = True
 DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
-# MODES = ["2dfs-stargz"]
+MUTATION_PERCENTS = [25, 50, 75, 100]
+
 
 def make_methods(base_image: str):
     all_methods = [
@@ -50,38 +51,36 @@ def get_chunks_to_mutate(chunk_paths: list[str], r: int, direction: str) -> list
     return chunk_paths[:r]
 
 
-def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
+def measure_rebuilds(chunk_paths: list[str], methods: list, max_allowed_splits: int) -> list[dict]:
     results = []
 
     for run in range(CFG.rebuild_n_runs):
         log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{CFG.rebuild_n_runs} ===")
-        for r in CFG.rebuild_r_values:
+        for pct in MUTATION_PERCENTS:
+            r = max(1, max_allowed_splits * pct // 100)
             for direction in DIRECTIONS:
                 targets = get_chunks_to_mutate(chunk_paths, r, direction)
 
                 for method_name, build_fn, clear_fn in methods:
                     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
-                         f"=== r={r}, {direction}, {method_name} ===")
+                         f"=== mutation={pct}% (r={r}), {direction}, {method_name} ===")
 
-                    # clean slate: clear cache, build v1
                     t0 = time.time()
                     clear_fn()
                     log.info(f"Cache clear took {time.time() - t0:.2f}s")
-                    build_fn(CFG.rebuild_n_splits)
+                    build_fn(max_allowed_splits)
 
-                    # mutate r chunks
                     for path in targets:
                         mutate_chunk(path)
 
-                    # rebuild v2 (timed)
-                    br: BuildResult = build_fn(CFG.rebuild_n_splits)
+                    br: BuildResult = build_fn(max_allowed_splits)
 
-                    # restore chunks
                     for path in targets:
                         mutate_chunk(path)
 
                     results.append({
                         "run": run,
+                        "mutation_pct": pct,
                         "r": r,
                         "direction": direction,
                         "method": method_name,
@@ -99,10 +98,10 @@ def measure_rebuilds(chunk_paths: list[str], methods: list) -> list[dict]:
     return results
 
 
-def save_csv(results: list[dict], model: str, n: int, base_image: str, execution_ts: str) -> None:
-    path = rebuild_csv_path(SCRIPT_DIR, model, base_image, n, execution_ts)
+def save_csv(results: list[dict], model: str, base_image: str, execution_ts: str) -> None:
+    path = rebuild_csv_path(SCRIPT_DIR, model, base_image, execution_ts)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    fieldnames = ["run", "r", "direction", "method", "rebuild_s",
+    fieldnames = ["run", "mutation_pct", "r", "direction", "method", "rebuild_s",
                   "pull_s", "context_transfer_s", "build_s", "export_s"]
     rows = [{
         **row,
@@ -115,7 +114,7 @@ def save_csv(results: list[dict], model: str, n: int, base_image: str, execution
     write_csv(path, fieldnames, rows)
 
 
-def plot(results: list[dict], model: str, n: int, base_image: str, execution_ts: str) -> None:
+def plot(results: list[dict], model: str, base_image: str, max_allowed_splits: int, execution_ts: str) -> None:
     os.makedirs(rebuild_charts_run_dir(SCRIPT_DIR, execution_ts), exist_ok=True)
 
     n_modes = len(MODES)
@@ -128,10 +127,10 @@ def plot(results: list[dict], model: str, n: int, base_image: str, execution_ts:
         (ax_btt, "bottom_to_top", "Bottom to Top"),
     ]:
         for i, mode in enumerate(MODES):
-            for j, r in enumerate(CFG.rebuild_r_values):
+            for j, pct in enumerate(MUTATION_PERCENTS):
                 group = [
                     row for row in results
-                    if row["direction"] == direction and row["method"] == mode and row["r"] == r
+                    if row["direction"] == direction and row["method"] == mode and row["mutation_pct"] == pct
                 ]
                 rebuild_vals = [row["rebuild_s"] - row["pull_s"] for row in group]
                 if not rebuild_vals:
@@ -146,18 +145,18 @@ def plot(results: list[dict], model: str, n: int, base_image: str, execution_ts:
 
                 add_run_dots(ax, x_center, rebuild_vals)
 
-        bar_group_xticks(ax, len(CFG.rebuild_r_values), n_modes, bar_width, [str(r) for r in CFG.rebuild_r_values])
-        ax.set_xlabel("Chunks mutated (r)")
+        bar_group_xticks(ax, len(MUTATION_PERCENTS), n_modes, bar_width, [f"{p}" for p in MUTATION_PERCENTS])
+        ax.set_xlabel("% of splits updated")
         ax.set_title(f"{title}")
         ax.legend(fontsize="small")
         ax.grid(True, linestyle="--", alpha=0.5, axis="y")
 
     ax_ttb.set_ylabel("Rebuild time (s)")
-    fig.suptitle(f"Incremental rebuild performance (n={n}, median, {CFG.rebuild_n_runs} runs, dots = individual runs)")
-    figure_footer(fig, model, base_image)
+    fig.suptitle(f"Incremental rebuild performance (median, {CFG.rebuild_n_runs} runs, dots = individual runs)")
+    figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
     fig.tight_layout()
 
-    path = rebuild_chart_path(SCRIPT_DIR, model, base_image, n, execution_ts)
+    path = rebuild_chart_path(SCRIPT_DIR, model, base_image, execution_ts)
     save_figure(fig, path)
 
 
@@ -165,24 +164,24 @@ def main():
     log.set_verbose(VERBOSE)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    for model, base_image in EXPERIMENTS:
-        log.result(f"\n===== Experiment: {model} / {base_image} =====")
+    for model, base_image, max_allowed_splits in EXPERIMENTS:
+        log.result(f"\n===== Experiment: {model} / {base_image} (max_allowed_splits={max_allowed_splits}) =====")
         prepare_local_registry(base_image, registry(CFG))
 
         methods = make_methods(base_image)
 
-        log.info(f"Preparing model with {CFG.rebuild_n_splits} splits...")
-        chunk_paths = prepare(model, CFG.rebuild_n_splits, base_image, CFG)
+        log.info(f"Preparing model at full capacity ({max_allowed_splits} layers)...")
+        chunk_paths = prepare(model, max_allowed_splits, max_allowed_splits, base_image, CFG)
 
-        results = measure_rebuilds(chunk_paths, methods)
+        results = measure_rebuilds(chunk_paths, methods, max_allowed_splits)
 
-        save_csv(results, model, CFG.rebuild_n_splits, base_image, execution_ts)
-        plot(results, model, CFG.rebuild_n_splits, base_image, execution_ts)
+        save_csv(results, model, base_image, execution_ts)
+        plot(results, model, base_image, max_allowed_splits, execution_ts)
 
-        log.result(f"\n{'run':>4}  {'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild':>8}  {'pull':>6}  {'ctx':>6}  {'build':>6}  {'export':>6}")
-        log.result("-" * 84)
+        log.result(f"\n{'run':>4}  {'pct':>4}  {'r':>4}  {'direction':<16}  {'method':<14}  {'rebuild':>8}  {'pull':>6}  {'ctx':>6}  {'build':>6}  {'export':>6}")
+        log.result("-" * 92)
         for row in results:
-            log.result(f"{row['run']:>4}  {row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  "
+            log.result(f"{row['run']:>4}  {row['mutation_pct']:>3}%  {row['r']:>4}  {row['direction']:<16}  {row['method']:<14}  "
                        f"{row['rebuild_s']:>8.2f}  {row['pull_s']:>6.2f}  {row['context_transfer_s']:>6.2f}  "
                        f"{row['build_s']:>6.2f}  {row['export_s']:>6.2f}")
 

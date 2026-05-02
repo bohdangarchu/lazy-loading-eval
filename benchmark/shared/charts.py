@@ -9,11 +9,17 @@ MODE_COLORS: dict[str, str] = {
 }
 
 
-def figure_footer(fig, model: str, base_image: str, fontsize: int = 8) -> None:
+def figure_footer(
+    fig, model: str, base_image: str, fontsize: int = 8,
+    max_allowed_splits: int | None = None,
+) -> None:
     """Stamp bottom-left corner of a figure with model/image metadata."""
+    text = f"model: {model}\nbase image: {base_image}"
+    if max_allowed_splits is not None:
+        text += f"\nmax_allowed_splits: {max_allowed_splits}"
     fig.text(
         0.01, 0.01,
-        f"model: {model}\nbase image: {base_image}",
+        text,
         fontsize=fontsize,
         verticalalignment="bottom",
         family="monospace",
