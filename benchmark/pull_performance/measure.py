@@ -10,7 +10,7 @@ import matplotlib.patches as mpatches
 import numpy as np
 
 from shared import log
-from shared.charts import MODE_COLORS, figure_footer, add_run_dots, save_figure
+from shared.charts import MODE_COLORS, figure_footer, save_figure
 from pull_performance.paths import pull_csv_path, pull_chart_path, pull_artifacts_dir
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
@@ -253,10 +253,10 @@ def measure(
 
 def print_results(results: dict[str, list[tuple[int, int, float, float]]]) -> None:
     pcts = sorted(set(p for entries in results.values() for _, p, _, _ in entries))
-    col = 18
+    col = 26
     header_modes = "  ".join(f"{m:>{col}}" for m in results)
-    subheader = "  ".join(f"{'pull/run/total':>{col}}" for _ in results)
-    log.result("\n=== Pull + Run Performance Results (median across runs) ===")
+    subheader = "  ".join(f"{'pull(m±s) run(m±s)':>{col}}" for _ in results)
+    log.result(f"\n=== Pull + Run Performance Results (mean ± stddev, n={CFG.pull_n_runs} runs) ===")
     log.result(f"{'pct':>8}  {header_modes}")
     log.result(f"{'':>8}  {subheader}")
     log.result("-" * (10 + (col + 2) * len(results)))
@@ -265,9 +265,12 @@ def print_results(results: dict[str, list[tuple[int, int, float, float]]]) -> No
             group = [(pull_t, run_t) for _, p_val, pull_t, run_t in entries if p_val == pct]
             if not group:
                 return "N/A"
-            p = float(np.median([g[0] for g in group]))
-            r_t = float(np.median([g[1] for g in group]))
-            return f"{p:.1f}/{r_t:.1f}/{p+r_t:.1f}"
+            pull_arr = np.array([g[0] for g in group])
+            run_arr = np.array([g[1] for g in group])
+            return (
+                f"{pull_arr.mean():.1f}±{pull_arr.std(ddof=0):.1f} "
+                f"{run_arr.mean():.1f}±{run_arr.std(ddof=0):.1f}"
+            )
         row = "  ".join(f"{fmt(entries):>{col}}" for entries in results.values())
         log.result(f"{pct:>7}%  {row}")
 
@@ -297,6 +300,22 @@ def save_csv(
                     p, r_t = match[0]
                     return [f"{p:.4f}", f"{r_t:.4f}", f"{p+r_t:.4f}"]
                 writer.writerow([run, pct, *(v for entries in results.values() for v in row_vals(entries))])
+
+        for stat_name, stat_fn in (("mean", np.mean), ("std", lambda a: np.std(a, ddof=0))):
+            for pct in pcts:
+                def stat_vals(entries: list[tuple[int, int, float, float]]) -> list[str]:
+                    group = [(pull_t, run_t) for _, p_val, pull_t, run_t in entries if p_val == pct]
+                    if not group:
+                        return ["", "", ""]
+                    pull_arr = np.array([g[0] for g in group])
+                    run_arr = np.array([g[1] for g in group])
+                    tot_arr = pull_arr + run_arr
+                    return [
+                        f"{float(stat_fn(pull_arr)):.4f}",
+                        f"{float(stat_fn(run_arr)):.4f}",
+                        f"{float(stat_fn(tot_arr)):.4f}",
+                    ]
+                writer.writerow([stat_name, pct, *(v for entries in results.values() for v in stat_vals(entries))])
     log.result(f"Results saved to {output_path}")
 
 
@@ -316,24 +335,32 @@ def plot(
     for i, (mode, entries) in enumerate(results.items()):
         color = MODE_COLORS[mode]
         offset = (i - (n_modes - 1) / 2) * width
-        med_pulls = []
-        med_runs = []
-        for j, pct in enumerate(pcts):
+        mean_pulls, std_pulls = [], []
+        mean_runs = []
+        std_totals = []
+        for pct in pcts:
             group = [(pull_t, run_t) for _, p_val, pull_t, run_t in entries if p_val == pct]
-            med_p = float(np.median([g[0] for g in group])) if group else 0.0
-            med_r = float(np.median([g[1] for g in group])) if group else 0.0
-            med_pulls.append(med_p)
-            med_runs.append(med_r)
-            x_center = x[j] + offset + width / 2
-            add_run_dots(ax, x_center, [g[0] + g[1] for g in group])
-        ax.bar(x + offset, med_pulls, width, color=color, alpha=0.5,
-               hatch="//", edgecolor=color, linewidth=0.5)
-        ax.bar(x + offset, med_runs, width, bottom=med_pulls, color=color,
-               edgecolor=color, linewidth=0.5, label=mode)
+            if group:
+                pull_arr = np.array([g[0] for g in group])
+                run_arr = np.array([g[1] for g in group])
+                tot_arr = pull_arr + run_arr
+                mean_pulls.append(float(pull_arr.mean()))
+                std_pulls.append(float(pull_arr.std(ddof=0)))
+                mean_runs.append(float(run_arr.mean()))
+                std_totals.append(float(tot_arr.std(ddof=0)))
+            else:
+                mean_pulls.append(0.0)
+                std_pulls.append(0.0)
+                mean_runs.append(0.0)
+                std_totals.append(0.0)
+        ax.bar(x + offset, mean_pulls, width, yerr=std_pulls, capsize=3,
+               color=color, alpha=0.5, hatch="//", edgecolor=color, linewidth=0.5)
+        ax.bar(x + offset, mean_runs, width, bottom=mean_pulls, yerr=std_totals, capsize=3,
+               color=color, edgecolor=color, linewidth=0.5, label=mode)
 
     ax.set_xlabel("Partition size (%)")
     ax.set_ylabel("Time (s)")
-    ax.set_title(f"Pull + Run Performance (median, n={CFG.pull_n_runs} runs, dots = individual runs)")
+    ax.set_title(f"Pull + Run Performance (mean ± stddev, n={CFG.pull_n_runs} runs")
     ax.set_xticks(x)
     ax.set_xticklabels([f"{p}%" for p in pcts])
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")

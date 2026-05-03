@@ -10,7 +10,7 @@ import matplotlib.patches as mpatches
 import numpy as np
 
 from shared import log
-from shared.charts import MODE_COLORS, figure_footer, add_run_dots, save_figure, write_csv
+from shared.charts import MODE_COLORS, figure_footer, save_figure, write_csv
 from pull_performance.paths import refresh_csv_path, refresh_chart_path, refresh_artifacts_dir
 from shared.config import load_config
 from shared.registry import (
@@ -327,7 +327,10 @@ def save_results_csv(
     fieldnames = ["run", "partition_pct"]
     for mode in results:
         slug = mode.replace("-", "_")
-        fieldnames += [f"{slug}_pull_s", f"{slug}_layer_refresh_s", f"{slug}_file_access_s"]
+        fieldnames += [
+            f"{slug}_pull_s", f"{slug}_layer_refresh_s",
+            f"{slug}_file_access_s", f"{slug}_total_s",
+        ]
 
     rows = []
     for run in range(CFG.refresh_n_runs):
@@ -341,12 +344,17 @@ def save_results_csv(
                     row[f"{slug}_pull_s"] = f"{p:.4f}"
                     row[f"{slug}_layer_refresh_s"] = f"{lr:.4f}"
                     row[f"{slug}_file_access_s"] = f"{fa:.4f}"
+                    row[f"{slug}_total_s"] = f"{lr + fa:.4f}"
                 else:
                     row[f"{slug}_pull_s"] = ""
-                    row[f"{slug}_layer_refresh_s"] = row[f"{slug}_file_access_s"] = ""
+                    row[f"{slug}_layer_refresh_s"] = ""
+                    row[f"{slug}_file_access_s"] = ""
+                    row[f"{slug}_total_s"] = ""
             rows.append(row)
 
-    # Summary rows: mean and stddev across runs, per (mode, pct)
+    # Summary rows: mean and stddev across runs, per (mode, pct).
+    # std on each component is per-component (no sums); std on total is the
+    # std of (layer_refresh + file_access) sums, used by the chart's upper whisker.
     for stat_name, stat_fn in (("mean", np.mean), ("std", lambda a: np.std(a, ddof=0))):
         for pct in PARTITION_PERCENTS:
             row = {"run": stat_name, "partition_pct": pct}
@@ -357,12 +365,16 @@ def save_results_csv(
                     p_arr = np.array([g[0] for g in group])
                     lr_arr = np.array([g[1] for g in group])
                     fa_arr = np.array([g[2] for g in group])
+                    tot_arr = lr_arr + fa_arr
                     row[f"{slug}_pull_s"] = f"{float(stat_fn(p_arr)):.4f}"
                     row[f"{slug}_layer_refresh_s"] = f"{float(stat_fn(lr_arr)):.4f}"
                     row[f"{slug}_file_access_s"] = f"{float(stat_fn(fa_arr)):.4f}"
+                    row[f"{slug}_total_s"] = f"{float(stat_fn(tot_arr)):.4f}"
                 else:
                     row[f"{slug}_pull_s"] = ""
-                    row[f"{slug}_layer_refresh_s"] = row[f"{slug}_file_access_s"] = ""
+                    row[f"{slug}_layer_refresh_s"] = ""
+                    row[f"{slug}_file_access_s"] = ""
+                    row[f"{slug}_total_s"] = ""
             rows.append(row)
 
     write_csv(path, fieldnames, rows)
@@ -388,32 +400,34 @@ def plot(
         mean_lr = []
         std_lr = []
         mean_fa = []
-        std_fa = []
-        for j, pct in enumerate(pcts):
+        std_total = []
+        for pct in pcts:
             lr_group = [lr for _, pp, _, lr, _ in entries if pp == pct]
             fa_group = [fa for _, pp, _, _, fa in entries if pp == pct]
-            lr_arr = np.array(lr_group) if lr_group else np.array([0.0])
-            fa_arr = np.array(fa_group) if fa_group else np.array([0.0])
-            mean_lr.append(float(lr_arr.mean()))
-            std_lr.append(float(lr_arr.std(ddof=0)))
-            mean_fa.append(float(fa_arr.mean()))
-            std_fa.append(float(fa_arr.std(ddof=0)))
-            x_center = x[j] + offset + width / 2
-            total_group = [lr + fa for lr, fa in zip(lr_group, fa_group)]
-            add_run_dots(ax, x_center, total_group)
+            if lr_group:
+                lr_arr = np.array(lr_group)
+                fa_arr = np.array(fa_group)
+                tot_arr = lr_arr + fa_arr
+                mean_lr.append(float(lr_arr.mean()))
+                std_lr.append(float(lr_arr.std(ddof=0)))
+                mean_fa.append(float(fa_arr.mean()))
+                std_total.append(float(tot_arr.std(ddof=0)))
+            else:
+                mean_lr.append(0.0)
+                std_lr.append(0.0)
+                mean_fa.append(0.0)
+                std_total.append(0.0)
 
         ax.bar(x + offset, mean_lr, width, yerr=std_lr, capsize=3,
                color=color, edgecolor=color, linewidth=0.5, alpha=1.0,
                label=f"{mode} (layer refresh)")
-        ax.bar(x + offset, mean_fa, width, bottom=mean_lr, yerr=std_fa, capsize=3,
+        ax.bar(x + offset, mean_fa, width, bottom=mean_lr, yerr=std_total, capsize=3,
                color=color, edgecolor=color, linewidth=0.5, alpha=0.45,
                label=f"{mode} (file access)")
 
     ax.set_xlabel("Partition size (%)")
     ax.set_ylabel("Access time (s)")
-    ax.set_title(
-        f"refresh-layer total time (mean ± stddev, n={CFG.refresh_n_runs} runs, dots = individual run totals)"
-    )
+    ax.set_title(f"refresh-layer time (mean ± stddev, n={CFG.refresh_n_runs} runs)")
     ax.set_xticks(x)
     ax.set_xticklabels([f"{p}%" for p in pcts])
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")
