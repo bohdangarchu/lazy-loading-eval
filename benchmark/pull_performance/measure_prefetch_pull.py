@@ -18,8 +18,9 @@ from shared.model import cleanup_pull_experiment
 from pull_performance.measure import _timed_pull, _timed_run, _run_cmd
 from pull_performance.paths import (
     prefetch_pull_charts_run_dir, prefetch_pull_csv_path, prefetch_pull_chart_path,
-    prefetch_pull_log_path,
+    prefetch_pull_log_path, prefetch_pull_artifacts_dir,
 )
+from shared.artifacts import clear_artifacts
 from pull_performance.prepare import prepare_chunks
 from pull_performance.prefetch_common import (
     poll_until_prefetch_done, prefetch_span, bg_fetch_spans, passthrough_open_spans,
@@ -82,12 +83,19 @@ class PullPrefetchSpan:
 # ── prepare ────────────────────────────────────────────────────────
 
 
-def _prepare_all_images(source_image: str, cfg, chunk_paths: list[str]) -> None:
+def _prepare_all_images(
+    source_image: str, cfg, chunk_paths: list[str],
+    model: str | None = None, execution_ts: str | None = None,
+) -> None:
     log.info("\n=== Preparing images ===")
     for mode in MODES:
         log.info(f"\n--- Preparing mode: {mode} ---")
         prepare_local_registry(source_image, registry(cfg))
-        prepare_mode(mode, chunk_paths, source_image, cfg)
+        artifacts_dir = (
+            prefetch_pull_artifacts_dir(SCRIPT_DIR, execution_ts, model, source_image, mode)
+            if model and execution_ts else None
+        )
+        prepare_mode(mode, chunk_paths, source_image, cfg, artifacts_dir)
 
 
 # ── measure ────────────────────────────────────────────────────────
@@ -199,7 +207,7 @@ def measure(
         for overrides, label in CONFIG_OPTIONS:
             log.info(f"\n=== Config option: {label} ===")
             clear_registry(cfg, preserve_base=True)
-            _prepare_all_images(source_image, cfg, chunk_paths)
+            _prepare_all_images(source_image, cfg, chunk_paths, model, execution_ts)
             config_content = apply_overrides(base_config, overrides)
             apply_stargz_config(config_content)
 
@@ -438,6 +446,7 @@ def plot(
 
 def main():
     log.set_verbose(VERBOSE)
+    clear_artifacts(SCRIPT_DIR)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log.info(f"Modes: {MODES}")
     log.info(f"Config options: {[label for _, label in CONFIG_OPTIONS]}")
@@ -459,6 +468,8 @@ def main():
         save_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, execution_ts)
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
+
+    clear_artifacts(SCRIPT_DIR)
 
 
 if __name__ == "__main__":

@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 
 from shared import log
 from shared.charts import figure_footer, save_figure
-from pull_performance.paths import config_charts_run_dir, build_config_csv_path, build_config_chart_path
-from shared.artifacts import write_2dfs_json
+from pull_performance.paths import config_charts_run_dir, build_config_csv_path, build_config_chart_path, build_config_artifacts_dir
+from shared.artifacts import write_2dfs_json, snapshot_artifacts, clear_artifacts
 from shared.config import load_config
 from shared.registry import (
     prepare_local_registry, registry, image_slug,
@@ -69,8 +69,13 @@ def _pull_name(source_image: str, cfg, label: str, n: int) -> str:
 # ── prepare ────────────────────────────────────────────────────────
 
 
-def _prepare_option(chunk_paths: list[str], source_image: str, cfg, flags: str, label: str) -> None:
+def _prepare_option(
+    chunk_paths: list[str], source_image: str, cfg, flags: str, label: str,
+    artifacts_dir: str | None = None,
+) -> None:
     write_2dfs_json([[p] for p in chunk_paths], SCRIPT_DIR)
+    if artifacts_dir:
+        snapshot_artifacts(SCRIPT_DIR, artifacts_dir)
     target = _build_name(source_image, cfg, label)
 
     if MODE == "2dfs-stargz":
@@ -136,13 +141,15 @@ def _measure_option(
 
 def measure(
     chunk_paths: list[str], source_image: str, cfg,
+    model: str, execution_ts: str,
 ) -> dict[str, list[tuple[int, float, float]]]:
     results: dict[str, list[tuple[int, float, float]]] = {}
 
     for flags, label in FLAG_OPTIONS:
         log.info(f"\n=== Preparing {MODE} ({label}) ===")
         clear_2dfs_cache(cfg)
-        _prepare_option(chunk_paths, source_image, cfg, flags, label)
+        artifacts_dir = build_config_artifacts_dir(SCRIPT_DIR, execution_ts, model, source_image, label)
+        _prepare_option(chunk_paths, source_image, cfg, flags, label, artifacts_dir)
         results[flags] = _measure_option(source_image, cfg, flags, label)
 
     return results
@@ -208,6 +215,7 @@ def plot(
 
 def main():
     log.set_verbose(VERBOSE)
+    clear_artifacts(SCRIPT_DIR)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log.info(f"Mode: {MODE}")
     log.info(f"Flag options: {[f'{label} ({flags})' for flags, label in FLAG_OPTIONS]}")
@@ -219,7 +227,7 @@ def main():
         prepare_local_registry(base_image, registry(CFG))
 
         chunk_paths = prepare_chunks(model, NUM_SPLITS)
-        results = measure(chunk_paths, base_image, CFG)
+        results = measure(chunk_paths, base_image, CFG, model, execution_ts)
 
         log.result(f"\n=== Results ({MODE}) ===")
         col = max(len(label) for _, label in FLAG_OPTIONS) + 2
@@ -235,6 +243,8 @@ def main():
 
         save_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, execution_ts)
+
+    clear_artifacts(SCRIPT_DIR)
 
 
 if __name__ == "__main__":

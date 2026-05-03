@@ -214,10 +214,10 @@ def rpull_noprefetch(image: str) -> None:
     )
 
 
-def prepare_mode(mode: str, chunk_paths: list[str], source_image: str, cfg) -> None:
+def prepare_mode(mode: str, chunk_paths: list[str], source_image: str, cfg, artifacts_dir: str | None = None) -> None:
     if mode == "2dfs-stargz":
-        prepare_2dfs_stargz(chunk_paths, source_image, cfg)
+        prepare_2dfs_stargz(chunk_paths, source_image, cfg, artifacts_dir)
     elif mode == "2dfs-stargz-zstd":
-        prepare_2dfs_stargz_zstd(chunk_paths, source_image, cfg)
+        prepare_2dfs_stargz_zstd(chunk_paths, source_image, cfg, artifacts_dir)
     else:
         raise ValueError(f"Unknown mode: {mode}")

@@ -25,12 +25,9 @@ build_with_resource: true
 rebuild_n_runs: 3
 
 # pull_performance/measure.py
-pull_n_splits: 10
-pull_base_splits: [2, 4, 6, 8, 10]
 pull_n_runs: 3
 
 # pull_performance/measure_refresh.py
-refresh_n_splits: 4
 refresh_n_runs: 1
 
 # pull_performance/measure_stargz_config.py

@@ -18,7 +18,9 @@ from pull_performance.prepare import prepare_chunks
 from pull_performance.paths import (
     prefetch_layered_csv_path, prefetch_layered_chart_path,
     prefetch_layered_charts_run_dir, prefetch_layered_log_path,
+    prefetch_layered_artifacts_dir,
 )
+from shared.artifacts import clear_artifacts
 from pull_performance.prefetch_common import (
     LayerPrefetchEvent,
     poll_until_prefetch_done,
@@ -134,7 +136,8 @@ def measure(
         for mode in MODES:
             log.info(f"\n=== Preparing mode: {mode} ===")
             prepare_local_registry(source_image, registry(cfg))
-            prepare_mode(mode, chunk_paths, source_image, cfg)
+            artifacts_dir = prefetch_layered_artifacts_dir(SCRIPT_DIR, execution_ts, model, base_image, mode)
+            prepare_mode(mode, chunk_paths, source_image, cfg, artifacts_dir)
 
             for n in ALLOTMENTS:
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -246,6 +249,7 @@ def plot(results: list[PullPrefetchResult], model: str, base_image: str, executi
 
 def main():
     log.set_verbose(VERBOSE)
+    clear_artifacts(SCRIPT_DIR)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     for model, base_image in EXPERIMENTS:
@@ -254,6 +258,8 @@ def main():
         save_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, execution_ts)
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
+
+    clear_artifacts(SCRIPT_DIR)
 
 
 if __name__ == "__main__":

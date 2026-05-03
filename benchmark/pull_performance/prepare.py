@@ -5,7 +5,7 @@ from shared import log
 from shared import paths
 from shared.config import EnvConfig
 from shared.model import download_model, split_model
-from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_base_dockerfile
+from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_base_dockerfile, snapshot_artifacts
 from shared.registry import stargz_base_image, plain_base_image, zstd_base_image, tdfs_cmd
 from shared.services import clear_2dfs_cache
 from pull_performance.images import (
@@ -40,8 +40,11 @@ def _build_and_push_2dfs_image(
     base_image: str,
     extra_flags: list[str],
     label: str,
+    artifacts_dir: str | None = None,
 ) -> None:
     write_2dfs_json([[p] for p in chunk_paths], SCRIPT_DIR)
+    if artifacts_dir:
+        snapshot_artifacts(SCRIPT_DIR, artifacts_dir)
     cmd = tdfs_cmd(cfg, SCRIPT_DIR) + [
         "build",
         "--platforms", "linux/amd64",
@@ -61,38 +64,43 @@ def _build_and_push_2dfs_image(
     log.result(f"Pushed {target}")
 
 
-def _build_and_push_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+def _build_and_push_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConfig, artifacts_dir: str | None = None) -> None:
     _build_and_push_2dfs_image(
         chunk_paths, cfg,
         target=build_name_2dfs(source_image, cfg),
         base_image=plain_base_image(source_image, cfg),
         extra_flags=[],
         label="2dfs",
+        artifacts_dir=artifacts_dir,
     )
 
 
-def _build_and_push_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+def _build_and_push_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig, artifacts_dir: str | None = None) -> None:
     _build_and_push_2dfs_image(
         chunk_paths, cfg,
         target=build_name_2dfs_stargz(source_image, cfg),
         base_image=stargz_base_image(source_image, cfg),
         extra_flags=["--enable-stargz", "--stargz-chunk-size", "2097152"],  # 2 MiB (most optimal)
         label="2dfs-stargz",
+        artifacts_dir=artifacts_dir,
     )
 
 
-def _build_and_push_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+def _build_and_push_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, cfg: EnvConfig, artifacts_dir: str | None = None) -> None:
     _build_and_push_2dfs_image(
         chunk_paths, cfg,
         target=build_name_2dfs_stargz_zstd(source_image, cfg),
         base_image=zstd_base_image(source_image, cfg),
         extra_flags=["--enable-stargz", "--use-zstd", "--stargz-chunk-size", "8388608"],  # 8 MiB (most optimal)
         label="2dfs-stargz-zstd",
+        artifacts_dir=artifacts_dir,
     )
 
 
-def _build_and_push_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+def _build_and_push_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig, artifacts_dir: str | None = None) -> None:
     create_stargz_dockerfile([[p] for p in chunk_paths], stargz_base_image(source_image, cfg), SCRIPT_DIR)
+    if artifacts_dir:
+        snapshot_artifacts(SCRIPT_DIR, artifacts_dir)
     target = build_name_stargz(source_image, cfg)
 
     # force-compression=true makes sure the split layers are converted to stargz
@@ -110,9 +118,11 @@ def _build_and_push_stargz(chunk_paths: list[str], source_image: str, cfg: EnvCo
     log.result(f"Built and pushed {target}")
 
 
-def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_image: str, cfg: EnvConfig) -> None:
+def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_image: str, cfg: EnvConfig, artifacts_dir_fn=None) -> None:
     for r in base_splits:
         create_base_dockerfile([[p] for p in chunk_paths[:r]], plain_base_image(source_image, cfg), SCRIPT_DIR)
+        if artifacts_dir_fn:
+            snapshot_artifacts(SCRIPT_DIR, artifacts_dir_fn(r))
         target = build_name_base(source_image, cfg, r)
 
         cmd = [
@@ -131,24 +141,24 @@ def _build_and_push_base(chunk_paths: list[str], base_splits: list[int], source_
 # ── per-mode public entry points ────────────────────────────────────
 
 
-def prepare_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+def prepare_2dfs(chunk_paths: list[str], source_image: str, cfg: EnvConfig, artifacts_dir: str | None = None) -> None:
     clear_2dfs_cache(cfg)
-    _build_and_push_2dfs(chunk_paths, source_image, cfg)
+    _build_and_push_2dfs(chunk_paths, source_image, cfg, artifacts_dir)
 
 
-def prepare_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+def prepare_2dfs_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig, artifacts_dir: str | None = None) -> None:
     clear_2dfs_cache(cfg)
-    _build_and_push_2dfs_stargz(chunk_paths, source_image, cfg)
+    _build_and_push_2dfs_stargz(chunk_paths, source_image, cfg, artifacts_dir)
 
 
-def prepare_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
+def prepare_2dfs_stargz_zstd(chunk_paths: list[str], source_image: str, cfg: EnvConfig, artifacts_dir: str | None = None) -> None:
     clear_2dfs_cache(cfg)
-    _build_and_push_2dfs_stargz_zstd(chunk_paths, source_image, cfg)
+    _build_and_push_2dfs_stargz_zstd(chunk_paths, source_image, cfg, artifacts_dir)
 
 
-def prepare_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig) -> None:
-    _build_and_push_stargz(chunk_paths, source_image, cfg)
+def prepare_stargz(chunk_paths: list[str], source_image: str, cfg: EnvConfig, artifacts_dir: str | None = None) -> None:
+    _build_and_push_stargz(chunk_paths, source_image, cfg, artifacts_dir)
 
 
-def prepare_base(chunk_paths: list[str], base_splits: list[int], source_image: str, cfg: EnvConfig) -> None:
-    _build_and_push_base(chunk_paths, base_splits, source_image, cfg)
+def prepare_base(chunk_paths: list[str], base_splits: list[int], source_image: str, cfg: EnvConfig, artifacts_dir_fn=None) -> None:
+    _build_and_push_base(chunk_paths, base_splits, source_image, cfg, artifacts_dir_fn)

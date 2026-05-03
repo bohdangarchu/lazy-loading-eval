@@ -161,3 +161,36 @@ def prefetch_pull_log_path(base_dir: str, model: str, base_image: str, mode: str
     mode_slug = mode.replace("-", "_")
     label_slug = config_label.replace(" ", "_").replace(",", "").replace("/", "_")
     return os.path.join(prefetch_pull_logs_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{label_slug}_{n}allotments_run{run}.json")
+
+
+# ── artifact directories ──────────────────────────────────────────
+
+def _experiment_dir(base_dir: str, scope: str, execution_ts: str, model: str, base_image: str) -> str:
+    return os.path.join(
+        base_dir, "artifacts", scope, execution_ts,
+        f"{_model_slug(model)}_{_image_slug(base_image)}",
+    )
+
+def pull_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, mode: str, n: int | None = None) -> str:
+    root = _experiment_dir(base_dir, "pull", execution_ts, model, base_image)
+    if mode == "base":
+        if n is None:
+            raise ValueError("n required for base mode")
+        return os.path.join(root, "base", f"n_{n}")
+    return os.path.join(root, mode)
+
+def refresh_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, build_mode: str) -> str:
+    return os.path.join(_experiment_dir(base_dir, "refresh", execution_ts, model, base_image), build_mode)
+
+def build_config_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, label: str) -> str:
+    label_slug = label.replace(" ", "_").replace(",", "").replace("/", "_")
+    return os.path.join(_experiment_dir(base_dir, "build-config", execution_ts, model, base_image), label_slug)
+
+def stargz_config_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, mode: str) -> str:
+    return os.path.join(_experiment_dir(base_dir, "stargz-config", execution_ts, model, base_image), mode)
+
+def prefetch_layered_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, mode: str) -> str:
+    return os.path.join(_experiment_dir(base_dir, "prefetch-layered", execution_ts, model, base_image), mode)
+
+def prefetch_pull_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, mode: str) -> str:
+    return os.path.join(_experiment_dir(base_dir, "prefetch-pull", execution_ts, model, base_image), mode)

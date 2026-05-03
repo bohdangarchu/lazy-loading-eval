@@ -13,7 +13,9 @@ from shared import log
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure
 from pull_performance.paths import (
     stargz_config_charts_run_dir, stargz_config_csv_path, stargz_config_chart_path, stargz_config_log_path,
+    stargz_config_artifacts_dir,
 )
+from shared.artifacts import clear_artifacts
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
 from shared.stargz_config import read_base_config, apply_overrides, apply_stargz_config
@@ -59,11 +61,11 @@ def _pull_name(mode: str, source_image: str, cfg, n: int) -> str:
 # ── prepare ────────────────────────────────────────────────────────
 
 
-def _prepare_mode(mode: str, chunk_paths: list[str], source_image: str, cfg) -> None:
+def _prepare_mode(mode: str, chunk_paths: list[str], source_image: str, cfg, artifacts_dir: str | None = None) -> None:
     if mode == "2dfs-stargz":
-        prepare_2dfs_stargz(chunk_paths, source_image, cfg)
+        prepare_2dfs_stargz(chunk_paths, source_image, cfg, artifacts_dir)
     elif mode == "2dfs-stargz-zstd":
-        prepare_2dfs_stargz_zstd(chunk_paths, source_image, cfg)
+        prepare_2dfs_stargz_zstd(chunk_paths, source_image, cfg, artifacts_dir)
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
@@ -118,7 +120,8 @@ def measure(
         for mode in MODES:
             log.info(f"\n--- Preparing mode: {mode} ---")
             prepare_local_registry(source_image, registry(cfg))
-            _prepare_mode(mode, chunk_paths, source_image, cfg)
+            artifacts_dir = stargz_config_artifacts_dir(SCRIPT_DIR, execution_ts, model, base_image, mode)
+            _prepare_mode(mode, chunk_paths, source_image, cfg, artifacts_dir)
 
     try:
         for overrides, label in CONFIG_OPTIONS:
@@ -261,6 +264,7 @@ def plot(
 
 def main():
     log.set_verbose(VERBOSE)
+    clear_artifacts(SCRIPT_DIR)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log.info(f"Modes: {MODES}")
     log.info(f"Config options: {[label for _, label in CONFIG_OPTIONS]}")
@@ -282,6 +286,8 @@ def main():
         save_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, execution_ts)
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
+
+    clear_artifacts(SCRIPT_DIR)
 
 
 if __name__ == "__main__":
