@@ -90,10 +90,11 @@ def ensure_buildkit() -> None:
     if result.returncode != 0:
         log.info("buildkit is not running, starting it...")
         subprocess.run(["sudo", "systemctl", "start", "buildkit"], check=True)
-        # Wait for the socket to become available (up to 10s)
-        sock = "/run/buildkit/buildkitd.sock"
-        for _ in range(20):
-            if os.path.exists(sock):
-                break
-            time.sleep(0.5)
-        log.info("buildkit started.")
+    # systemd may report "active" before buildkitd binds the unix socket
+    # (e.g. after a containerd restart cascades through Requires=). Always wait.
+    sock = "/run/buildkit/buildkitd.sock"
+    for _ in range(20):
+        if subprocess.run(["sudo", "test", "-S", sock]).returncode == 0:
+            return
+        time.sleep(0.5)
+    raise RuntimeError(f"buildkit socket {sock} did not appear within 10s")
