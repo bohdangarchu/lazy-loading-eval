@@ -38,6 +38,18 @@ def refresh_run_dir(base_dir: str, execution_ts: str) -> str:
 def refresh_charts_run_dir(base_dir: str, execution_ts: str) -> str:
     return os.path.join(refresh_charts_dir(base_dir), execution_ts)
 
+def manual_update_results_dir(base_dir: str) -> str:
+    return os.path.join(base_dir, "results", "manual-update")
+
+def manual_update_charts_dir(base_dir: str) -> str:
+    return os.path.join(base_dir, "charts", "manual-update")
+
+def manual_update_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(manual_update_results_dir(base_dir), execution_ts)
+
+def manual_update_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(manual_update_charts_dir(base_dir), execution_ts)
+
 def stargz_config_results_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "results", "stargz-config")
 
@@ -100,6 +112,12 @@ def refresh_csv_path(base_dir: str, model: str, base_image: str, execution_ts: s
 
 def refresh_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(refresh_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh.png")
+
+def manual_update_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(manual_update_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_manual_update.csv")
+
+def manual_update_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(manual_update_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_manual_update.png")
 
 def stargz_config_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(stargz_config_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}.csv")
@@ -181,6 +199,9 @@ def pull_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image:
 
 def refresh_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, build_mode: str) -> str:
     return os.path.join(_experiment_dir(base_dir, "refresh", execution_ts, model, base_image), build_mode)
+
+def manual_update_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, build_mode: str) -> str:
+    return os.path.join(_experiment_dir(base_dir, "manual-update", execution_ts, model, base_image), build_mode)
 
 def build_config_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, label: str) -> str:
     label_slug = label.replace(" ", "_").replace(",", "").replace("/", "_")

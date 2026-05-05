@@ -2,7 +2,6 @@ import os
 import re
 import subprocess
 import time
-import uuid
 from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
@@ -15,20 +14,22 @@ from pull_performance.paths import refresh_csv_path, refresh_chart_path, refresh
 from shared.config import load_config
 from shared.registry import (
     prepare_local_registry, clear_registry, registry, image_slug,
-    tdfs_cmd, stargz_base_image, zstd_base_image,
+    tdfs_cmd,
 )
 from shared.artifacts import write_2dfs_json, mutate_chunk, snapshot_artifacts, clear_artifacts
 from shared.services import ensure_buildkit, clear_2dfs_cache, clear_stargz_cache
 from pull_performance.prepare import prepare_chunks
 from pull_performance.measure import _next_container_name
+from pull_performance.refresh_common import (
+    EXPERIMENTS,
+    build_mode, extra_flags, base_image,
+    timed_pull, start_container, exec_timed, stop_container,
+)
+from pull_performance.measure_manual_update import manual_update_main
 
-EXPERIMENTS = [
-    ("openai-community/gpt2", "docker.io/library/python:3.12-slim", 12),         # ~0.5GB     ~50 MB
-    ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim", 12),                      # ~3.09 GB     ~3.4 GB
-    # ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim", 12),    # ~6.85 GB     ~3.4 GB
-]
 CFG = load_config()
 VERBOSE = True
+RUN_MANUAL_UPDATE_BASELINE = True
 MODES = [
     "2dfs-stargz-with-bg-fetch",
     "2dfs-stargz-zstd-with-bg-fetch",
@@ -69,31 +70,6 @@ def _is_bg_fetch_mode(mode: str) -> bool:
     return mode.endswith("-with-bg-fetch")
 
 
-def _build_mode(mode: str) -> str:
-    """Strip bg-fetch suffix; build behavior is identical to the base mode."""
-    if _is_bg_fetch_mode(mode):
-        return mode[: -len("-with-bg-fetch")]
-    return mode
-
-
-def _extra_flags(mode: str) -> list[str]:
-    base = _build_mode(mode)
-    if base == "2dfs-stargz":
-        return ["--enable-stargz", "--stargz-chunk-size", "2097152"]
-    if base == "2dfs-stargz-zstd":
-        return ["--enable-stargz", "--use-zstd", "--stargz-chunk-size", "8388608"]
-    raise ValueError(f"Unknown mode: {mode}")
-
-
-def _base_image(source_image: str, cfg, mode: str) -> str:
-    base = _build_mode(mode)
-    if base == "2dfs-stargz":
-        return stargz_base_image(source_image, cfg)
-    if base == "2dfs-stargz-zstd":
-        return zstd_base_image(source_image, cfg)
-    raise ValueError(f"Unknown mode: {mode}")
-
-
 def _build_version(
     chunk_paths: list[str],
     source_image: str,
@@ -103,12 +79,12 @@ def _build_version(
 ) -> dict[int, str]:
     """Build one refresh image version and return its allotment digest map."""
     target = _build_name_refresh(source_image, cfg, mode, version_idx)
-    base = _base_image(source_image, cfg, mode)
+    base = base_image(source_image, cfg, mode)
 
     write_2dfs_json([[p] for p in chunk_paths], SCRIPT_DIR)
     cmd = tdfs_cmd(cfg, SCRIPT_DIR) + [
         "build", "--platforms", "linux/amd64",
-        *_extra_flags(mode),
+        *extra_flags(mode),
         "--force-http", "-f", "2dfs.json",
         base, target,
     ]
@@ -184,45 +160,6 @@ def prepare_refresh(
 # ── container helpers ──────────────────────────────────────────────────
 
 
-def _timed_pull(cmd: list[str]) -> float:
-    start = time.perf_counter()
-    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"Pull failed (exit {result.returncode}):\n{result.stderr}")
-    return time.perf_counter() - start
-
-
-def _start_container(image: str, name: str) -> None:
-    """Start a detached stargz container that stays alive via sleep infinity."""
-    subprocess.run(
-        ["sudo", "ctr-remote", "run", "--detach", "--snapshotter=stargz",
-         image, name, "sleep", "infinity"],
-        check=True, capture_output=not log.VERBOSE,
-    )
-
-
-def _exec_timed(name: str, n: int) -> float:
-    """Exec into running container, cat n chunk files, return elapsed seconds."""
-    files = " ".join(f"/chunk{i + 1}.bin" for i in range(n))
-    exec_id = uuid.uuid4().hex[:8]
-    start = time.perf_counter()
-    subprocess.run(
-        ["sudo", "ctr", "tasks", "exec", "--exec-id", exec_id,
-         name, "sh", "-c", f"cat {files} > /dev/null"],
-        check=True, capture_output=not log.VERBOSE,
-    )
-    return time.perf_counter() - start
-
-
-def _stop_container(name: str) -> None:
-    subprocess.run(["sudo", "nerdctl", "stop", name], check=True,
-                   capture_output=not log.VERBOSE)
-    subprocess.run(["sudo", "ctr", "tasks", "delete", name], check=True,
-                   capture_output=not log.VERBOSE)
-    subprocess.run(["sudo", "ctr", "containers", "delete", name], check=True,
-                   capture_output=not log.VERBOSE)
-
-
 def _refresh_layer(old_digest: str, new_digest: str, with_bg_fetch: bool = False) -> None:
     old = f"sha256:{old_digest}"
     new = f"sha256:{new_digest}"
@@ -260,13 +197,13 @@ def measure_refresh(
 
                 v0_pull = _pull_name_refresh(source_image, cfg, mode, 0, max_allowed_splits)
                 log.info(f"Pulling v0: {v0_pull}")
-                pull_t = _timed_pull(
+                pull_t = timed_pull(
                     ["sudo", "ctr-remote", "images", "rpull", "--plain-http", v0_pull]
                 )
                 log.result(f"  pull ({mode}): {pull_t:.2f}s")
 
                 name = _next_container_name(f"refresh-{mode.replace('-', '')}")
-                _start_container(v0_pull, name)
+                start_container(v0_pull, name)
 
                 with_bg_fetch = _is_bg_fetch_mode(mode)
                 t0 = time.perf_counter()
@@ -277,10 +214,10 @@ def measure_refresh(
                 layer_refresh_t = time.perf_counter() - t0
                 log.result(f"  refresh-layer ({k} layers, {mode}): {layer_refresh_t:.2f}s")
 
-                file_access_t = _exec_timed(name, k)
+                file_access_t = exec_timed(name, k)
                 log.result(f"  post-refresh file access ({k} refreshed files, {mode}): {file_access_t:.2f}s")
 
-                _stop_container(name)
+                stop_container(name)
                 log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
                 time.sleep(cfg.pull_cooldown)
 
@@ -481,7 +418,7 @@ def main():
         clear_registry(CFG, preserve_base=True)
         for mode in MODES:
             log.info(f"\n=== Preparing mode: {mode} ===")
-            artifacts_dir = refresh_artifacts_dir(SCRIPT_DIR, execution_ts, model, base_image, _build_mode(mode))
+            artifacts_dir = refresh_artifacts_dir(SCRIPT_DIR, execution_ts, model, base_image, build_mode(mode))
             all_digests_per_mode[mode] = prepare_refresh(chunk_paths, base_image, CFG, mode, max_allowed_splits, artifacts_dir)
 
         results = measure_refresh(base_image, CFG, all_digests_per_mode, max_allowed_splits)
@@ -491,6 +428,9 @@ def main():
         print_results(results)
         save_results_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, execution_ts)
+
+    if RUN_MANUAL_UPDATE_BASELINE:
+        manual_update_main(execution_ts)
 
     clear_artifacts(SCRIPT_DIR)
 

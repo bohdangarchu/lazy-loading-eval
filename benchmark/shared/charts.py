@@ -4,6 +4,7 @@ MODE_COLORS: dict[str, str] = {
     "2dfs-stargz-zstd":              "#9467bd",
     "2dfs-stargz-with-bg-fetch":     "#e377c2", # refresh-layer
     "2dfs-stargz-zstd-with-bg-fetch":"#8c564b", # refresh-layer
+    "baseline-2dfs-stargz":          "#17becf",
     "stargz":                        "#2ca02c",
     "base":                          "#d62728",
 }
