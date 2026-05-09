@@ -39,9 +39,8 @@ def mutate_chunk(path: str) -> None:
 
 def chunks_to_groups(chunk_paths: list[str], num_layers: int) -> list[list[str]]:
     # Partition `chunk_paths` into `num_layers` consecutive groups for split-capacity
-    # benchmarks. When len(chunks) is not divisible by num_layers (only the 75%-
-    # capacity case in the build sweep, e.g. 12 chunks → 9 layers), front-loaded
-    # np.array_split semantics apply: the first `len % num_layers` groups carry
+    # benchmarks. When len(chunks) is not divisible by num_layers (75%-capacity case, e.g. 12 chunks → 9 layers), 
+    # front-loaded np.array_split semantics apply: the first `len % num_layers` groups carry
     # ceil(len/num_layers) chunks each, the rest carry floor. Total bytes per build
     # are unchanged; only intra-layer chunk counts vary.
     n = len(chunk_paths)
