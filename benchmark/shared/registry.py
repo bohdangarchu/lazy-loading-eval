@@ -114,14 +114,15 @@ def _parse_name_tag(local_tag: str, registry_url: str) -> tuple[str, str]:
     return name, tag
 
 
-def clear_registry(cfg: EnvConfig, preserve_base: bool = False) -> None:
+def clear_registry(cfg: EnvConfig, preserve_base: bool = False, verbose: bool = True) -> None:
     """Delete all images from the registry via v2 API.
 
     If preserve_base=True, skips tags ending in -plain, -esgz, or -zstd
     (the base images used as build inputs — expensive to regenerate).
     """
     reg = cfg.registry
-    log.info(f"Clearing registry {reg}...")
+    if verbose:
+        log.info(f"Clearing registry {reg}...")
     catalog_url = f"http://{reg}/v2/_catalog"
     with urllib.request.urlopen(catalog_url) as resp:
         repos = json.loads(resp.read())["repositories"]
@@ -131,7 +132,8 @@ def clear_registry(cfg: EnvConfig, preserve_base: bool = False) -> None:
             tags = json.loads(resp.read()).get("tags") or []
         for tag in tags:
             if preserve_base and tag.endswith(("-plain", "-esgz", "-zstd")):
-                log.info(f"  Preserving base image {name}:{tag}")
+                if verbose:
+                    log.info(f"  Preserving base image {name}:{tag}")
                 continue
             manifest_url = f"http://{reg}/v2/{name}/manifests/{tag}"
             req = urllib.request.Request(manifest_url, headers={
@@ -142,15 +144,18 @@ def clear_registry(cfg: EnvConfig, preserve_base: bool = False) -> None:
                     digest = resp.headers["Docker-Content-Digest"]
             except urllib.error.HTTPError as e:
                 if e.code == 404:
-                    log.info(f"  Skipping {name}:{tag} (manifest not found)")
+                    if verbose:
+                        log.info(f"  Skipping {name}:{tag} (manifest not found)")
                     continue
                 raise
             delete_url = f"http://{reg}/v2/{name}/manifests/{digest}"
             del_req = urllib.request.Request(delete_url, method="DELETE")
             with urllib.request.urlopen(del_req):
                 pass
-            log.info(f"  Deleted {name}:{tag} ({digest[:19]}...)")
-    log.result("Registry cleared.")
+            if verbose:
+                log.info(f"  Deleted {name}:{tag} ({digest[:19]}...)")
+    if verbose:
+        log.result("Registry cleared.")
 
 
 def prepare_local_registry(
