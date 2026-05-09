@@ -1,0 +1,163 @@
+import hashlib
+import os
+import subprocess
+import uuid
+
+from shared import log
+from shared.artifacts import (
+    chunks_to_groups,
+    clear_artifacts,
+    mutate_chunk,
+    write_2dfs_json,
+)
+from shared.config import load_config
+from shared.registry import (
+    clear_registry,
+    image_slug,
+    prepare_local_registry,
+    registry,
+    tdfs_cmd,
+)
+from shared.services import clear_2dfs_cache, clear_stargz_cache, ensure_buildkit
+from pull_performance.measure import _next_container_name
+from pull_performance.prepare import prepare_chunks
+from pull_performance.refresh_common import (
+    base_image,
+    exec_timed,
+    extra_flags,
+    start_container,
+    stop_container,
+    timed_pull,
+)
+
+CFG = load_config()
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+MODE = "2dfs-stargz"
+MODEL = "openai-community/gpt2"
+SOURCE_IMAGE = "docker.io/library/python:3.12-slim"
+NUM_CHUNKS = 12
+NUM_LAYERS = 3
+MUTATED_IDX = 0
+
+
+def _build_target() -> str:
+    return f"{registry(CFG)}/{image_slug(SOURCE_IMAGE)}-{MODE}-verify-refresh:latest"
+
+
+def _pull_ref() -> str:
+    end_col = NUM_LAYERS - 1
+    return f"{registry(CFG)}/library/{image_slug(SOURCE_IMAGE)}-{MODE}-verify-refresh:latest--0.0.0.{end_col}"
+
+
+def _build_and_push(chunk_paths: list[str], label: str) -> None:
+    target = _build_target()
+    base = base_image(SOURCE_IMAGE, CFG, MODE)
+    groups = chunks_to_groups(chunk_paths, NUM_LAYERS)
+    write_2dfs_json(groups, SCRIPT_DIR)
+
+    cmd = tdfs_cmd(CFG, SCRIPT_DIR) + [
+        "build", "--platforms", "linux/amd64",
+        *extra_flags(MODE),
+        "--force-http", "-f", "2dfs.json",
+        base, target,
+    ]
+    log.info(f"Building {label}: {target}")
+    subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
+    log.result(f"Built {target}")
+
+    push_cmd = tdfs_cmd(CFG, SCRIPT_DIR) + ["image", "push", "--force-http", target]
+    log.info(f"Pushing {target}")
+    subprocess.run(push_cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
+    log.result(f"Pushed {target}")
+
+
+def _sha256_in_container(name: str, path: str) -> str:
+    exec_id = uuid.uuid4().hex[:8]
+    result = subprocess.run(
+        ["sudo", "ctr", "tasks", "exec", "--exec-id", exec_id, name,
+         "sh", "-c", f"sha256sum {path}"],
+        check=True, capture_output=True, text=True,
+    )
+    return result.stdout.split()[0]
+
+
+def _sha256_local(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for blk in iter(lambda: f.read(1 << 20), b""):
+            h.update(blk)
+    return h.hexdigest()
+
+
+def main():
+    log.set_verbose(True)
+    clear_artifacts(SCRIPT_DIR)
+    ensure_buildkit()
+
+    chunk_paths = prepare_chunks(MODEL, NUM_CHUNKS)
+    prepare_local_registry(SOURCE_IMAGE, registry(CFG))
+
+    clear_registry(CFG, preserve_base=True)
+    clear_2dfs_cache(CFG)
+    clear_stargz_cache()
+
+    log.result("=== Build + push v0 ===")
+    _build_and_push(chunk_paths, "v0")
+
+    pull_ref = _pull_ref()
+    log.result(f"=== rpull v0: {pull_ref} ===")
+    timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", pull_ref])
+
+    name = _next_container_name(f"verify-refresh-{MODE.replace('-', '')}")
+    start_container(pull_ref, name)
+
+    log.info(f"Cat all {NUM_CHUNKS} files in container...")
+    exec_timed(name, NUM_CHUNKS)
+
+    target_file = f"/chunk{MUTATED_IDX + 1}.bin"
+    pre_digest = _sha256_in_container(name, target_file)
+    log.result(f"pre-refresh  in-container sha256({target_file}) = {pre_digest}")
+
+    log.result(f"=== Mutate {os.path.basename(chunk_paths[MUTATED_IDX])} + build v1 ===")
+    mutate_chunk(chunk_paths[MUTATED_IDX])
+    expected_digest = _sha256_local(chunk_paths[MUTATED_IDX])
+    log.info(f"expected post-refresh sha256({target_file}) = {expected_digest}")
+    _build_and_push(chunk_paths, "v1")
+
+    log.result(f"=== ctr-remote refresh {pull_ref} ===")
+    refresh = subprocess.run(
+        ["sudo", "ctr-remote", "refresh", "--plain-http", pull_ref],
+        capture_output=True, text=True,
+    )
+    if refresh.stdout:
+        print(refresh.stdout, end="")
+    if refresh.stderr:
+        print(refresh.stderr, end="")
+    if refresh.returncode != 0:
+        log.result(f"FAIL: refresh exited with code {refresh.returncode}")
+        stop_container(name)
+        mutate_chunk(chunk_paths[MUTATED_IDX])
+        return
+
+    post_digest = _sha256_in_container(name, target_file)
+    log.result(f"post-refresh in-container sha256({target_file}) = {post_digest}")
+
+    if pre_digest == post_digest:
+        log.result(f"FAIL: digest unchanged after refresh ({pre_digest})")
+    elif post_digest != expected_digest:
+        log.result(f"FAIL: post-refresh digest {post_digest} != expected {expected_digest}")
+    else:
+        log.result(f"PASS: {target_file} refreshed successfully ({pre_digest[:12]}... -> {post_digest[:12]}...)")
+
+    stop_container(name)
+
+    log.info("Restoring mutated chunk...")
+    mutate_chunk(chunk_paths[MUTATED_IDX])
+
+    clear_registry(CFG, preserve_base=True)
+    clear_artifacts(SCRIPT_DIR)
+
+
+if __name__ == "__main__":
+    main()
