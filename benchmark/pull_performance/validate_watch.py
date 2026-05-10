@@ -201,6 +201,7 @@ def main():
     else:
         log.result(f"PASS: {target_file} updated by watcher ({pre_digest[:12]}... -> {post_digest[:12]}...)")
 
+    _watch_list()
     _unwatch(pull_ref)
     stop_container(name)
 
