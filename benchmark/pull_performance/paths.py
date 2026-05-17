@@ -131,6 +131,12 @@ def refresh_csv_path(base_dir: str, model: str, base_image: str, execution_ts: s
 def refresh_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(refresh_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh.png")
 
+def refresh_bytes_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(refresh_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh_bytes.csv")
+
+def refresh_bytes_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(refresh_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh_bytes.png")
+
 def manual_update_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(manual_update_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_manual_update.csv")
 

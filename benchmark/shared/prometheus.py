@@ -120,6 +120,23 @@ def active_window(
     return (span_start, span_end) if span_start is not None else None
 
 
+def bytes_by_layer(op_type: str, t: float | None = None) -> dict[str, int]:
+    """Return {layer_digest: bytes} for stargz_fs_bytes_served{operation_type=op_type}
+    aggregated by layer at instant t. Missing/unreachable prometheus → {}."""
+    promql = (
+        f'sum by (layer) (stargz_fs_bytes_served{{operation_type="{op_type}"}})'
+    )
+    out: dict[str, int] = {}
+    for entry in query(promql, t):
+        layer = entry.get("metric", {}).get("layer", "")
+        val = entry.get("value", [None, "0"])[1]
+        try:
+            out[layer] = int(float(val))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _get(path: str) -> list[dict]:
     try:
         with urlopen(f"{PROM_URL}{path}", timeout=HTTP_TIMEOUT_S) as r:
