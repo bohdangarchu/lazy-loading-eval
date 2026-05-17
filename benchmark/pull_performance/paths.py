@@ -26,6 +26,18 @@ def pull_run_dir(base_dir: str, execution_ts: str) -> str:
 def pull_charts_run_dir(base_dir: str, execution_ts: str) -> str:
     return os.path.join(pull_charts_dir(base_dir), execution_ts)
 
+def refresh_layer_results_dir(base_dir: str) -> str:
+    return os.path.join(base_dir, "results", "refresh-layer")
+
+def refresh_layer_charts_dir(base_dir: str) -> str:
+    return os.path.join(base_dir, "charts", "refresh-layer")
+
+def refresh_layer_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(refresh_layer_results_dir(base_dir), execution_ts)
+
+def refresh_layer_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(refresh_layer_charts_dir(base_dir), execution_ts)
+
 def refresh_results_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "results", "refresh")
 
@@ -37,18 +49,6 @@ def refresh_run_dir(base_dir: str, execution_ts: str) -> str:
 
 def refresh_charts_run_dir(base_dir: str, execution_ts: str) -> str:
     return os.path.join(refresh_charts_dir(base_dir), execution_ts)
-
-def refresh_full_results_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "results", "refresh-full")
-
-def refresh_full_charts_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "charts", "refresh-full")
-
-def refresh_full_run_dir(base_dir: str, execution_ts: str) -> str:
-    return os.path.join(refresh_full_results_dir(base_dir), execution_ts)
-
-def refresh_full_charts_run_dir(base_dir: str, execution_ts: str) -> str:
-    return os.path.join(refresh_full_charts_dir(base_dir), execution_ts)
 
 def manual_update_results_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "results", "manual-update")
@@ -119,17 +119,17 @@ def pull_csv_path(base_dir: str, model: str, base_image: str, n_splits: int, exe
 def pull_chart_path(base_dir: str, model: str, base_image: str, n_splits: int, execution_ts: str) -> str:
     return os.path.join(pull_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_pull_{n_splits}.png")
 
+def refresh_layer_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(refresh_layer_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh_layer.csv")
+
+def refresh_layer_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(refresh_layer_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh_layer.png")
+
 def refresh_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(refresh_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh.csv")
 
 def refresh_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(refresh_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh.png")
-
-def refresh_full_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
-    return os.path.join(refresh_full_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh.csv")
-
-def refresh_full_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
-    return os.path.join(refresh_full_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh.png")
 
 def manual_update_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(manual_update_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_manual_update.csv")
@@ -187,6 +187,15 @@ def stargz_config_log_path(base_dir: str, model: str, base_image: str, mode: str
     label_slug = config_label.replace(" ", "_").replace(",", "").replace("/", "_")
     return os.path.join(stargz_config_logs_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{label_slug}_{n}allotments_run{run}.json")
 
+def refresh_layer_logs_dir(base_dir: str) -> str:
+    return os.path.join(base_dir, "logs", "refresh-layer")
+
+def refresh_layer_logs_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(refresh_layer_logs_dir(base_dir), execution_ts)
+
+def refresh_layer_log_path(base_dir: str, model: str, base_image: str, arm: str, run: int, execution_ts: str) -> str:
+    return os.path.join(refresh_layer_logs_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{arm}_run{run}.json")
+
 def refresh_logs_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "logs", "refresh")
 
@@ -195,15 +204,6 @@ def refresh_logs_run_dir(base_dir: str, execution_ts: str) -> str:
 
 def refresh_log_path(base_dir: str, model: str, base_image: str, arm: str, run: int, execution_ts: str) -> str:
     return os.path.join(refresh_logs_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{arm}_run{run}.json")
-
-def refresh_full_logs_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "logs", "refresh-full")
-
-def refresh_full_logs_run_dir(base_dir: str, execution_ts: str) -> str:
-    return os.path.join(refresh_full_logs_dir(base_dir), execution_ts)
-
-def refresh_full_log_path(base_dir: str, model: str, base_image: str, arm: str, run: int, execution_ts: str) -> str:
-    return os.path.join(refresh_full_logs_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{arm}_run{run}.json")
 
 
 def prefetch_pull_logs_dir(base_dir: str) -> str:
@@ -234,11 +234,11 @@ def pull_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image:
         return os.path.join(root, "base", f"n_{n}")
     return os.path.join(root, mode)
 
+def refresh_layer_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, build_mode: str) -> str:
+    return os.path.join(_experiment_dir(base_dir, "refresh-layer", execution_ts, model, base_image), build_mode)
+
 def refresh_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, build_mode: str) -> str:
     return os.path.join(_experiment_dir(base_dir, "refresh", execution_ts, model, base_image), build_mode)
-
-def refresh_full_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, build_mode: str) -> str:
-    return os.path.join(_experiment_dir(base_dir, "refresh-full", execution_ts, model, base_image), build_mode)
 
 def manual_update_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, build_mode: str) -> str:
     return os.path.join(_experiment_dir(base_dir, "manual-update", execution_ts, model, base_image), build_mode)

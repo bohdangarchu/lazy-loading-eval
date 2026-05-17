@@ -16,7 +16,7 @@ class EnvConfig:
     build_with_resource: bool
     rebuild_n_runs: int
     pull_n_runs: int
-    refresh_n_runs: int
+    refresh_layer_n_runs: int
     stargz_config_n_splits: int
     stargz_config_base_splits: list[int]
     stargz_config_n_runs: int

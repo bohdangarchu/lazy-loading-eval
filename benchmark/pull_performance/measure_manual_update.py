@@ -136,9 +136,9 @@ def measure_manual_update(
     }
 
     for mode in MANUAL_UPDATE_MODES:
-        for run in range(CFG.refresh_n_runs):
+        for run in range(CFG.refresh_layer_n_runs):
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
-                     f"=== {mode} run {run + 1}/{CFG.refresh_n_runs} ===")
+                     f"=== {mode} run {run + 1}/{CFG.refresh_layer_n_runs} ===")
             for pct in PARTITION_PERCENTS:
                 k = max(1, max_allowed_splits * pct // 100)
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -192,7 +192,7 @@ def measure_manual_update(
 def print_results(
     results: dict[str, list[tuple[int, int, float, float, float, float]]],
 ) -> None:
-    log.result(f"\n=== Manual-Update Baseline Results (mean ± stddev, n={CFG.refresh_n_runs} runs) ===")
+    log.result(f"\n=== Manual-Update Baseline Results (mean ± stddev, n={CFG.refresh_layer_n_runs} runs) ===")
     log.result(
         f"{'pct':>5}  {'mode':<32}  "
         f"{'stop':>10}  {'pull':>10}  {'run':>10}  {'file_acc':>10}  {'total':>10}"
@@ -232,7 +232,7 @@ def save_results_csv(
         ]
 
     rows = []
-    for run in range(CFG.refresh_n_runs):
+    for run in range(CFG.refresh_layer_n_runs):
         for pct in PARTITION_PERCENTS:
             row: dict = {"run": run, "partition_pct": pct}
             for mode, entries in results.items():
@@ -327,7 +327,7 @@ def plot(
     ax.set_xlabel("Elapsed time (s)")
     ax.set_ylabel("Partition size (%)")
     ax.set_title(
-        f"manual-update baseline ({mode}, mean ± stddev, n={CFG.refresh_n_runs} runs)"
+        f"manual-update baseline ({mode}, mean ± stddev, n={CFG.refresh_layer_n_runs} runs)"
     )
     ax.invert_yaxis()
     ax.grid(True, linestyle="--", alpha=0.3, axis="x")
@@ -360,7 +360,7 @@ def manual_update_main(execution_ts: str) -> None:
     log.set_verbose(VERBOSE)
     log.info(f"Manual-update modes: {MANUAL_UPDATE_MODES}")
     log.info(f"Partition percents: {PARTITION_PERCENTS}")
-    log.info(f"CFG.refresh_n_runs: {CFG.refresh_n_runs}")
+    log.info(f"CFG.refresh_layer_n_runs: {CFG.refresh_layer_n_runs}")
 
     for model, base_image, max_allowed_splits in EXPERIMENTS:
         log.result(
