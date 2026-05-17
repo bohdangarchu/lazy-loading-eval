@@ -1,8 +1,6 @@
 import hashlib
-import json
 import os
 import subprocess
-import urllib.request
 import uuid
 from datetime import datetime, timezone
 
@@ -16,9 +14,11 @@ from shared.artifacts import (
 from shared.config import load_config
 from shared.registry import (
     clear_registry,
+    fetch_layer_digests,
     image_slug,
     prepare_local_registry,
     registry,
+    save_toc,
     tdfs_cmd,
 )
 from shared.services import clear_2dfs_cache, clear_stargz_cache, ensure_buildkit
@@ -102,52 +102,6 @@ def _full_tag() -> str:
     return f"latest--0.0.0.{end_col}"
 
 
-def _fetch_layer_digests(tag: str | None = None) -> list[str]:
-    if tag is None:
-        tag = _full_tag()
-    base = f"http://{registry(CFG)}/v2/{_repo()}/manifests"
-    accept = ", ".join([
-        "application/vnd.oci.image.index.v1+json",
-        "application/vnd.oci.image.manifest.v1+json",
-        "application/vnd.docker.distribution.manifest.list.v2+json",
-        "application/vnd.docker.distribution.manifest.v2+json",
-    ])
-    req = urllib.request.Request(f"{base}/{tag}", headers={"Accept": accept})
-    with urllib.request.urlopen(req) as resp:
-        m = json.loads(resp.read())
-    if "manifests" in m:
-        entries = m["manifests"]
-        chosen = None
-        for entry in entries:
-            plat = entry.get("platform", {})
-            if plat.get("os") == "linux" and plat.get("architecture") == "amd64":
-                chosen = entry
-                break
-        if chosen is None:
-            log.info(f"no linux/amd64 in index ({len(entries)} entries); using first")
-            chosen = entries[0]
-        req2 = urllib.request.Request(f"{base}/{chosen['digest']}", headers={"Accept": accept})
-        with urllib.request.urlopen(req2) as resp2:
-            m = json.loads(resp2.read())
-    return [layer["digest"] for layer in m["layers"]]
-
-
-def _save_toc(digest: str, out_path: str) -> None:
-    ref = f"{registry(CFG)}/{_repo()}@{digest}"
-    log.info(f"fetch-toc {digest[:19]}... -> {os.path.basename(out_path)}")
-    result = subprocess.run(
-        ["sudo", "ctr-remote", "fetch-toc", ref],
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        log.result(f"WARN: fetch-toc failed for {digest[:19]}... (rc={result.returncode}); skipping")
-        if result.stderr:
-            log.info(result.stderr.decode(errors="replace").strip())
-        return
-    with open(out_path, "wb") as f:
-        f.write(result.stdout)
-
-
 def main():
     log.set_verbose(True)
     clear_artifacts(SCRIPT_DIR)
@@ -167,10 +121,11 @@ def main():
 
     log.result("=== Build + push v0 ===")
     _build_and_push(chunk_paths, "v0")
-    v0_digests = _fetch_layer_digests()
+    repo = _repo()
+    v0_digests = fetch_layer_digests(registry(CFG), repo, _full_tag())
     log.info(f"v0 layers: {[d[:19] for d in v0_digests]}")
     for i, d in enumerate(v0_digests):
-        _save_toc(d, os.path.join(toc_dir, f"toc_v0_layer{i}.json"))
+        save_toc(registry(CFG), repo, d, os.path.join(toc_dir, f"toc_v0_layer{i}.json"))
 
     pull_ref = _pull_ref()
     log.result(f"=== rpull v0: {pull_ref} ===")
@@ -191,7 +146,7 @@ def main():
     expected_digest = _sha256_local(chunk_paths[MUTATED_IDX])
     log.info(f"expected post-refresh sha256({target_file}) = {expected_digest}")
     _build_and_push(chunk_paths, "v1")
-    v1_digests = _fetch_layer_digests()
+    v1_digests = fetch_layer_digests(registry(CFG), repo, _full_tag())
     log.info(f"v1 layers: {[d[:19] for d in v1_digests]}")
 
     changed = [
@@ -201,7 +156,7 @@ def main():
     if not changed:
         log.result("WARN: no changed layer detected between v0 and v1")
     for i in changed:
-        _save_toc(v1_digests[i], os.path.join(toc_dir, f"toc_v1_layer{i}.json"))
+        save_toc(registry(CFG), repo, v1_digests[i], os.path.join(toc_dir, f"toc_v1_layer{i}.json"))
 
     log.result(f"=== ctr-remote refresh {pull_ref} ===")
     refresh = subprocess.run(

@@ -1,8 +1,6 @@
-import json
 import os
 import subprocess
 import time
-import urllib.request
 import uuid
 from datetime import datetime, timezone
 
@@ -17,7 +15,8 @@ from shared.artifacts import clear_artifacts, snapshot_artifacts, write_2dfs_jso
 from shared.charts import figure_footer, save_figure, write_csv
 from shared.config import load_config
 from shared.registry import (
-    clear_registry, image_slug, prepare_local_registry, registry, tdfs_cmd,
+    clear_registry, fetch_layer_digests, image_slug, prepare_local_registry,
+    registry, save_toc, tdfs_cmd,
 )
 from shared.services import (
     clear_2dfs_cache, clear_stargz_cache, ensure_buildkit, save_stargz_run_log,
@@ -143,61 +142,16 @@ def _repo() -> str:
     return f"library/{image_slug(SOURCE_IMAGE)}-{MODE}-refresh"
 
 
-def _full_tag(version: int) -> str:
-    return f"v{version}--0.0.0.0"
-
-
-def _fetch_layer_digests(version: int) -> list[str]:
-    tag = _full_tag(version)
-    base = f"http://{registry(CFG)}/v2/{_repo()}/manifests"
-    accept = ", ".join([
-        "application/vnd.oci.image.index.v1+json",
-        "application/vnd.oci.image.manifest.v1+json",
-        "application/vnd.docker.distribution.manifest.list.v2+json",
-        "application/vnd.docker.distribution.manifest.v2+json",
-    ])
-    req = urllib.request.Request(f"{base}/{tag}", headers={"Accept": accept})
-    with urllib.request.urlopen(req) as resp:
-        m = json.loads(resp.read())
-    if "manifests" in m:
-        entries = m["manifests"]
-        chosen = None
-        for entry in entries:
-            plat = entry.get("platform", {})
-            if plat.get("os") == "linux" and plat.get("architecture") == "amd64":
-                chosen = entry
-                break
-        if chosen is None:
-            log.info(f"no linux/amd64 in index ({len(entries)} entries); using first")
-            chosen = entries[0]
-        req2 = urllib.request.Request(f"{base}/{chosen['digest']}", headers={"Accept": accept})
-        with urllib.request.urlopen(req2) as resp2:
-            m = json.loads(resp2.read())
-    return [layer["digest"] for layer in m["layers"]]
-
-
-def _save_toc(digest: str, out_path: str) -> None:
-    ref = f"{registry(CFG)}/{_repo()}@{digest}"
-    log.info(f"fetch-toc {digest[:19]}... -> {os.path.basename(out_path)}")
-    result = subprocess.run(
-        ["sudo", "ctr-remote", "fetch-toc", ref],
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        log.result(f"WARN: fetch-toc failed for {digest[:19]}... (rc={result.returncode}); skipping")
-        if result.stderr:
-            log.info(result.stderr.decode(errors="replace").strip())
-        return
-    with open(out_path, "wb") as f:
-        f.write(result.stdout)
-
-
 def _export_tocs(version: int, toc_dir: str) -> list[str]:
     os.makedirs(toc_dir, exist_ok=True)
-    digests = _fetch_layer_digests(version)
+    repo = _repo()
+    digests = fetch_layer_digests(registry(CFG), repo, f"v{version}--0.0.0.0")
     log.info(f"v{version} layers: {[d[:19] for d in digests]}")
     for i, d in enumerate(digests):
-        _save_toc(d, os.path.join(toc_dir, f"toc_v{version}_layer{i}.json"))
+        save_toc(
+            registry(CFG), repo, d,
+            os.path.join(toc_dir, f"toc_v{version}_layer{i}.json"),
+        )
     return digests
 
 

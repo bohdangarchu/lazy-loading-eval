@@ -114,6 +114,58 @@ def _parse_name_tag(local_tag: str, registry_url: str) -> tuple[str, str]:
     return name, tag
 
 
+def fetch_layer_digests(registry_url: str, repo: str, tag: str) -> list[str]:
+    """Fetch layer digests for a given image tag from the registry v2 API.
+
+    Resolves index manifests to the linux/amd64 entry (falls back to first entry).
+    """
+    base = f"http://{registry_url}/v2/{repo}/manifests"
+    accept = ", ".join([
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    ])
+    req = urllib.request.Request(f"{base}/{tag}", headers={"Accept": accept})
+    with urllib.request.urlopen(req) as resp:
+        m = json.loads(resp.read())
+    if "manifests" in m:
+        entries = m["manifests"]
+        chosen = None
+        for entry in entries:
+            plat = entry.get("platform", {})
+            if plat.get("os") == "linux" and plat.get("architecture") == "amd64":
+                chosen = entry
+                break
+        if chosen is None:
+            log.info(f"no linux/amd64 in index ({len(entries)} entries); using first")
+            chosen = entries[0]
+        req2 = urllib.request.Request(f"{base}/{chosen['digest']}", headers={"Accept": accept})
+        with urllib.request.urlopen(req2) as resp2:
+            m = json.loads(resp2.read())
+    return [layer["digest"] for layer in m["layers"]]
+
+
+def save_toc(registry_url: str, repo: str, digest: str, out_path: str) -> None:
+    """Run `ctr-remote fetch-toc` for a layer and write the JSON to out_path.
+
+    On failure logs a warning and returns without raising.
+    """
+    ref = f"{registry_url}/{repo}@{digest}"
+    log.info(f"fetch-toc {digest[:19]}... -> {os.path.basename(out_path)}")
+    result = subprocess.run(
+        ["sudo", "ctr-remote", "fetch-toc", ref],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        log.result(f"WARN: fetch-toc failed for {digest[:19]}... (rc={result.returncode}); skipping")
+        if result.stderr:
+            log.info(result.stderr.decode(errors="replace").strip())
+        return
+    with open(out_path, "wb") as f:
+        f.write(result.stdout)
+
+
 def clear_registry(cfg: EnvConfig, preserve_base: bool = False, verbose: bool = True) -> None:
     """Delete all images from the registry via v2 API.
 
