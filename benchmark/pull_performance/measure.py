@@ -1,8 +1,8 @@
-import csv
 import os
 import subprocess
 import time
 import uuid
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
@@ -10,13 +10,14 @@ import matplotlib.patches as mpatches
 import numpy as np
 
 from shared import log
-from shared.charts import MODE_COLORS, figure_footer, save_figure
-from pull_performance.paths import pull_csv_path, pull_chart_path, pull_artifacts_dir
+from shared.charts import MODE_COLORS, figure_footer, save_figure, write_csv
+from pull_performance.paths import pull_csv_path, pull_chart_path, pull_artifacts_dir, pull_stargz_config_path, pull_merged_csv_path
 from shared.config import load_config
-from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
+from shared.registry import prepare_local_registry, clear_registry, registry
 from shared.services import ensure_buildkit, clear_stargz_cache
 from shared.artifacts import clear_artifacts
 from shared.model import cleanup_pull_experiment
+from shared.stargz_config import read_base_config
 from pull_performance.prepare import (
     prepare_chunks,
     prepare_2dfs, prepare_2dfs_stargz, prepare_2dfs_stargz_zstd,
@@ -29,22 +30,33 @@ from pull_performance.images import (
 
 EXPERIMENTS = [
     ("openai-community/gpt2", "docker.io/library/python:3.12-slim", 12),         # ~0.5GB     ~50 MB
-    ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim", 12),                      # ~3.09 GB     ~3.4 GB
+    # ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim", 12),                      # ~3.09 GB     ~3.4 GB
     # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama", 12),    # ~6.0 GB     ~3.4 GB
 ]
 CFG = load_config()
 VERBOSE = True
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
-# MODES = ["2dfs-stargz"]
 PARTITION_PERCENTS = [25, 50, 75, 100]
+SCHEMA_VERSION = 1
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
+@dataclass(frozen=True)
+class PullRow:
+    schema_version: int
+    model: str
+    base_image: str
+    max_allowed_splits: int
+    run: int
+    partition_pct: int
+    num_splits: int
+    mode: str
+    pull_s: float
+    run_s: float
+    total_s: float
+
 # ── helpers ────────────────────────────────────────────────────────
-
-
-def _run(cmd: str) -> None:
-    subprocess.run(cmd, shell=True, check=True, capture_output=not log.VERBOSE)
 
 
 def _next_container_name(prefix: str) -> str:
@@ -218,9 +230,8 @@ def _splits_for(max_allowed_splits: int) -> list[int]:
 def measure(
     chunk_paths: list[str], max_allowed_splits: int, source_image: str, cfg,
     model: str, execution_ts: str,
-) -> dict[str, list[tuple[int, int, float, float]]]:
-    # results[mode] = list of (run, pct, pull_t, run_t)
-    results: dict[str, list[tuple[int, int, float, float]]] = {m: [] for m in MODES}
+) -> list[PullRow]:
+    results: list[PullRow] = []
 
     base_splits = _splits_for(max_allowed_splits)
 
@@ -238,7 +249,19 @@ def measure(
                 log.info(f"\n[{ts}] === {mode}: {pct}% ({n} splits) ===")
                 clear_stargz_cache()
                 _, pull_t, run_t = _measure_one(mode, n, source_image, cfg)
-                results[mode].append((run, pct, pull_t, run_t))
+                results.append(PullRow(
+                    schema_version=SCHEMA_VERSION,
+                    model=model,
+                    base_image=source_image,
+                    max_allowed_splits=max_allowed_splits,
+                    run=run,
+                    partition_pct=pct,
+                    num_splits=n,
+                    mode=mode,
+                    pull_s=pull_t,
+                    run_s=run_t,
+                    total_s=pull_t + run_t,
+                ))
                 log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
                 time.sleep(cfg.pull_cooldown)
 
@@ -250,18 +273,18 @@ def measure(
 # ── output ─────────────────────────────────────────────────────────
 
 
-def print_results(results: dict[str, list[tuple[int, int, float, float]]]) -> None:
-    pcts = sorted(set(p for entries in results.values() for _, p, _, _ in entries))
+def print_results(results: list[PullRow]) -> None:
+    pcts = sorted({r.partition_pct for r in results})
     col = 26
-    header_modes = "  ".join(f"{m:>{col}}" for m in results)
-    subheader = "  ".join(f"{'pull(m±s) run(m±s)':>{col}}" for _ in results)
+    header_modes = "  ".join(f"{m:>{col}}" for m in MODES)
+    subheader = "  ".join(f"{'pull(m±s) run(m±s)':>{col}}" for _ in MODES)
     log.result(f"\n=== Pull + Run Performance Results (mean ± stddev, n={CFG.pull_n_runs} runs) ===")
     log.result(f"{'pct':>8}  {header_modes}")
     log.result(f"{'':>8}  {subheader}")
-    log.result("-" * (10 + (col + 2) * len(results)))
+    log.result("-" * (10 + (col + 2) * len(MODES)))
     for pct in pcts:
-        def fmt(entries: list[tuple[int, int, float, float]]) -> str:
-            group = [(pull_t, run_t) for _, p_val, pull_t, run_t in entries if p_val == pct]
+        def fmt(mode: str) -> str:
+            group = [(r.pull_s, r.run_s) for r in results if r.mode == mode and r.partition_pct == pct]
             if not group:
                 return "N/A"
             pull_arr = np.array([g[0] for g in group])
@@ -270,75 +293,48 @@ def print_results(results: dict[str, list[tuple[int, int, float, float]]]) -> No
                 f"{pull_arr.mean():.1f}±{pull_arr.std(ddof=0):.1f} "
                 f"{run_arr.mean():.1f}±{run_arr.std(ddof=0):.1f}"
             )
-        row = "  ".join(f"{fmt(entries):>{col}}" for entries in results.values())
+        row = "  ".join(f"{fmt(m):>{col}}" for m in MODES)
         log.result(f"{pct:>7}%  {row}")
 
 
-def save_csv(
-    results: dict[str, list[tuple[int, int, float, float]]],
-    model: str,
-    base_image: str,
-    execution_ts: str,
-) -> None:
-    pcts = sorted(set(p for entries in results.values() for _, p, _, _ in entries))
-    output_path = pull_csv_path(SCRIPT_DIR, model, base_image, len(pcts), execution_ts)
+def _write_pull_rows(output_path: str, results: list[PullRow]) -> None:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        header = ["run", "partition_pct"]
-        for mode in results:
-            slug = mode.replace("-", "_")
-            header += [f"{slug}_pull_s", f"{slug}_run_s", f"{slug}_total_s"]
-        writer.writerow(header)
-        for run in range(CFG.pull_n_runs):
-            for pct in pcts:
-                def row_vals(entries: list[tuple[int, int, float, float]]) -> list[str]:
-                    match = [(pull_t, run_t) for r, p_val, pull_t, run_t in entries if r == run and p_val == pct]
-                    if not match:
-                        return ["", "", ""]
-                    p, r_t = match[0]
-                    return [f"{p:.4f}", f"{r_t:.4f}", f"{p+r_t:.4f}"]
-                writer.writerow([run, pct, *(v for entries in results.values() for v in row_vals(entries))])
-
-        for stat_name, stat_fn in (("mean", np.mean), ("std", lambda a: np.std(a, ddof=0))):
-            for pct in pcts:
-                def stat_vals(entries: list[tuple[int, int, float, float]]) -> list[str]:
-                    group = [(pull_t, run_t) for _, p_val, pull_t, run_t in entries if p_val == pct]
-                    if not group:
-                        return ["", "", ""]
-                    pull_arr = np.array([g[0] for g in group])
-                    run_arr = np.array([g[1] for g in group])
-                    tot_arr = pull_arr + run_arr
-                    return [
-                        f"{float(stat_fn(pull_arr)):.4f}",
-                        f"{float(stat_fn(run_arr)):.4f}",
-                        f"{float(stat_fn(tot_arr)):.4f}",
-                    ]
-                writer.writerow([stat_name, pct, *(v for entries in results.values() for v in stat_vals(entries))])
-    log.result(f"Results saved to {output_path}")
+    fieldnames = [f.name for f in fields(PullRow)]
+    rows = [{
+        **asdict(r),
+        "pull_s": f"{r.pull_s:.4f}",
+        "run_s": f"{r.run_s:.4f}",
+        "total_s": f"{r.total_s:.4f}",
+    } for r in results]
+    write_csv(output_path, fieldnames, rows)
 
 
-def plot(
-    results: dict[str, list[tuple[int, int, float, float]]],
-    model: str,
-    base_image: str,
-    execution_ts: str,
-) -> None:
-    pcts = sorted(set(p for entries in results.values() for _, p, _, _ in entries))
+def save_csv(results: list[PullRow], model: str, base_image: str, execution_ts: str) -> None:
+    pcts = sorted({r.partition_pct for r in results})
+    output_path = pull_csv_path(SCRIPT_DIR, model, base_image, len(pcts), execution_ts)
+    _write_pull_rows(output_path, results)
+
+
+def save_merged_csv(results: list[PullRow], execution_ts: str) -> None:
+    _write_pull_rows(pull_merged_csv_path(SCRIPT_DIR, execution_ts), results)
+
+
+def plot(results: list[PullRow], model: str, base_image: str, execution_ts: str) -> None:
+    pcts = sorted({r.partition_pct for r in results})
     x = np.arange(len(pcts))
-    n_modes = len(results)
+    n_modes = len(MODES)
     width = min(0.8 / n_modes, 0.15)
 
     fig, ax = plt.subplots(figsize=(max(10, n_modes * 2), 6))
 
-    for i, (mode, entries) in enumerate(results.items()):
+    for i, mode in enumerate(MODES):
         color = MODE_COLORS[mode]
         offset = (i - (n_modes - 1) / 2) * width
         mean_pulls, std_pulls = [], []
         mean_runs = []
         std_totals = []
         for pct in pcts:
-            group = [(pull_t, run_t) for _, p_val, pull_t, run_t in entries if p_val == pct]
+            group = [(r.pull_s, r.run_s) for r in results if r.mode == mode and r.partition_pct == pct]
             if group:
                 pull_arr = np.array([g[0] for g in group])
                 run_arr = np.array([g[1] for g in group])
@@ -359,13 +355,13 @@ def plot(
 
     ax.set_xlabel("Partition size (%)")
     ax.set_ylabel("Time (s)")
-    ax.set_title(f"Pull + Run Performance (mean ± stddev, n={CFG.pull_n_runs} runs")
+    ax.set_title(f"Pull + Run Performance (mean ± stddev, n={CFG.pull_n_runs} runs)")
     ax.set_xticks(x)
     ax.set_xticklabels([f"{p}%" for p in pcts])
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")
 
     method_handles = [mpatches.Patch(facecolor=MODE_COLORS[m], edgecolor=MODE_COLORS[m], label=m)
-                      for m in results]
+                      for m in MODES]
     pull_patch = mpatches.Patch(facecolor="gray", alpha=0.5, hatch="//",
                                 edgecolor="gray", label="pull")
     run_patch = mpatches.Patch(facecolor="gray", edgecolor="gray", label="run")
@@ -394,6 +390,13 @@ def main():
     for model, _, _ in EXPERIMENTS:
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
 
+    stargz_config_path = pull_stargz_config_path(SCRIPT_DIR, execution_ts)
+    os.makedirs(os.path.dirname(stargz_config_path), exist_ok=True)
+    with open(stargz_config_path, "w") as f:
+        f.write(read_base_config())
+    log.result(f"Stargz config snapshot saved to {stargz_config_path}")
+
+    all_results: list[PullRow] = []
     for model, base_image, max_allowed_splits in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} (max_splits={max_allowed_splits}) =====")
         chunk_paths = prepare_chunks(model, max_allowed_splits)
@@ -403,7 +406,11 @@ def main():
         print_results(results)
         save_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, execution_ts)
+        all_results.extend(results)
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
+
+    if all_results:
+        save_merged_csv(all_results, execution_ts)
 
     clear_artifacts(SCRIPT_DIR)
 

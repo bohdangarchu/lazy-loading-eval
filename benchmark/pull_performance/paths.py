@@ -119,6 +119,12 @@ def pull_csv_path(base_dir: str, model: str, base_image: str, n_splits: int, exe
 def pull_chart_path(base_dir: str, model: str, base_image: str, n_splits: int, execution_ts: str) -> str:
     return os.path.join(pull_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_pull_{n_splits}.png")
 
+def pull_stargz_config_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_run_dir(base_dir, execution_ts), "stargz-config.toml")
+
+def pull_merged_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_run_dir(base_dir, execution_ts), "merged.csv")
+
 def refresh_layer_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(refresh_layer_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh_layer.csv")
 
@@ -136,6 +142,15 @@ def refresh_bytes_csv_path(base_dir: str, model: str, base_image: str, execution
 
 def refresh_bytes_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(refresh_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh_bytes.png")
+
+def refresh_merged_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(refresh_run_dir(base_dir, execution_ts), "merged.csv")
+
+def refresh_merged_bytes_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(refresh_run_dir(base_dir, execution_ts), "merged_bytes.csv")
+
+def refresh_stargz_config_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(refresh_run_dir(base_dir, execution_ts), "stargz-config.toml")
 
 def manual_update_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(manual_update_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_manual_update.csv")

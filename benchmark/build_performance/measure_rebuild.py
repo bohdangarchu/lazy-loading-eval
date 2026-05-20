@@ -8,7 +8,7 @@ import numpy as np
 
 from shared import log
 from shared.build_result import BuildResult
-from build_performance.paths import rebuild_charts_run_dir, rebuild_csv_path, rebuild_chart_path, rebuild_artifacts_dir
+from build_performance.paths import rebuild_charts_run_dir, rebuild_csv_path, rebuild_chart_path, rebuild_artifacts_dir, rebuild_merged_csv_path
 from shared.charts import MODE_COLORS, figure_footer, save_figure, write_csv
 from shared.config import load_config
 from shared.artifacts import mutate_chunk, snapshot_artifacts, clear_artifacts
@@ -115,12 +115,19 @@ def measure_rebuilds(
     return results
 
 
-def save_csv(results: list[RebuildRow], model: str, base_image: str, execution_ts: str) -> None:
-    path = rebuild_csv_path(SCRIPT_DIR, model, base_image, execution_ts)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+def _write_rebuild_rows(output_path: str, results: list[RebuildRow]) -> None:
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fieldnames = [f.name for f in fields(RebuildRow)]
     rows = [{**asdict(r), "total_s": f"{r.total_s:.4f}"} for r in results]
-    write_csv(path, fieldnames, rows)
+    write_csv(output_path, fieldnames, rows)
+
+
+def save_csv(results: list[RebuildRow], model: str, base_image: str, execution_ts: str) -> None:
+    _write_rebuild_rows(rebuild_csv_path(SCRIPT_DIR, model, base_image, execution_ts), results)
+
+
+def save_merged_csv(results: list[RebuildRow], execution_ts: str) -> None:
+    _write_rebuild_rows(rebuild_merged_csv_path(SCRIPT_DIR, execution_ts), results)
 
 
 def plot(results: list[RebuildRow], model: str, base_image: str, max_allowed_splits: int, execution_ts: str) -> None:
@@ -164,6 +171,7 @@ def main():
     log.set_verbose(VERBOSE)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    all_results: list[RebuildRow] = []
     for model, base_image, max_allowed_splits in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} (max_allowed_splits={max_allowed_splits}) =====")
         prepare_local_registry(base_image, registry(CFG))
@@ -181,12 +189,16 @@ def main():
 
         save_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, max_allowed_splits, execution_ts)
+        all_results.extend(results)
 
         log.result(f"\n{'run':>4}  {'pct':>4}  {'n_mut':>5}  {'direction':<16}  {'mode':<14}  {'total':>8}")
         log.result("-" * 60)
         for row in results:
             log.result(f"{row.run:>4}  {row.mutation_pct:>3}%  {row.n_chunks_mutated:>5}  {row.direction:<16}  {row.mode:<14}  "
                        f"{row.total_s:>8.2f}")
+
+    if all_results:
+        save_merged_csv(all_results, execution_ts)
 
     clear_artifacts(SCRIPT_DIR)
 

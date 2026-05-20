@@ -2,7 +2,9 @@ import os
 import subprocess
 import time
 import uuid
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -22,10 +24,13 @@ from shared.registry import (
 from shared.services import (
     clear_2dfs_cache, clear_stargz_cache, ensure_buildkit, save_stargz_run_log,
 )
+from shared.stargz_config import read_base_config
 from pull_performance.measure import _next_container_name
 from pull_performance.paths import (
     refresh_artifacts_dir, refresh_bytes_chart_path, refresh_bytes_csv_path,
     refresh_chart_path, refresh_csv_path, refresh_log_path,
+    refresh_merged_csv_path, refresh_merged_bytes_csv_path,
+    refresh_stargz_config_path,
 )
 from pull_performance.refresh_common import (
     base_image, build_mode, extra_flags, start_container, stop_container, timed_pull,
@@ -43,8 +48,42 @@ MUTATED_FILENAME = "tokenizer_config.json"
 MUTATION_STRING = b"added string"
 OP_TYPES = ["on_demand_bytes_fetched"]
 PROM_SETTLE_S = 1.0  # > scrape_interval (500ms) so post-op scrape is visible
+SCHEMA_VERSION = 1
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+UpdateStrategy = Literal["baseline", "refresh"]
+ExperimentPhase = Literal["setup", "update"]
+ImageVersion = Literal["before", "after"]
+
+@dataclass(frozen=True)
+class RefreshTimeRow:
+    schema_version: int
+    model: str
+    base_image: str
+    mode: str
+    run: int
+    update_strategy: UpdateStrategy
+    stop_s: float | None
+    pull_s: float | None
+    run_s: float | None
+    refresh_s: float | None
+    read_s: float
+    total_s: float
+
+
+@dataclass(frozen=True)
+class RefreshBytesRow:
+    schema_version: int
+    model: str
+    base_image: str
+    mode: str
+    run: int
+    update_strategy: UpdateStrategy
+    experiment_phase: ExperimentPhase
+    layer: str
+    op_type: str
+    bytes: int
 
 
 # ── snapshot download ──────────────────────────────────────────────────
@@ -130,12 +169,12 @@ def _restore_byte(offset: int, length: int) -> None:
 # ── image naming ───────────────────────────────────────────────────────
 
 
-def _build_target(version: int) -> str:
-    return f"{registry(CFG)}/{image_slug(SOURCE_IMAGE)}-{MODE}-refresh:v{version}"
+def _build_target(image_version: ImageVersion) -> str:
+    return f"{registry(CFG)}/{image_slug(SOURCE_IMAGE)}-{MODE}-refresh:{image_version}"
 
 
-def _pull_ref(version: int) -> str:
-    return f"{registry(CFG)}/library/{image_slug(SOURCE_IMAGE)}-{MODE}-refresh:v{version}--0.0.0.0"
+def _pull_ref(image_version: ImageVersion) -> str:
+    return f"{registry(CFG)}/library/{image_slug(SOURCE_IMAGE)}-{MODE}-refresh:{image_version}--0.0.0.0"
 
 
 # ── TOC export ─────────────────────────────────────────────────────────
@@ -145,15 +184,15 @@ def _repo() -> str:
     return f"library/{image_slug(SOURCE_IMAGE)}-{MODE}-refresh"
 
 
-def _export_tocs(version: int, toc_dir: str) -> list[str]:
+def _export_tocs(image_version: ImageVersion, toc_dir: str) -> list[str]:
     os.makedirs(toc_dir, exist_ok=True)
     repo = _repo()
-    digests = fetch_layer_digests(registry(CFG), repo, f"v{version}--0.0.0.0")
-    log.info(f"v{version} layers: {[d[:19] for d in digests]}")
+    digests = fetch_layer_digests(registry(CFG), repo, f"{image_version}--0.0.0.0")
+    log.info(f"{image_version} layers: {[d[:19] for d in digests]}")
     for i, d in enumerate(digests):
         save_toc(
             registry(CFG), repo, d,
-            os.path.join(toc_dir, f"toc_v{version}_layer{i}.json"),
+            os.path.join(toc_dir, f"toc_{image_version}_layer{i}.json"),
         )
     return digests
 
@@ -161,8 +200,8 @@ def _export_tocs(version: int, toc_dir: str) -> list[str]:
 # ── build helpers ──────────────────────────────────────────────────────
 
 
-def _build_version(snapshot_files: list[str], version: int) -> None:
-    target = _build_target(version)
+def _build_version(snapshot_files: list[str], image_version: ImageVersion) -> None:
+    target = _build_target(image_version)
     base = base_image(SOURCE_IMAGE, CFG, MODE)
 
     write_2dfs_json([snapshot_files], SCRIPT_DIR)
@@ -173,7 +212,7 @@ def _build_version(snapshot_files: list[str], version: int) -> None:
         "--force-http", "-f", "2dfs.json",
         base, target,
     ]
-    log.info(f"Building v{version}: {target}")
+    log.info(f"Building {image_version}: {target}")
     subprocess.run(cmd, check=True, cwd=SCRIPT_DIR, capture_output=not log.VERBOSE)
     log.result(f"Built {target}")
 
@@ -190,8 +229,8 @@ def prepare_refresh(
     artifacts_dir: str | None = None,
     toc_dir: str | None = None,
 ) -> list[str]:
-    """Download snapshot, build & push v0, mutate one byte, build & push v1,
-    restore. Returns snapshot file list.
+    """Download snapshot, build & push before-image, mutate one byte, build &
+    push after-image, restore. Returns snapshot file list.
     """
     snapshot_files = download_snapshot()
 
@@ -199,28 +238,28 @@ def prepare_refresh(
     clear_registry(CFG, preserve_base=True, verbose=False)
     clear_artifacts(SCRIPT_DIR)
 
-    _build_version(snapshot_files, 0)
+    _build_version(snapshot_files, "before")
     if artifacts_dir:
         snapshot_artifacts(SCRIPT_DIR, artifacts_dir)
-    v0_digests: list[str] = []
+    before_digests: list[str] = []
     if toc_dir:
-        v0_digests = _export_tocs(0, toc_dir)
+        before_digests = _export_tocs("before", toc_dir)
 
     offset, original = _mutate_chat_template()
     try:
-        _build_version(snapshot_files, 1)
+        _build_version(snapshot_files, "after")
     finally:
         _restore_byte(offset, original)
 
     if toc_dir:
-        v1_digests = _export_tocs(1, toc_dir)
+        after_digests = _export_tocs("after", toc_dir)
         changed = [
-            i for i in range(min(len(v0_digests), len(v1_digests)))
-            if v0_digests[i] != v1_digests[i]
+            i for i in range(min(len(before_digests), len(after_digests)))
+            if before_digests[i] != after_digests[i]
         ]
         log.result(
-            f"TOC: v0 vs v1 changed layer indices: {changed}"
-            if changed else "TOC: no changed layers detected between v0 and v1"
+            f"TOC: before vs after changed layer indices: {changed}"
+            if changed else "TOC: no changed layers detected between before and after"
         )
 
     return snapshot_files
@@ -313,10 +352,11 @@ def _log_deltas(label: str, deltas: dict[str, dict[str, int]]) -> None:
                    f"layers={len(deltas.get(op, {}))}")
 
 
-def _setup_warm_v0(
+def _setup(
     in_paths: list[str],
 ) -> tuple[str, dict[str, dict[str, int]]]:
-    """Clear stargz cache, pull v0, start container, warm page cache via cat.
+    """Clear stargz cache, pull before-image, start container, warm page cache
+    via cat.
 
     Diagnostic: cat twice back-to-back. If second cat is fast, the kernel page
     cache is being used; if both are ~same, FUSE is bypassing it (in which case
@@ -324,21 +364,21 @@ def _setup_warm_v0(
     """
     clear_stargz_cache()
     time.sleep(PROM_SETTLE_S)
-    before = _snapshot_bytes()
-    v0 = _pull_ref(0)
-    log.info(f"Pulling v0 (setup): {v0}")
+    bytes_before = _snapshot_bytes()
+    before_ref = _pull_ref("before")
+    log.info(f"Pulling before-image (setup): {before_ref}")
     subprocess.run(
-        ["sudo", "ctr-remote", "images", "rpull", "--plain-http", v0],
+        ["sudo", "ctr-remote", "images", "rpull", "--plain-http", before_ref],
         check=True, capture_output=not log.VERBOSE,
     )
-    name = _next_container_name(f"refresh-v0")
-    start_container(v0, name)
+    name = _next_container_name("refresh-before")
+    start_container(before_ref, name)
 
     cold_t = _cat_all_in_container(name, in_paths)
     warm_t = _cat_all_in_container(name, in_paths)
     _assert_mutated(name, expected=False)
     time.sleep(PROM_SETTLE_S)
-    v0_warm_deltas = _delta(before, _snapshot_bytes())
+    setup_deltas = _delta(bytes_before, _snapshot_bytes())
     log.result(
         f"DIAGNOSTICS: warm-up cat#1 (cold)={cold_t:.2f}s "
         f"cat#2 (re-read)={warm_t:.2f}s"
@@ -349,19 +389,19 @@ def _setup_warm_v0(
             f"DIAGNOSTICS: re-read/cold ratio={ratio:.2f} "
             f"({'kernel page cache effective' if ratio < 0.5 else 'kernel page cache NOT effective — FUSE likely bypasses it'})"
         )
-    _log_deltas("v0_warm", v0_warm_deltas)
-    return name, v0_warm_deltas
+    _log_deltas("setup", setup_deltas)
+    return name, setup_deltas
 
 
-def _run_baseline_arm(
+def _run_baseline_strategy(
     in_paths: list[str], log_path: str | None = None,
 ) -> tuple[float, float, float, float,
            dict[str, dict[str, int]], dict[str, dict[str, int]]]:
-    """stop -> rpull v1 -> run -> read.
-    Returns (stop_s, pull_s, run_s, read_s, v0_warm_deltas, update_deltas)."""
+    """stop -> rpull after-image -> run -> read.
+    Returns (stop_s, pull_s, run_s, read_s, setup_deltas, update_deltas)."""
     log_window_start = time.time()
-    name, v0_warm_deltas = _setup_warm_v0(in_paths)
-    v1 = _pull_ref(1)
+    name, setup_deltas = _setup(in_paths)
+    after_ref = _pull_ref("after")
 
     update_before = _snapshot_bytes()
 
@@ -370,12 +410,12 @@ def _run_baseline_arm(
     stop_t = time.perf_counter() - t0
 
     pull_t = timed_pull(
-        ["sudo", "ctr-remote", "images", "rpull", "--plain-http", v1]
+        ["sudo", "ctr-remote", "images", "rpull", "--plain-http", after_ref]
     )
 
-    name2 = _next_container_name("refresh-v1")
+    name2 = _next_container_name("refresh-after")
     t0 = time.perf_counter()
-    start_container(v1, name2)
+    start_container(after_ref, name2)
     run_t = time.perf_counter() - t0
 
     read_t = _cat_all_in_container(name2, in_paths)
@@ -391,25 +431,25 @@ def _run_baseline_arm(
     if log_path:
         save_stargz_run_log(log_window_start, time.time(), log_path)
         log.result(f"  stargz logs -> {log_path}")
-    return stop_t, pull_t, run_t, read_t, v0_warm_deltas, update_deltas
+    return stop_t, pull_t, run_t, read_t, setup_deltas, update_deltas
 
 
-def _run_refresh_arm(
+def _run_refresh_strategy(
     in_paths: list[str], log_path: str | None = None,
 ) -> tuple[float, float,
            dict[str, dict[str, int]], dict[str, dict[str, int]]]:
-    """ctr-remote refresh v0 v1 -> read.
-    Returns (refresh_s, read_s, v0_warm_deltas, update_deltas)."""
+    """ctr-remote refresh before-image after-image -> read.
+    Returns (refresh_s, read_s, setup_deltas, update_deltas)."""
     log_window_start = time.time()
-    name, v0_warm_deltas = _setup_warm_v0(in_paths)
-    v0 = _pull_ref(0)
-    v1 = _pull_ref(1)
+    name, setup_deltas = _setup(in_paths)
+    before_ref = _pull_ref("before")
+    after_ref = _pull_ref("after")
 
     update_before = _snapshot_bytes()
 
     t0 = time.perf_counter()
     subprocess.run(
-        ["sudo", "ctr-remote", "refresh", "--plain-http", v0, v1],
+        ["sudo", "ctr-remote", "refresh", "--plain-http", before_ref, after_ref],
         check=True, capture_output=not log.VERBOSE,
     )
     refresh_t = time.perf_counter() - t0
@@ -424,17 +464,82 @@ def _run_refresh_arm(
     if log_path:
         save_stargz_run_log(log_window_start, time.time(), log_path)
         log.result(f"  stargz logs -> {log_path}")
-    return refresh_t, read_t, v0_warm_deltas, update_deltas
+    return refresh_t, read_t, setup_deltas, update_deltas
 
 
-def measure_refresh(snapshot_files: list[str], execution_ts: str) -> dict:
-    """results = {
-        "baseline": [(run, stop_s, pull_s, run_s, read_s), ...],
-        "refresh":  [(run, refresh_s, read_s), ...],
-    }
-    """
+def _baseline_row(run: int, stop: float, pull: float, run_t: float, read: float) -> RefreshTimeRow:
+    return RefreshTimeRow(
+        schema_version=SCHEMA_VERSION,
+        model=MODEL,
+        base_image=SOURCE_IMAGE,
+        mode=MODE,
+        run=run,
+        update_strategy="baseline",
+        stop_s=stop,
+        pull_s=pull,
+        run_s=run_t,
+        refresh_s=None,
+        read_s=read,
+        total_s=stop + pull + run_t + read,
+    )
+
+
+def _refresh_row(run: int, refresh: float, read: float) -> RefreshTimeRow:
+    return RefreshTimeRow(
+        schema_version=SCHEMA_VERSION,
+        model=MODEL,
+        base_image=SOURCE_IMAGE,
+        mode=MODE,
+        run=run,
+        update_strategy="refresh",
+        stop_s=None,
+        pull_s=None,
+        run_s=None,
+        refresh_s=refresh,
+        read_s=read,
+        total_s=refresh + read,
+    )
+
+
+def _bytes_rows(
+    run: int, update_strategy: UpdateStrategy, experiment_phase: ExperimentPhase, deltas: dict[str, dict[str, int]],
+) -> list[RefreshBytesRow]:
+    rows: list[RefreshBytesRow] = []
+    for op in OP_TYPES:
+        for layer, b in sorted(deltas.get(op, {}).items()):
+            rows.append(RefreshBytesRow(
+                schema_version=SCHEMA_VERSION,
+                model=MODEL,
+                base_image=SOURCE_IMAGE,
+                mode=MODE,
+                run=run,
+                update_strategy=update_strategy,
+                experiment_phase=experiment_phase,
+                layer=layer,
+                op_type=op,
+                bytes=b,
+            ))
+    return rows
+
+
+def measure_refresh(
+    snapshot_files: list[str], execution_ts: str,
+) -> tuple[list[RefreshTimeRow], list[RefreshBytesRow]]:
     in_paths = _container_paths(snapshot_files)
-    results: dict = {"baseline": [], "refresh": []}
+    time_rows: list[RefreshTimeRow] = []
+    bytes_rows: list[RefreshBytesRow] = []
+
+    def record_baseline(run: int, result: tuple) -> None:
+        stop, pull, run_t, read, setup, update = result
+        time_rows.append(_baseline_row(run, stop, pull, run_t, read))
+        bytes_rows.extend(_bytes_rows(run, "baseline", "setup", setup))
+        bytes_rows.extend(_bytes_rows(run, "baseline", "update", update))
+
+    def record_refresh(run: int, result: tuple) -> None:
+        refresh, read, setup, update = result
+        time_rows.append(_refresh_row(run, refresh, read))
+        bytes_rows.extend(_bytes_rows(run, "refresh", "setup", setup))
+        bytes_rows.extend(_bytes_rows(run, "refresh", "update", update))
 
     for run in range(N_RUNS):
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -447,38 +552,33 @@ def measure_refresh(snapshot_files: list[str], execution_ts: str) -> dict:
             SCRIPT_DIR, MODEL, SOURCE_IMAGE, "refresh", run, execution_ts,
         )
 
-        # Alternate arm order per run to remove ordering bias.
+        # Alternate update_strategy order per run to remove ordering bias.
         if run % 2 == 0:
-            baseline = _run_baseline_arm(in_paths, baseline_log)
-            results["baseline"].append((run, *baseline))
+            record_baseline(run, _run_baseline_strategy(in_paths, baseline_log))
             time.sleep(CFG.pull_cooldown)
-            refresh = _run_refresh_arm(in_paths, refresh_log)
-            results["refresh"].append((run, *refresh))
+            record_refresh(run, _run_refresh_strategy(in_paths, refresh_log))
         else:
-            refresh = _run_refresh_arm(in_paths, refresh_log)
-            results["refresh"].append((run, *refresh))
+            record_refresh(run, _run_refresh_strategy(in_paths, refresh_log))
             time.sleep(CFG.pull_cooldown)
-            baseline = _run_baseline_arm(in_paths, baseline_log)
-            results["baseline"].append((run, *baseline))
+            record_baseline(run, _run_baseline_strategy(in_paths, baseline_log))
 
         time.sleep(CFG.pull_cooldown)
 
-    return results
+    return time_rows, bytes_rows
 
 
 # ── output ─────────────────────────────────────────────────────────────
 
 
-def print_results(results: dict) -> None:
-    n = N_RUNS
-    log.result(f"\n=== Refresh-vs-Baseline Results (mean ± stddev, n={n} runs) ===")
+def print_results(time_rows: list[RefreshTimeRow]) -> None:
+    log.result(f"\n=== Refresh-vs-Baseline Results (mean ± stddev, n={N_RUNS} runs) ===")
 
-    if results["baseline"]:
-        arr = np.array(
-            [(stop, pull, run, read)
-             for _, stop, pull, run, read, _, _ in results["baseline"]]
-        )
-        tot = arr.sum(axis=1)
+    baseline = [r for r in time_rows if r.update_strategy == "baseline"]
+    refresh = [r for r in time_rows if r.update_strategy == "refresh"]
+
+    if baseline:
+        arr = np.array([(r.stop_s, r.pull_s, r.run_s, r.read_s) for r in baseline], dtype=float)
+        tot = np.array([r.total_s for r in baseline])
         log.result(
             f"baseline:  stop={arr[:,0].mean():.2f}±{arr[:,0].std():.2f}  "
             f"pull={arr[:,1].mean():.2f}±{arr[:,1].std():.2f}  "
@@ -486,11 +586,9 @@ def print_results(results: dict) -> None:
             f"read={arr[:,3].mean():.2f}±{arr[:,3].std():.2f}  "
             f"total={tot.mean():.2f}±{tot.std():.2f}"
         )
-    if results["refresh"]:
-        arr = np.array(
-            [(refresh, read) for _, refresh, read, _, _ in results["refresh"]]
-        )
-        tot = arr.sum(axis=1)
+    if refresh:
+        arr = np.array([(r.refresh_s, r.read_s) for r in refresh], dtype=float)
+        tot = np.array([r.total_s for r in refresh])
         log.result(
             f"refresh:   refresh={arr[:,0].mean():.2f}±{arr[:,0].std():.2f}  "
             f"read={arr[:,1].mean():.2f}±{arr[:,1].std():.2f}  "
@@ -498,109 +596,42 @@ def print_results(results: dict) -> None:
         )
 
 
-def save_results_csv(results: dict, execution_ts: str) -> None:
-    path = refresh_csv_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, execution_ts)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-
-    fieldnames = [
-        "run", "arm",
-        "stop_s", "pull_s", "run_s", "refresh_s", "read_s", "total_s",
-    ]
-    rows: list[dict] = []
-
-    for run, stop, pull, run_t, read, _, _ in results["baseline"]:
-        rows.append({
-            "run": run, "arm": "baseline",
-            "stop_s": f"{stop:.4f}", "pull_s": f"{pull:.4f}",
-            "run_s": f"{run_t:.4f}",
-            "refresh_s": "", "read_s": f"{read:.4f}",
-            "total_s": f"{stop + pull + run_t + read:.4f}",
-        })
-    for run, refresh, read, _, _ in results["refresh"]:
-        rows.append({
-            "run": run, "arm": "refresh",
-            "stop_s": "", "pull_s": "", "run_s": "",
-            "refresh_s": f"{refresh:.4f}", "read_s": f"{read:.4f}",
-            "total_s": f"{refresh + read:.4f}",
-        })
-
-    for stat_name, stat_fn in (("mean", np.mean), ("std", lambda a: np.std(a, ddof=0))):
-        if results["baseline"]:
-            arr = np.array(
-                [(stop, pull, run_t, read)
-                 for _, stop, pull, run_t, read, _, _ in results["baseline"]]
-            )
-            tot = arr.sum(axis=1)
-            rows.append({
-                "run": stat_name, "arm": "baseline",
-                "stop_s": f"{float(stat_fn(arr[:,0])):.4f}",
-                "pull_s": f"{float(stat_fn(arr[:,1])):.4f}",
-                "run_s":  f"{float(stat_fn(arr[:,2])):.4f}",
-                "refresh_s": "",
-                "read_s": f"{float(stat_fn(arr[:,3])):.4f}",
-                "total_s": f"{float(stat_fn(tot)):.4f}",
-            })
-        if results["refresh"]:
-            arr = np.array(
-                [(refresh, read) for _, refresh, read, _, _ in results["refresh"]]
-            )
-            tot = arr.sum(axis=1)
-            rows.append({
-                "run": stat_name, "arm": "refresh",
-                "stop_s": "", "pull_s": "", "run_s": "",
-                "refresh_s": f"{float(stat_fn(arr[:,0])):.4f}",
-                "read_s":    f"{float(stat_fn(arr[:,1])):.4f}",
-                "total_s":   f"{float(stat_fn(tot)):.4f}",
-            })
-
-    write_csv(path, fieldnames, rows)
+def _format_time_row(r: RefreshTimeRow) -> dict:
+    row = asdict(r)
+    for k, v in row.items():
+        if isinstance(v, float):
+            row[k] = f"{v:.4f}"
+        elif v is None:
+            row[k] = ""
+    return row
 
 
-# ── bytes output ───────────────────────────────────────────────────────
+def _write_time_rows(output_path: str, rows: list[RefreshTimeRow]) -> None:
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    fieldnames = [f.name for f in fields(RefreshTimeRow)]
+    write_csv(output_path, fieldnames, [_format_time_row(r) for r in rows])
 
 
-def _iter_phase_deltas(results: dict):
-    """Yields (run, arm, phase, deltas) for every recorded window."""
-    for run, _, _, _, _, v0_warm, update in results["baseline"]:
-        yield run, "baseline", "v0_warm", v0_warm
-        yield run, "baseline", "update", update
-    for run, _, _, v0_warm, update in results["refresh"]:
-        yield run, "refresh", "v0_warm", v0_warm
-        yield run, "refresh", "update", update
+def _write_bytes_rows(output_path: str, rows: list[RefreshBytesRow]) -> None:
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    fieldnames = [f.name for f in fields(RefreshBytesRow)]
+    write_csv(output_path, fieldnames, [asdict(r) for r in rows])
 
 
-def save_bytes_csv(results: dict, execution_ts: str) -> None:
-    path = refresh_bytes_csv_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, execution_ts)
-    fieldnames = ["run", "arm", "phase", "layer", "op_type", "bytes"]
-    rows: list[dict] = []
+def save_results_csv(rows: list[RefreshTimeRow], execution_ts: str) -> None:
+    _write_time_rows(refresh_csv_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, execution_ts), rows)
 
-    for run, arm, phase, deltas in _iter_phase_deltas(results):
-        for op in OP_TYPES:
-            for layer, b in sorted(deltas.get(op, {}).items()):
-                rows.append({
-                    "run": run, "arm": arm, "phase": phase,
-                    "layer": layer, "op_type": op, "bytes": b,
-                })
 
-    # Per-(arm, phase, op_type) total summary across runs.
-    totals: dict[tuple[str, str, str], list[int]] = {}
-    for _, arm, phase, deltas in _iter_phase_deltas(results):
-        for op in OP_TYPES:
-            totals.setdefault((arm, phase, op), []).append(
-                sum(deltas.get(op, {}).values())
-            )
-    for (arm, phase, op), vals in sorted(totals.items()):
-        a = np.array(vals, dtype=float)
-        rows.append({
-            "run": "mean", "arm": arm, "phase": phase,
-            "layer": "", "op_type": op, "bytes": f"{a.mean():.1f}",
-        })
-        rows.append({
-            "run": "std", "arm": arm, "phase": phase,
-            "layer": "", "op_type": op, "bytes": f"{a.std(ddof=0):.1f}",
-        })
+def save_merged_csv(rows: list[RefreshTimeRow], execution_ts: str) -> None:
+    _write_time_rows(refresh_merged_csv_path(SCRIPT_DIR, execution_ts), rows)
 
-    write_csv(path, fieldnames, rows)
+
+def save_bytes_csv(rows: list[RefreshBytesRow], execution_ts: str) -> None:
+    _write_bytes_rows(refresh_bytes_csv_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, execution_ts), rows)
+
+
+def save_merged_bytes_csv(rows: list[RefreshBytesRow], execution_ts: str) -> None:
+    _write_bytes_rows(refresh_merged_bytes_csv_path(SCRIPT_DIR, execution_ts), rows)
 
 
 # ── chart ──────────────────────────────────────────────────────────────
@@ -615,17 +646,17 @@ PHASE_COLORS = {
 }
 
 
-def plot(results: dict, execution_ts: str) -> None:
+def plot(time_rows: list[RefreshTimeRow], execution_ts: str) -> None:
     fig, ax = plt.subplots(figsize=(10, 3.6))
 
     y_positions = [0, 1]
     labels = ["manual update", "refresh"]
 
-    if results["baseline"]:
-        arr = np.array(
-            [(stop, pull, run_t, read)
-             for _, stop, pull, run_t, read, _, _ in results["baseline"]]
-        )
+    baseline = [r for r in time_rows if r.update_strategy == "baseline"]
+    refresh = [r for r in time_rows if r.update_strategy == "refresh"]
+
+    if baseline:
+        arr = np.array([(r.stop_s, r.pull_s, r.run_s, r.read_s) for r in baseline], dtype=float)
         means = arr.mean(axis=0)
         cum_stds = np.cumsum(arr, axis=1).std(axis=0, ddof=0)
         left = 0.0
@@ -641,10 +672,8 @@ def plot(results: dict, execution_ts: str) -> None:
             fmt="none", capsize=3, ecolor="black", elinewidth=1,
         )
 
-    if results["refresh"]:
-        arr = np.array(
-            [(refresh, read) for _, refresh, read, _, _ in results["refresh"]]
-        )
+    if refresh:
+        arr = np.array([(r.refresh_s, r.read_s) for r in refresh], dtype=float)
         means = arr.mean(axis=0)
         cum_stds = np.cumsum(arr, axis=1).std(axis=0, ddof=0)
         left = 0.0
@@ -687,20 +716,24 @@ def plot(results: dict, execution_ts: str) -> None:
     save_figure(fig, output_path)
 
 
-def plot_bytes(results: dict, execution_ts: str) -> None:
-    """One bar per (arm, phase). Bytes = on_demand_bytes_fetched, mean across runs."""
+def plot_bytes(bytes_rows: list[RefreshBytesRow], execution_ts: str) -> None:
+    """One bar per (update_strategy, experiment_phase). Bytes = on_demand_bytes_fetched, mean across runs."""
     op = OP_TYPES[0]
-    # (arm, phase, descriptive label, color)
     groups = [
         ("baseline", "update", "manual update"),
         ("refresh",  "update", "refresh"),
     ]
 
+    per_run_totals: dict[tuple[int, str, str], int] = {}
+    for r in bytes_rows:
+        if r.op_type != op:
+            continue
+        key = (r.run, r.update_strategy, r.experiment_phase)
+        per_run_totals[key] = per_run_totals.get(key, 0) + r.bytes
+
     totals_by_key: dict[tuple[str, str], list[int]] = {}
-    for _, arm, phase, deltas in _iter_phase_deltas(results):
-        totals_by_key.setdefault((arm, phase), []).append(
-            sum(deltas.get(op, {}).values())
-        )
+    for (_, update_strategy, experiment_phase), total in per_run_totals.items():
+        totals_by_key.setdefault((update_strategy, experiment_phase), []).append(total)
 
     if not any(totals_by_key.values()):
         log.info("plot_bytes: no data, skipping")
@@ -711,17 +744,17 @@ def plot_bytes(results: dict, execution_ts: str) -> None:
     x_centers = np.arange(len(groups), dtype=float)
 
     means_gb: list[float] = []
-    for gi, (arm, phase, _) in enumerate(groups):
-        vals = totals_by_key.get((arm, phase), [0])
+    for group_index, (update_strategy, experiment_phase, _) in enumerate(groups):
+        vals = totals_by_key.get((update_strategy, experiment_phase), [0])
         m_gb = float(np.mean(vals)) / (1024 ** 3)
         means_gb.append(m_gb)
         ax.bar(
-            x_centers[gi], m_gb, bar_w,
+            x_centers[group_index], m_gb, bar_w,
             color="#7f7f7f", edgecolor="white", linewidth=0.3,
         )
         if m_gb > 0:
             ax.text(
-                x_centers[gi], m_gb,
+                x_centers[group_index], m_gb,
                 _fmt_bytes(int(m_gb * (1024 ** 3))),
                 ha="center", va="bottom", fontsize=10, fontweight="bold",
             )
@@ -762,6 +795,12 @@ def main(execution_ts: str | None = None) -> None:
     ensure_buildkit()
     prepare_local_registry(SOURCE_IMAGE, registry(CFG))
 
+    stargz_config_path = refresh_stargz_config_path(SCRIPT_DIR, execution_ts)
+    os.makedirs(os.path.dirname(stargz_config_path), exist_ok=True)
+    with open(stargz_config_path, "w") as f:
+        f.write(read_base_config())
+    log.result(f"Stargz config snapshot saved to {stargz_config_path}")
+
     artifacts_dir = refresh_artifacts_dir(
         SCRIPT_DIR, execution_ts, MODEL, SOURCE_IMAGE, build_mode(MODE)
     )
@@ -771,14 +810,18 @@ def main(execution_ts: str | None = None) -> None:
         artifacts_dir=artifacts_dir, toc_dir=toc_dir,
     )
 
-    results = measure_refresh(snapshot_files, execution_ts)
+    time_rows, bytes_rows = measure_refresh(snapshot_files, execution_ts)
 
     clear_registry(CFG, verbose=False, preserve_base=True)
-    print_results(results)
-    save_results_csv(results, execution_ts)
-    save_bytes_csv(results, execution_ts)
-    plot(results, execution_ts)
-    plot_bytes(results, execution_ts)
+    print_results(time_rows)
+    save_results_csv(time_rows, execution_ts)
+    save_bytes_csv(bytes_rows, execution_ts)
+    if time_rows:
+        save_merged_csv(time_rows, execution_ts)
+    if bytes_rows:
+        save_merged_bytes_csv(bytes_rows, execution_ts)
+    plot(time_rows, execution_ts)
+    plot_bytes(bytes_rows, execution_ts)
     clear_artifacts(SCRIPT_DIR)
 
 

@@ -103,6 +103,15 @@ def resource_chart_path(base_dir: str, model: str, base_image: str, execution_ts
 def rebuild_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(rebuild_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild.csv")
 
+def build_merged_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(build_performance_run_dir(base_dir, execution_ts), "merged.csv")
+
+def resource_merged_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(build_resource_run_dir(base_dir, execution_ts), "merged.csv")
+
+def rebuild_merged_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(rebuild_run_dir(base_dir, execution_ts), "merged.csv")
+
 def rebuild_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(rebuild_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild.png")
 

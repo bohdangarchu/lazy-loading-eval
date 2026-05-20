@@ -17,6 +17,7 @@ from build_performance.paths import (
     resource_csv_path, resource_chart_path,
     resource_cpu_charts_run_dir, resource_ram_charts_run_dir,
     build_artifacts_dir,
+    build_merged_csv_path, resource_merged_csv_path,
 )
 from shared.artifacts import snapshot_artifacts, clear_artifacts
 from shared.config import load_config
@@ -207,12 +208,19 @@ def measure_builds(
     return results
 
 
-def save_csv(results: list[BuildRow], model: str, base_image: str, execution_ts: str) -> None:
-    output_path = build_csv_path(SCRIPT_DIR, model, base_image, execution_ts)
+def _write_build_rows(output_path: str, results: list[BuildRow]) -> None:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fieldnames = [f.name for f in fields(BuildRow)]
     rows = [{**asdict(r), "total_s": f"{r.total_s:.4f}"} for r in results]
     write_csv(output_path, fieldnames, rows)
+
+
+def save_csv(results: list[BuildRow], model: str, base_image: str, execution_ts: str) -> None:
+    _write_build_rows(build_csv_path(SCRIPT_DIR, model, base_image, execution_ts), results)
+
+
+def save_merged_csv(results: list[BuildRow], execution_ts: str) -> None:
+    _write_build_rows(build_merged_csv_path(SCRIPT_DIR, execution_ts), results)
 
 
 def plot(results: list[BuildRow], model: str, base_image: str, max_allowed_splits: int, execution_ts: str) -> None:
@@ -243,10 +251,7 @@ def plot(results: list[BuildRow], model: str, base_image: str, max_allowed_split
     save_figure(fig, path)
 
 
-def save_resource_csv(
-    samples: list[ResourceRow], model: str, base_image: str, execution_ts: str,
-) -> None:
-    output_path = resource_csv_path(SCRIPT_DIR, model, base_image, execution_ts)
+def _write_resource_rows(output_path: str, samples: list[ResourceRow]) -> None:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fieldnames = [f.name for f in fields(ResourceRow)]
     with open(output_path, "w", newline="") as f:
@@ -260,6 +265,16 @@ def save_resource_csv(
                 row["run"] = ""
             writer.writerow(row)
     log.result(f"Resource CSV saved to {output_path}")
+
+
+def save_resource_csv(
+    samples: list[ResourceRow], model: str, base_image: str, execution_ts: str,
+) -> None:
+    _write_resource_rows(resource_csv_path(SCRIPT_DIR, model, base_image, execution_ts), samples)
+
+
+def save_merged_resource_csv(samples: list[ResourceRow], execution_ts: str) -> None:
+    _write_resource_rows(resource_merged_csv_path(SCRIPT_DIR, execution_ts), samples)
 
 
 def plot_resource(
@@ -409,6 +424,8 @@ def main():
     log.set_verbose(VERBOSE)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    all_results: list[BuildRow] = []
+    all_samples: list[ResourceRow] = []
     for model, base_image, max_allowed_splits in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} (max_allowed_splits={max_allowed_splits}) =====")
         prepare_local_registry(base_image, registry(CFG))
@@ -425,6 +442,7 @@ def main():
             save_resource_csv(samples, model, base_image, execution_ts)
             plot_resource(samples, model, base_image, max_allowed_splits, execution_ts)
             plot_resource_individual(samples, model, base_image, execution_ts, max_allowed_splits)
+            all_samples.extend(samples)
 
         capacities = sorted(set(r.capacity for r in results))
         log.result("\n=== Comparison (median across runs) ===")
@@ -441,6 +459,12 @@ def main():
 
         save_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, max_allowed_splits, execution_ts)
+        all_results.extend(results)
+
+    if all_results:
+        save_merged_csv(all_results, execution_ts)
+    if all_samples:
+        save_merged_resource_csv(all_samples, execution_ts)
 
     clear_artifacts(SCRIPT_DIR)
 
