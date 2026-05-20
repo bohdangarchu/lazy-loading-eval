@@ -46,27 +46,36 @@ def compression_results_dir(base_dir: str) -> str:
 def compression_charts_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "charts", "compression")
 
-def build_results_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "results", "build")
+# Layout: results/build/<ts>/{performance,resource}/  and  charts/build/<ts>/{performance,resource}/
+# A single execution_ts folder bundles both subcategories.
 
-def build_charts_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "charts", "build")
+def build_run_results_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(base_dir, "results", "build", execution_ts)
 
-def resource_results_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "results", "resource")
+def build_run_charts_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(base_dir, "charts", "build", execution_ts)
 
-def resource_charts_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "charts", "resource")
+def build_performance_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(build_run_results_dir(base_dir, execution_ts), "performance")
 
-def resource_cpu_charts_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "charts", "resource", "cpu")
+def build_performance_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(build_run_charts_dir(base_dir, execution_ts), "performance")
 
-def resource_ram_charts_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "charts", "resource", "ram")
+def build_resource_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(build_run_results_dir(base_dir, execution_ts), "resource")
+
+def build_resource_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(build_run_charts_dir(base_dir, execution_ts), "resource")
+
+def resource_cpu_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(build_resource_charts_run_dir(base_dir, execution_ts), "cpu")
+
+def resource_ram_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(build_resource_charts_run_dir(base_dir, execution_ts), "ram")
 
 def build_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, capacity: int) -> str:
     return os.path.join(
-        base_dir, "artifacts", "build", execution_ts,
+        base_dir, "artifacts", "build", execution_ts, "performance",
         f"{_model_slug(model)}_{_image_slug(base_image)}", f"cap_{capacity}",
     )
 
@@ -76,29 +85,20 @@ def rebuild_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_ima
         f"{_model_slug(model)}_{_image_slug(base_image)}", "full",
     )
 
-def resource_cpu_charts_run_dir(base_dir: str, execution_ts: str) -> str:
-    return os.path.join(resource_cpu_charts_dir(base_dir), execution_ts)
-
-def resource_ram_charts_run_dir(base_dir: str, execution_ts: str) -> str:
-    return os.path.join(resource_ram_charts_dir(base_dir), execution_ts)
-
 
 # ── output file paths ──────────────────────────────────────────────
 
 def build_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
-    return os.path.join(build_results_dir(base_dir), execution_ts, f"{_model_slug(model)}_{_image_slug(base_image)}.csv")
+    return os.path.join(build_performance_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}.csv")
 
 def build_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
-    return os.path.join(build_charts_dir(base_dir), execution_ts, f"{_model_slug(model)}_{_image_slug(base_image)}_stages.png")
+    return os.path.join(build_performance_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_stages.png")
 
 def resource_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
-    return os.path.join(resource_results_dir(base_dir), execution_ts, f"{_model_slug(model)}_{_image_slug(base_image)}_resource.csv")
+    return os.path.join(build_resource_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_resource.csv")
 
 def resource_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
-    return os.path.join(
-        resource_charts_dir(base_dir), "total", execution_ts,
-        f"{_model_slug(model)}_{_image_slug(base_image)}_resource.png",
-    )
+    return os.path.join(build_resource_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_resource.png")
 
 def rebuild_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(rebuild_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild.csv")
