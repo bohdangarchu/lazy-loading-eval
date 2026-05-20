@@ -292,6 +292,20 @@ def _fmt_bytes(n: int) -> str:
     return f"{n:.1f}TB"
 
 
+def _model_size_str() -> str | None:
+    d = _model_snapshot_dir()
+    if not os.path.isdir(d):
+        return None
+    total = 0
+    for root, _, files in os.walk(d):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return _fmt_bytes(total) if total > 0 else None
+
+
 def _log_deltas(label: str, deltas: dict[str, dict[str, int]]) -> None:
     for op in OP_TYPES:
         total = sum(deltas.get(op, {}).values())
@@ -605,7 +619,7 @@ def plot(results: dict, execution_ts: str) -> None:
     fig, ax = plt.subplots(figsize=(10, 3.6))
 
     y_positions = [0, 1]
-    labels = ["baseline", "refresh"]
+    labels = ["manual update", "refresh"]
 
     if results["baseline"]:
         arr = np.array(
@@ -650,7 +664,7 @@ def plot(results: dict, execution_ts: str) -> None:
     ax.set_yticklabels(labels)
     ax.set_xlabel("Elapsed time (s)")
     ax.set_title(
-        f"refresh vs baseline ({MODE}, mean ± stddev, n={N_RUNS} runs)"
+        f"model access time after config update"
     )
     ax.invert_yaxis()
     ax.grid(True, linestyle="--", alpha=0.3, axis="x")
@@ -666,7 +680,7 @@ def plot(results: dict, execution_ts: str) -> None:
         ncol=5, fontsize=9, frameon=False,
     )
 
-    figure_footer(fig, MODEL, SOURCE_IMAGE)
+    figure_footer(fig, MODEL, SOURCE_IMAGE, model_size=_model_size_str())
     output_path = refresh_chart_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout(rect=(0, 0.12, 1, 1))
@@ -678,10 +692,8 @@ def plot_bytes(results: dict, execution_ts: str) -> None:
     op = OP_TYPES[0]
     # (arm, phase, descriptive label, color)
     groups = [
-        ("baseline", "v0_warm", "setup",  "#9ecae1"),
-        ("baseline", "update",  "update", "#1f77b4"),
-        ("refresh",  "v0_warm", "setup",  "#fdbe85"),
-        ("refresh",  "update",  "update", "#ff7f0e"),
+        ("baseline", "update", "manual update"),
+        ("refresh",  "update", "refresh"),
     ]
 
     totals_by_key: dict[tuple[str, str], list[int]] = {}
@@ -699,13 +711,13 @@ def plot_bytes(results: dict, execution_ts: str) -> None:
     x_centers = np.arange(len(groups), dtype=float)
 
     means_gb: list[float] = []
-    for gi, (arm, phase, _, color) in enumerate(groups):
+    for gi, (arm, phase, _) in enumerate(groups):
         vals = totals_by_key.get((arm, phase), [0])
         m_gb = float(np.mean(vals)) / (1024 ** 3)
         means_gb.append(m_gb)
         ax.bar(
             x_centers[gi], m_gb, bar_w,
-            color=color, edgecolor="white", linewidth=0.3,
+            color="#7f7f7f", edgecolor="white", linewidth=0.3,
         )
         if m_gb > 0:
             ax.text(
@@ -718,24 +730,16 @@ def plot_bytes(results: dict, execution_ts: str) -> None:
         ax.set_ylim(0, max(means_gb) * 1.18)
 
     ax.set_xticks(x_centers)
-    ax.set_xticklabels([g[2] for g in groups], fontsize=9)
-    # Arm name above each tick
-    for gi, (arm, _, _, _) in enumerate(groups):
-        ax.text(
-            x_centers[gi], 1.02, arm,
-            ha="center", va="bottom", fontsize=10, fontweight="bold",
-            transform=ax.get_xaxis_transform(),
-        )
+    ax.set_xticklabels([g[2] for g in groups], fontsize=10)
 
     ax.set_ylabel("GiB")
     ax.set_title(
-        f"stargz on-demand bytes fetched per phase  "
-        f"({MODE}, n={N_RUNS} runs)",
+        f"on-demand bytes fetched after config update",
         pad=24,
     )
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")
 
-    figure_footer(fig, MODEL, SOURCE_IMAGE, fontsize=7)
+    figure_footer(fig, MODEL, SOURCE_IMAGE, fontsize=7, model_size=_model_size_str())
     output_path = refresh_bytes_chart_path(
         SCRIPT_DIR, MODEL, SOURCE_IMAGE, execution_ts
     )

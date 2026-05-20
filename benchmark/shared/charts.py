@@ -13,9 +13,13 @@ MODE_COLORS: dict[str, str] = {
 def figure_footer(
     fig, model: str, base_image: str, fontsize: int = 8,
     max_allowed_splits: int | None = None,
+    model_size: str | None = None,
 ) -> None:
     """Stamp bottom-left corner of a figure with model/image metadata."""
-    text = f"model: {model}\nbase image: {base_image}"
+    text = f"model: {model}"
+    if model_size is not None:
+        text += f" ({model_size})"
+    text += f"\nbase image: {base_image}"
     if max_allowed_splits is not None:
         text += f"\nmax_allowed_splits: {max_allowed_splits}"
     n_lines = text.count("\n") + 1
