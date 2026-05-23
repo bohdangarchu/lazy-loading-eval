@@ -28,8 +28,7 @@ from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_stargz as bs
 from build_performance import build_base as bb
-from build_performance.prepare import prepare, print_packing_table
-from shared.split_llm import compute_optimal_params
+from build_performance.prepare import generate_build_artifacts, prepare_model_splits, print_packing_table
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -165,7 +164,7 @@ def _run_one(mode: str, n: int, cfg, source_image: str) -> BuildResult:
 
 
 def measure_builds(
-    model: str, max_allowed_splits: int, source_image: str, cfg=CFG,
+    model: str, chunks_dir: str, max_allowed_splits: int, source_image: str, cfg=CFG,
     monitor: ResourceMonitor | None = None, execution_ts: str = "",
 ) -> list[BuildRow]:
     results: list[BuildRow] = []
@@ -175,7 +174,7 @@ def measure_builds(
         for cap in CAPACITIES:
             num_layers = num_layers_for_capacity(cap, max_allowed_splits)
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing capacity={cap}% ({num_layers} layer(s)) ===")
-            prepare(model, max_allowed_splits, num_layers, source_image, cfg)
+            generate_build_artifacts(chunks_dir, num_layers, source_image, cfg)
             if execution_ts:
                 snapshot_artifacts(
                     SCRIPT_DIR,
@@ -428,15 +427,13 @@ def main():
     all_results: list[BuildRow] = []
     all_samples: list[ResourceRow] = []
     for model, base_image in EXPERIMENTS:
-        # max_allowed_splits = N_max derived from the model (largest bucket count
-        # that still satisfies target ≥ M). Cached on disk by compute_optimal_params.
-        max_allowed_splits, _, _ = compute_optimal_params(model)
+        chunks_dir, max_allowed_splits = prepare_model_splits(model)
         log.result(f"\n===== Experiment: {model} / {base_image} (max_allowed_splits={max_allowed_splits}) =====")
 
-        prepare(model, max_allowed_splits, max_allowed_splits, base_image, CFG)
+        generate_build_artifacts(chunks_dir, max_allowed_splits, base_image, CFG)
         num_layers_list = [num_layers_for_capacity(c, max_allowed_splits) for c in CAPACITIES]
         labels = [f"{c}%" for c in CAPACITIES]
-        print_packing_table(model, max_allowed_splits, labels, num_layers_list)
+        print_packing_table(chunks_dir, model, max_allowed_splits, labels, num_layers_list)
 
         prepare_local_registry(base_image, registry(CFG))
 
@@ -445,7 +442,7 @@ def main():
             monitor = ResourceMonitor(model, base_image, max_allowed_splits)
             monitor.start()
 
-        results = measure_builds(model, max_allowed_splits, base_image, CFG, monitor=monitor, execution_ts=execution_ts)
+        results = measure_builds(model, chunks_dir, max_allowed_splits, base_image, CFG, monitor=monitor, execution_ts=execution_ts)
 
         if monitor:
             samples = monitor.stop()

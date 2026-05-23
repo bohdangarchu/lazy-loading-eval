@@ -18,8 +18,7 @@ from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_base as bb
 from build_performance import build_stargz as bs
-from build_performance.prepare import prepare, print_packing_table
-from shared.split_llm import compute_optimal_params
+from build_performance.prepare import generate_build_artifacts, prepare_model_splits, print_packing_table
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -216,16 +215,15 @@ def main():
 
     all_results: list[RebuildRow] = []
     for model, base_image in EXPERIMENTS:
-        # max_allowed_splits = N_max derived from the model. Cached on disk.
-        max_allowed_splits, _, _ = compute_optimal_params(model)
+        chunks_dir, max_allowed_splits = prepare_model_splits(model)
         log.result(f"\n===== Experiment: {model} / {base_image} (max_allowed_splits={max_allowed_splits}) =====")
         prepare_local_registry(base_image, registry(CFG))
 
         methods = make_methods(base_image)
 
         log.info(f"Preparing model at full capacity ({max_allowed_splits} buckets)...")
-        groups = prepare(model, max_allowed_splits, max_allowed_splits, base_image, CFG)
-        print_packing_table(model, max_allowed_splits, ["full"], [max_allowed_splits])
+        groups = generate_build_artifacts(chunks_dir, max_allowed_splits, base_image, CFG)
+        print_packing_table(chunks_dir, model, max_allowed_splits, ["full"], [max_allowed_splits])
         print_mutation_table(groups)
         snapshot_artifacts(
             SCRIPT_DIR,

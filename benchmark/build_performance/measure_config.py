@@ -18,7 +18,7 @@ from shared.registry import (
 from shared.tdfs_parser import parse_tdfs_output
 from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
-from build_performance.prepare import prepare, clear_chunks
+from build_performance.prepare import generate_build_artifacts, prepare_model_splits, clear_chunks
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -104,10 +104,11 @@ def measure(model: str, max_splits: int, source_image: str) -> dict[str, ResultL
         log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === {MODE} {label} ({flags}) ===")
         _clear_cache()
         clear_chunks(model)
+        chunks_dir, _ = prepare_model_splits(model)
 
         flag_results: ResultList = []
         for n in range(1, max_splits + 1):
-            prepare(model, n, source_image, CFG)
+            generate_build_artifacts(chunks_dir, n, source_image, CFG)
             br = _build_one(n, flags, source_image)
             flag_results.append((n, br))
 

@@ -1,36 +1,22 @@
 """Wrapper around ../split-llm-simple/split_llm.py.
 
 Flow:
-  1. compute_optimal_params(model)       — read safetensors headers, return N_max + target.
-  2. ensure_splits(model, N_max, target) — run split_llm.py via its own venv; cache by manifest.
-  3. copy_splits_to_work_dir(splits_dir, work_dir) — copy into the build context.
-  4. repack(safetensor_paths, N)         — best-fit pack into N buckets per capacity %.
-
-Invariant the rest of the file assumes:
-  Splits are produced with target ≥ M (largest single tensor). Then every base
-  bucket lies in [0.5·target, target] (split_llm's undersize merge guarantees the
-  lower bound). Merging neighbors (or best-fit repacking with the same target) for
-  lower capacities preserves balance. If the invariant is violated (target < M),
-  the embedding becomes an outsized bucket and merged buckets inherit that skew —
-  capacity comparisons become unfair.
-
-  compute_optimal_params enforces target ≥ M by construction.
+  1. run_split_llm(model)              — run split_llm.py with defaults via its own venv; cache by model.
+  2. copy_splits_to_work_dir(...)      — copy into the build context.
+  3. compute_split_stats(paths)        — derive (max_allotments, total_size, max_file_size) from disk.
+  4. repack(paths, num_allotments)     — best-fit pack into N buckets.
 """
 
 import json
-import math
 import os
 import shutil
-import struct
 import subprocess
-
-import requests
-from dotenv import load_dotenv
-from huggingface_hub import HfApi, hf_hub_url
 
 from shared import fs, log
 
-load_dotenv()
+_SPLIT_REPO = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "split-llm-simple")
+)
 
 
 def split_llm_slug(model: str) -> str:
@@ -38,143 +24,48 @@ def split_llm_slug(model: str) -> str:
     return model.replace("/", "_").replace(":", "_")
 
 
-# ── 1. params ──────────────────────────────────────────────────────────
+# ── 1. invoke splitter ─────────────────────────────────────────────────
 
 
-def compute_optimal_params(
-    model: str, cache_dir: str | None = None,
-) -> tuple[int, int, int]:
-    """Read safetensors headers from the HF Hub (no download) and compute the
-    maximum bucket count that keeps every bucket ≥ largest single tensor.
-
-    Returns (N_max, T_bytes, M_bytes).
-
-    If `cache_dir` is given, persist the result to `<cache_dir>/optimal_params.json`
-    and reuse it on subsequent calls. The cache survives across runs and is
-    invalidated by wiping the directory (same lifecycle as splits_output).
-    """
-    cache_path = (
-        os.path.join(cache_dir, "optimal_params.json") if cache_dir else None
-    )
-    if cache_path and os.path.exists(cache_path):
-        try:
-            with open(cache_path) as f:
-                d = json.load(f)
-            if d.get("model") == model:
-                log.info(
-                    f"optimal_params cache hit: {model} "
-                    f"N_max={d['N_max']} T={d['T_bytes']/1024**2:.1f} MB "
-                    f"M={d['M_bytes']/1024**2:.1f} MB"
-                )
-                return d["N_max"], d["T_bytes"], d["M_bytes"]
-        except (OSError, json.JSONDecodeError, KeyError):
-            log.info(f"optimal_params cache unreadable at {cache_path} — recomputing")
-
-    token = os.environ.get("HF_TOKEN")
-    api = HfApi()
-    files = [
-        f for f in api.list_repo_files(model, token=token)
-        if f.endswith(".safetensors")
-    ]
-    if not files:
-        raise RuntimeError(f"No .safetensors files in {model}")
-
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    T = 0
-    M = 0
-    for f in files:
-        url = hf_hub_url(model, f)
-        r = requests.get(url, headers={**headers, "Range": "bytes=0-7"}, timeout=30)
-        r.raise_for_status()
-        hlen = struct.unpack("<Q", r.content)[0]
-        r = requests.get(
-            url, headers={**headers, "Range": f"bytes=8-{8 + hlen - 1}"}, timeout=30,
-        )
-        r.raise_for_status()
-        hdr = json.loads(r.content)
-        for name, meta in hdr.items():
-            if name == "__metadata__":
-                continue
-            start, end = meta["data_offsets"]
-            sz = end - start
-            T += sz
-            if sz > M:
-                M = sz
-
-    N_max = max(1, T // M)
-    log.info(
-        f"{model}: T={T/1024**2:.1f} MB  M={M/1024**2:.1f} MB  N_max={N_max}"
-    )
-
-    if cache_dir and cache_path:
-        os.makedirs(cache_dir, exist_ok=True)
-        with open(cache_path, "w") as f:
-            json.dump(
-                {"model": model, "N_max": N_max, "T_bytes": T, "M_bytes": M},
-                f, indent=2,
-            )
-        log.info(f"optimal_params cached at {cache_path}")
-
-    return N_max, T, M
-
-
-def target_mb_for_n(T_bytes: int, N: int) -> int:
-    """Bucket target size (MB) to pass to split_llm.py for N buckets. 2% slack
-    absorbs best-fit overshoot."""
-    return math.ceil((T_bytes / N) * 1.02 / (1024 ** 2))
-
-
-# ── 2. invoke splitter ─────────────────────────────────────────────────
-
-
-def ensure_splits(
-    model: str, repo_path: str, max_n_splits: int, target_split_size_mb: int,
-) -> str:
-    """Run ../split-llm-simple/split_llm.py with the given params, using that
-    repo's own .venv. Caches via manifest.json: re-runs only if args differ.
+def run_split_llm(model: str) -> str:
+    """Run ../split-llm-simple/split_llm.py with default args, using that
+    repo's own .venv. Caches via manifest.json: re-runs only if the model
+    changed (defaults are fixed).
 
     Returns the splits_output/<slug>/ path.
     """
     slug = split_llm_slug(model)
-    out_dir = os.path.join(repo_path, "splits_output", slug)
+    out_dir = os.path.join(_SPLIT_REPO, "splits_output", slug)
     manifest_path = os.path.join(out_dir, "manifest.json")
 
     if os.path.exists(manifest_path):
         try:
             with open(manifest_path) as f:
                 m = json.load(f)
-            if (m.get("max_n_splits") == max_n_splits
-                    and m.get("target_split_size_mb") == target_split_size_mb):
+            if m.get("model_name") == model:
                 log.info(f"Splits cache hit for {model} at {out_dir}")
                 return out_dir
             log.info(
                 f"Splits cache stale for {model} "
-                f"(was max_n_splits={m.get('max_n_splits')}, "
-                f"target={m.get('target_split_size_mb')}; "
-                f"want {max_n_splits}/{target_split_size_mb}) — regenerating"
+                f"(was {m.get('model_name')}) — regenerating"
             )
         except (OSError, json.JSONDecodeError):
             log.info(f"Splits manifest unreadable at {manifest_path} — regenerating")
         fs.rmtree(out_dir)
 
-    venv_py = os.path.join(repo_path, ".venv/bin/python")
-    script = os.path.join(repo_path, "split_llm.py")
+    venv_py = os.path.join(_SPLIT_REPO, ".venv/bin/python")
+    script = os.path.join(_SPLIT_REPO, "split_llm.py")
     if not os.path.exists(venv_py):
         raise RuntimeError(f"split-llm-simple venv not found at {venv_py}")
 
-    cmd = [
-        venv_py, script,
-        "--model", model,
-        "--max_n_splits", str(max_n_splits),
-        "--target_split_size_mb", str(target_split_size_mb),
-    ]
+    cmd = [venv_py, script, "--model", model]
     log.info(f"Running split_llm: {' '.join(cmd)}")
-    subprocess.run(cmd, cwd=repo_path, check=True)
+    subprocess.run(cmd, cwd=_SPLIT_REPO, check=True)
     log.result(f"Splits generated at {out_dir}")
     return out_dir
 
 
-# ── 3. copy into build context ─────────────────────────────────────────
+# ── 2. copy into build context ─────────────────────────────────────────
 
 
 def copy_splits_to_work_dir(splits_dir: str, work_dir: str) -> list[str]:
@@ -183,12 +74,6 @@ def copy_splits_to_work_dir(splits_dir: str, work_dir: str) -> list[str]:
     build context. Skips copy when work_dir/manifest.json already matches.
 
     Returns sorted absolute paths of the .safetensors files in work_dir.
-
-    Note: file content is duplicated (~T bytes per model). This is intentional —
-    keeps splits_output as the durable cache, lets refresh-mode mutations stay
-    isolated to work_dir, and avoids buildkit's "outside build context" rejection
-    for paths above SCRIPT_DIR. Hardlinks would save the disk but propagate
-    mutations back into the cache.
     """
     os.makedirs(work_dir, exist_ok=True)
 
@@ -200,11 +85,7 @@ def copy_splits_to_work_dir(splits_dir: str, work_dir: str) -> list[str]:
     else:
         fs.clear_dir(work_dir)
         for f in sorted(os.listdir(splits_dir)):
-            # Skip field.json: it describes split-llm's original bucketing,
-            # which doesn't match our per-capacity repack and would be
-            # misleading inside the image. split_N.json files are kept — they
-            # describe semantic groupings (which tensors belong to which
-            # logical layer) and remain valid regardless of our physical packing.
+            # field.json describes split_llm's own bucketing, which we ignore.
             if f == "field.json":
                 continue
             src = os.path.join(splits_dir, f)
@@ -224,28 +105,52 @@ def _read(path: str) -> bytes:
         return f.read()
 
 
+# ── 3. derive allotment count from the file pool ───────────────────────
+
+
+def compute_split_stats(safetensor_paths: list[str]) -> tuple[int, int, int]:
+    """Returns (max_allotments, total_size, max_file_size).
+
+    max_allotments = total_size // max_file_size. Floor guarantees
+    target = total_size / max_allotments ≥ max_file_size, so the largest file
+    (the embedding in practice) lands alone in bucket 0 and the remaining files
+    best-fit into buckets of size [0.5·max_file_size, max_file_size].
+    """
+    if not safetensor_paths:
+        raise RuntimeError("Empty safetensors pool")
+    sizes = [os.path.getsize(p) for p in safetensor_paths]
+    total_size = sum(sizes)
+    max_file_size = max(sizes)
+    max_allotments = max(1, total_size // max_file_size)
+    log.info(
+        f"splits: total={total_size/1024**2:.1f} MB  "
+        f"max_file={max_file_size/1024**2:.1f} MB  "
+        f"max_allotments={max_allotments}"
+    )
+    return max_allotments, total_size, max_file_size
+
+
 # ── 4. capacity-driven repacking ───────────────────────────────────────
 
 
-def repack(safetensor_paths: list[str], num_buckets: int) -> list[list[str]]:
-    """Best-fit pack files into `num_buckets` groups, balanced by file size.
+def repack(
+    safetensor_paths: list[str], num_allotments: int,
+) -> list[list[str]]:
+    """Best-fit pack files into `num_allotments` groups, balanced by file size.
 
-    Same algorithm split_llm.py uses internally, applied to the per-tensor file
-    pool — so capacity comparisons see the same packing policy at every N.
-
-    Assumes target ≥ M (largest file) — i.e. num_buckets ≤ N_max from
-    compute_optimal_params. Under that invariant the result is balanced. Above
-    it, the largest file becomes a forced outlier (the "embedding" case).
+    Assumes num_allotments ≤ max_allotments from compute_split_stats so
+    target ≥ max_file_size. Under that invariant the largest file (embedding)
+    lands alone in bucket 0 and the rest pack into [0.5·target, target].
     """
-    if num_buckets <= 1:
+    if num_allotments <= 1:
         return [list(safetensor_paths)]
 
     files_with_sizes = sorted(
         ((p, os.path.getsize(p)) for p in safetensor_paths),
         key=lambda x: x[1], reverse=True,
     )
-    T = sum(sz for _, sz in files_with_sizes)
-    target = T / num_buckets
+    total_size = sum(sz for _, sz in files_with_sizes)
+    target = total_size / num_allotments
 
     buckets: list[dict] = []
     for path, sz in files_with_sizes:
@@ -258,28 +163,22 @@ def repack(safetensor_paths: list[str], num_buckets: int) -> list[list[str]]:
                 best_projected = projected
 
         if best_idx is None:
-            if len(buckets) < num_buckets:
+            if len(buckets) < num_allotments:
                 buckets.append({"files": [path], "size": sz})
             else:
-                # Forced overflow: bucket can't grow to target without exceeding
-                # it. Place into the currently-smallest bucket. Only reachable
-                # when num_buckets > N_max (invariant violated).
-                target_idx = min(
+                smallest_idx = min(
                     range(len(buckets)), key=lambda i: buckets[i]["size"],
                 )
-                buckets[target_idx]["files"].append(path)
-                buckets[target_idx]["size"] += sz
+                buckets[smallest_idx]["files"].append(path)
+                buckets[smallest_idx]["size"] += sz
         else:
             buckets[best_idx]["files"].append(path)
             buckets[best_idx]["size"] += sz
 
-    # Merge undersized buckets (< 0.5 · target) into their smallest neighbor,
-    # matching split_llm.py's behavior. Prevents tiny straggler buckets when the
-    # tensor mix doesn't pack cleanly into num_buckets.
-    min_size = target * 0.5
+    min_bucket_size = target * 0.5
     while len(buckets) > 1:
         smallest = min(range(len(buckets)), key=lambda i: buckets[i]["size"])
-        if buckets[smallest]["size"] >= min_size:
+        if buckets[smallest]["size"] >= min_bucket_size:
             break
         merge_into = min(
             (i for i in range(len(buckets)) if i != smallest),

@@ -7,14 +7,10 @@ from shared.artifacts import (
 from shared.config import EnvConfig
 from shared.registry import plain_base_image
 from shared.split_llm import (
-    compute_optimal_params, copy_splits_to_work_dir, ensure_splits,
-    repack, split_llm_slug, target_mb_for_n,
+    compute_split_stats, copy_splits_to_work_dir, run_split_llm, repack,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SPLIT_REPO = os.path.normpath(
-    os.path.join(SCRIPT_DIR, "..", "..", "..", "split-llm-simple")
-)
 
 
 def clear_chunks(model_name: str | None = None) -> None:
@@ -24,67 +20,40 @@ def clear_chunks(model_name: str | None = None) -> None:
         fs.clear_dir(paths.model_chunks_dir(SCRIPT_DIR, model_name))
 
 
-def prepare(
-    model_name: str, max_allowed_splits: int, num_layers: int,
+def prepare_model_splits(model_name: str) -> tuple[str, int]:
+    """Ensure splits exist on disk and return (chunks_dir, max_allotments)."""
+    splits_dir = run_split_llm(model_name)
+    chunks_dir = paths.model_chunks_dir(SCRIPT_DIR, model_name)
+    safetensor_paths = copy_splits_to_work_dir(splits_dir, chunks_dir)
+    max_allotments, _, _ = compute_split_stats(safetensor_paths)
+    return chunks_dir, max_allotments
+
+
+def generate_build_artifacts(
+    chunks_dir: str, num_layers: int,
     source_image: str = "", cfg: EnvConfig = None,
 ) -> list[list[str]]:
-    """Produce 2dfs.json + Dockerfiles for one (model, capacity) build.
-
-    Flow:
-      1. compute_optimal_params reads safetensors headers from HF and returns
-         N_max (largest bucket count that still satisfies target ≥ M, where M
-         is the largest single tensor — typically the embedding).
-      2. max_allowed_splits caps N_max. The actual splitter run uses
-         N_eff = min(N_max, max_allowed_splits) so the splitter cache is keyed
-         on whichever is smaller. num_layers (capacity-driven) is then
-         re-packed in-memory below — no re-splitting per capacity.
-      3. ensure_splits invokes ../split-llm-simple via its own venv (cached on
-         manifest.json).
-      4. copy_splits_to_work_dir copies into benchmark/build_performance/chunks/
-         so all referenced paths stay inside the buildkit context.
-      5. repack packs the per-tensor files into `num_layers` buckets via best-
-         fit. As long as num_layers ≤ N_eff the result is balanced.
+    """Produce 2dfs.json + Dockerfiles for one (chunks_dir, capacity) build.
 
     Returns the groups (one list of file paths per allotment/bucket), in the
     same order as the COPY layers in the resulting Dockerfile and the
     allotments in 2dfs.json. groups[0] is the bottommost image layer,
-    groups[-1] is the topmost. Used by measure_rebuild for bucket-level
-    mutation; measure can ignore it.
+    groups[-1] is the topmost.
     """
-    # Cache optimal params alongside splits_output so a wipe of that folder
-    # invalidates both in one go.
-    params_cache_dir = os.path.join(
-        SPLIT_REPO, "splits_output", split_llm_slug(model_name),
-    )
-    N_max, T_bytes, _ = compute_optimal_params(
-        model_name, cache_dir=params_cache_dir,
-    )
-    N_eff = min(N_max, max_allowed_splits)
-    target_mb = target_mb_for_n(T_bytes, N_eff)
-
-    splits_dir = ensure_splits(model_name, SPLIT_REPO, N_eff, target_mb)
-    chunks_dir = paths.model_chunks_dir(SCRIPT_DIR, model_name)
-    safetensor_paths = copy_splits_to_work_dir(splits_dir, chunks_dir)
-
-    if num_layers > N_eff:
-        log.info(
-            f"num_layers={num_layers} > N_eff={N_eff}; clamping. Equal-size "
-            f"invariant only holds for num_layers ≤ N_eff."
-        )
-        num_layers = N_eff
-
-    groups = repack(safetensor_paths, num_layers)
-
+    files = sorted(os.path.join(chunks_dir, f) for f in os.listdir(chunks_dir))
+    safetensor_paths = [p for p in files if p.endswith(".safetensors")]
     # Carry the small model-metadata files (config, tokenizer, generation
     # config, ...) into the image too, so the served model is self-sufficient.
     # Pin them to bucket 0 — small, present in every layout, never the
     # bottleneck. Excludes manifest.json which is only a cache key.
     metadata_files = [
-        os.path.join(chunks_dir, f) for f in os.listdir(chunks_dir)
-        if not f.endswith(".safetensors") and f != "manifest.json"
+        p for p in files
+        if not p.endswith(".safetensors") and os.path.basename(p) != "manifest.json"
     ]
+
+    groups = repack(safetensor_paths, num_layers)
     if groups:
-        groups[0] = sorted(metadata_files) + groups[0]
+        groups[0] = metadata_files + groups[0]
 
     write_2dfs_json(groups, SCRIPT_DIR)
     create_stargz_dockerfile(groups, plain_base_image(source_image, cfg), SCRIPT_DIR)
@@ -93,24 +62,21 @@ def prepare(
 
 
 def preview_packings(
-    model_name: str, num_layers_list: list[int],
+    chunks_dir: str, num_layers_list: list[int],
 ) -> list[list[list[str]]]:
     """Repack the already-prepared chunks into N buckets for each N in num_layers_list."""
-    chunks_dir = paths.model_chunks_dir(SCRIPT_DIR, model_name)
-    safetensor_paths = sorted(
-        os.path.join(chunks_dir, f) for f in os.listdir(chunks_dir)
-        if f.endswith(".safetensors")
-    )
+    files = sorted(os.path.join(chunks_dir, f) for f in os.listdir(chunks_dir))
+    safetensor_paths = [p for p in files if p.endswith(".safetensors")]
     if not safetensor_paths:
         raise RuntimeError(
-            f"No .safetensors in {chunks_dir} — call prepare() before "
+            f"No .safetensors in {chunks_dir} — call generate_build_artifacts() before "
             f"preview_packings()."
         )
 
-    metadata_files = sorted(
-        os.path.join(chunks_dir, f) for f in os.listdir(chunks_dir)
-        if not f.endswith(".safetensors") and f != "manifest.json"
-    )
+    metadata_files = [
+        p for p in files
+        if not p.endswith(".safetensors") and os.path.basename(p) != "manifest.json"
+    ]
 
     n_available = len(safetensor_paths)
     results: list[list[list[str]]] = []
@@ -124,11 +90,11 @@ def preview_packings(
 
 
 def print_packing_table(
-    model_name: str, max_allowed_splits: int,
+    chunks_dir: str, model_name: str, max_allowed_splits: int,
     labels: list[str], num_layers_list: list[int],
 ) -> None:
     """Print per-label (#allotments, allotment sizes in MB)."""
-    packings = preview_packings(model_name, num_layers_list)
+    packings = preview_packings(chunks_dir, num_layers_list)
 
     log.result(
         f"\n=== Packing preview: {model_name} "

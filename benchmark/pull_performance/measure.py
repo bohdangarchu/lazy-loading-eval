@@ -17,13 +17,13 @@ from shared.registry import prepare_local_registry, clear_registry, registry
 from shared.services import ensure_buildkit, clear_stargz_cache
 from shared.artifacts import clear_artifacts
 from shared.model import cleanup_pull_experiment
-from shared.split_llm import compute_optimal_params
 from shared.stargz_config import read_base_config
 from pull_performance.prepare import (
-    prepare_chunks,
-    prepare_2dfs, prepare_2dfs_stargz, prepare_2dfs_stargz_zstd,
-    prepare_stargz, prepare_base,
+    prepare_model_splits,
+    build_and_push_2dfs, build_and_push_2dfs_stargz, build_and_push_2dfs_stargz_zstd,
+    build_and_push_stargz, build_and_push_base,
 )
+from shared.services import clear_2dfs_cache
 from pull_performance.images import (
     pull_name_2dfs, pull_name_2dfs_stargz, pull_name_2dfs_stargz_zstd,
     pull_name_stargz, pull_name_base,
@@ -76,8 +76,11 @@ def _timed_run(cmd: list[str]) -> float:
     return time.perf_counter() - start
 
 
-def _run_cmd(n: int) -> list[str]:
-    files = " ".join(f"/chunk{i+1}.bin" for i in range(n))
+def _run_cmd(allotments: list[list[str]], n: int) -> list[str]:
+    files = " ".join(
+        f"/{os.path.basename(p)}"
+        for a in allotments[:n] for p in a
+    )
     return ["sh", "-c", f"cat {files} > /dev/null"]
 
 
@@ -127,54 +130,54 @@ def pull_2dfs_stargz_zstd(source_image: str, cfg, num_allotments: int) -> float:
 # ── run functions ──────────────────────────────────────────────────
 
 
-def run_base(image: str, n: int) -> float:
+def run_base(image: str, allotments: list[list[str]], n: int) -> float:
     name = _next_container_name("run-base")
-    log.info(f"Running base container: {name} (reading {n} chunks)")
+    log.info(f"Running base container: {name} (reading {n} allotments)")
     elapsed = _timed_run([
-        "sudo", "ctr", "run", "--rm", image, name, *_run_cmd(n),
+        "sudo", "ctr", "run", "--rm", image, name, *_run_cmd(allotments, n),
     ])
     log.result(f"  base run: {elapsed:.2f}s")
     return elapsed
 
 
-def run_stargz(image: str, n: int) -> float:
+def run_stargz(image: str, allotments: list[list[str]], n: int) -> float:
     name = _next_container_name("run-stargz")
-    log.info(f"Running stargz container: {name} (reading {n} chunks)")
+    log.info(f"Running stargz container: {name} (reading {n} allotments)")
     elapsed = _timed_run([
         "sudo", "ctr-remote", "run", "--rm", "--snapshotter=stargz",
-        image, name, *_run_cmd(n),
+        image, name, *_run_cmd(allotments, n),
     ])
     log.result(f"  stargz run: {elapsed:.2f}s")
     return elapsed
 
 
-def run_2dfs(image: str, n: int) -> float:
+def run_2dfs(image: str, allotments: list[list[str]], n: int) -> float:
     name = _next_container_name("run-2dfs")
-    log.info(f"Running 2dfs container: {name} (reading {n} chunks)")
+    log.info(f"Running 2dfs container: {name} (reading {n} allotments)")
     elapsed = _timed_run([
-        "sudo", "ctr", "run", "--rm", image, name, *_run_cmd(n),
+        "sudo", "ctr", "run", "--rm", image, name, *_run_cmd(allotments, n),
     ])
     log.result(f"  2dfs run: {elapsed:.2f}s")
     return elapsed
 
 
-def run_2dfs_stargz(image: str, n: int) -> float:
+def run_2dfs_stargz(image: str, allotments: list[list[str]], n: int) -> float:
     name = _next_container_name("run-2dfs-stargz")
-    log.info(f"Running 2dfs-stargz container: {name} (reading {n} chunks)")
+    log.info(f"Running 2dfs-stargz container: {name} (reading {n} allotments)")
     elapsed = _timed_run([
         "sudo", "ctr-remote", "run", "--rm", "--snapshotter=stargz",
-        image, name, *_run_cmd(n),
+        image, name, *_run_cmd(allotments, n),
     ])
     log.result(f"  2dfs-stargz run: {elapsed:.2f}s")
     return elapsed
 
 
-def run_2dfs_stargz_zstd(image: str, n: int) -> float:
+def run_2dfs_stargz_zstd(image: str, allotments: list[list[str]], n: int) -> float:
     name = _next_container_name("run-2dfs-stargz-zstd")
-    log.info(f"Running 2dfs-stargz-zstd container: {name} (reading {n} chunks)")
+    log.info(f"Running 2dfs-stargz-zstd container: {name} (reading {n} allotments)")
     elapsed = _timed_run([
         "sudo", "ctr-remote", "run", "--rm", "--snapshotter=stargz",
-        image, name, *_run_cmd(n),
+        image, name, *_run_cmd(allotments, n),
     ])
     log.result(f"  2dfs-stargz-zstd run: {elapsed:.2f}s")
     return elapsed
@@ -184,41 +187,44 @@ def run_2dfs_stargz_zstd(image: str, n: int) -> float:
 
 
 def _prepare_mode(
-    mode: str, chunk_paths: list[str], base_splits: list[int],
+    mode: str, allotments: list[list[str]], base_splits: list[int],
     source_image: str, cfg, model: str, execution_ts: str,
 ) -> None:
     def art(n: int | None = None) -> str:
         return pull_artifacts_dir(SCRIPT_DIR, execution_ts, model, source_image, mode, n)
     if mode == "base":
-        prepare_base(chunk_paths, base_splits, source_image, cfg, artifacts_dir_fn=art)
+        build_and_push_base(allotments, base_splits, source_image, cfg, artifacts_dir_fn=art)
     elif mode == "stargz":
-        prepare_stargz(chunk_paths, source_image, cfg, artifacts_dir=art())
+        build_and_push_stargz(allotments, source_image, cfg, artifacts_dir=art())
     elif mode == "2dfs":
-        prepare_2dfs(chunk_paths, source_image, cfg, artifacts_dir=art())
+        clear_2dfs_cache(cfg)
+        build_and_push_2dfs(allotments, source_image, cfg, artifacts_dir=art())
     elif mode == "2dfs-stargz":
-        prepare_2dfs_stargz(chunk_paths, source_image, cfg, artifacts_dir=art())
+        clear_2dfs_cache(cfg)
+        build_and_push_2dfs_stargz(allotments, source_image, cfg, artifacts_dir=art())
     elif mode == "2dfs-stargz-zstd":
-        prepare_2dfs_stargz_zstd(chunk_paths, source_image, cfg, artifacts_dir=art())
+        clear_2dfs_cache(cfg)
+        build_and_push_2dfs_stargz_zstd(allotments, source_image, cfg, artifacts_dir=art())
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
 
-def _measure_one(mode: str, n: int, source_image: str, cfg) -> tuple[int, float, float]:
+def _measure_one(mode: str, allotments: list[list[str]], n: int, source_image: str, cfg) -> tuple[int, float, float]:
     if mode == "base":
         pull_t = pull_base(source_image, cfg, n)
-        run_t = run_base(pull_name_base(source_image, cfg, n), n)
+        run_t = run_base(pull_name_base(source_image, cfg, n), allotments, n)
     elif mode == "stargz":
         pull_t = pull_stargz(source_image, cfg)
-        run_t = run_stargz(pull_name_stargz(source_image, cfg), n)
+        run_t = run_stargz(pull_name_stargz(source_image, cfg), allotments, n)
     elif mode == "2dfs":
         pull_t = pull_2dfs(source_image, cfg, n)
-        run_t = run_2dfs(pull_name_2dfs(source_image, cfg, n), n)
+        run_t = run_2dfs(pull_name_2dfs(source_image, cfg, n), allotments, n)
     elif mode == "2dfs-stargz":
         pull_t = pull_2dfs_stargz(source_image, cfg, n)
-        run_t = run_2dfs_stargz(pull_name_2dfs_stargz(source_image, cfg, n), n)
+        run_t = run_2dfs_stargz(pull_name_2dfs_stargz(source_image, cfg, n), allotments, n)
     elif mode == "2dfs-stargz-zstd":
         pull_t = pull_2dfs_stargz_zstd(source_image, cfg, n)
-        run_t = run_2dfs_stargz_zstd(pull_name_2dfs_stargz_zstd(source_image, cfg, n), n)
+        run_t = run_2dfs_stargz_zstd(pull_name_2dfs_stargz_zstd(source_image, cfg, n), allotments, n)
     else:
         raise ValueError(f"Unknown mode: {mode}")
     return (n, pull_t, run_t)
@@ -229,7 +235,7 @@ def _splits_for(max_allowed_splits: int) -> list[int]:
 
 
 def measure(
-    chunk_paths: list[str], max_allowed_splits: int, source_image: str, cfg,
+    allotments: list[list[str]], max_allowed_splits: int, source_image: str, cfg,
     model: str, execution_ts: str,
 ) -> list[PullRow]:
     results: list[PullRow] = []
@@ -240,16 +246,16 @@ def measure(
     for mode in MODES:
         log.info(f"\n=== Preparing mode: {mode} ===")
         prepare_local_registry(source_image, registry(cfg))
-        _prepare_mode(mode, chunk_paths, base_splits, source_image, cfg, model, execution_ts)
+        _prepare_mode(mode, allotments, base_splits, source_image, cfg, model, execution_ts)
 
         for run in range(CFG.pull_n_runs):
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{CFG.pull_n_runs} ===")
             for pct in PARTITION_PERCENTS:
                 n = max(1, max_allowed_splits * pct // 100)
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-                log.info(f"\n[{ts}] === {mode}: {pct}% ({n} splits) ===")
+                log.info(f"\n[{ts}] === {mode}: {pct}% ({n} allotments) ===")
                 clear_stargz_cache()
-                _, pull_t, run_t = _measure_one(mode, n, source_image, cfg)
+                _, pull_t, run_t = _measure_one(mode, allotments, n, source_image, cfg)
                 results.append(PullRow(
                     schema_version=SCHEMA_VERSION,
                     model=model,
@@ -399,12 +405,10 @@ def main():
 
     all_results: list[PullRow] = []
     for model, base_image in EXPERIMENTS:
-        # max_allowed_splits = N_max derived from the model. Cached on disk.
-        max_allowed_splits, _, _ = compute_optimal_params(model)
+        allotments, max_allowed_splits = prepare_model_splits(model)
         log.result(f"\n===== Experiment: {model} / {base_image} (max_splits={max_allowed_splits}) =====")
-        chunk_paths = prepare_chunks(model, max_allowed_splits)
 
-        results = measure(chunk_paths, max_allowed_splits, base_image, CFG, model, execution_ts)
+        results = measure(allotments, max_allowed_splits, base_image, CFG, model, execution_ts)
 
         print_results(results)
         save_csv(results, model, base_image, execution_ts)
