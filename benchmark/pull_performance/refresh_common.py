@@ -61,7 +61,7 @@ def start_container(image: str, name: str) -> None:
         check=True, capture_output=not log.VERBOSE,
     )
 
-
+# old exec. not valid for measure_refresh which doesn't read chunks but full safetensors and config files
 def exec_timed(name: str, n: int) -> float:
     """Exec into running container, cat n chunk files, return elapsed seconds."""
     files = " ".join(f"/chunk{i + 1}.bin" for i in range(n))
