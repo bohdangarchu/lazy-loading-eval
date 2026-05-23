@@ -26,12 +26,18 @@ from pull_performance.measure import _next_container_name
 from pull_performance.prepare import prepare_chunks
 from pull_performance.refresh_common import (
     base_image,
-    exec_timed,
     extra_flags,
     start_container,
     stop_container,
     timed_pull,
+    cat_chunks_in_container,
 )
+
+# Verifies: `ctr-remote refresh` invalidates the FUSE/stargz cache for a layer
+# whose blob digest changed, so a file in the running container returns the new
+# content on next read without restarting the container.
+# Flow: build v0 → rpull → warm cache (cat all chunks) → sha256 chunk1 (old) →
+# mutate chunk1 → build v1 → ctr-remote refresh → sha256 chunk1 (must equal v1).
 
 CFG = load_config()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -135,7 +141,7 @@ def main():
     start_container(pull_ref, name)
 
     log.info(f"Cat all {NUM_CHUNKS} files in container...")
-    exec_timed(name, NUM_CHUNKS)
+    cat_chunks_in_container(name, NUM_CHUNKS)
 
     target_file = f"/chunk{MUTATED_IDX + 1}.bin"
     pre_digest = _sha256_in_container(name, target_file)

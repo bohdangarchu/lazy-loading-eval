@@ -61,18 +61,15 @@ def start_container(image: str, name: str) -> None:
         check=True, capture_output=not log.VERBOSE,
     )
 
-# old exec. not valid for measure_refresh which doesn't read chunks but full safetensors and config files
-def exec_timed(name: str, n: int) -> float:
-    """Exec into running container, cat n chunk files, return elapsed seconds."""
+def cat_chunks_in_container(name: str, n: int) -> None:
+    """Cat /chunk1.bin../chunkN.bin in container, discarding output."""
     files = " ".join(f"/chunk{i + 1}.bin" for i in range(n))
     exec_id = uuid.uuid4().hex[:8]
-    start = time.perf_counter()
     subprocess.run(
         ["sudo", "ctr", "tasks", "exec", "--exec-id", exec_id,
          name, "sh", "-c", f"cat {files} > /dev/null"],
         check=True, capture_output=not log.VERBOSE,
     )
-    return time.perf_counter() - start
 
 
 def stop_container(name: str) -> None:
