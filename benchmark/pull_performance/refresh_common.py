@@ -6,9 +6,9 @@ from shared import log
 from shared.registry import stargz_base_image, zstd_base_image
 
 EXPERIMENTS = [
-    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim", 12),         # ~0.5GB     ~50 MB
-    ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim", 12),                      # ~3.09 GB     ~3.4 GB
-    ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim", 12),    # ~6.85 GB     ~3.4 GB
+    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
+    ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),    # ~6.85 GB     ~3.4 GB
 ]
 
 

@@ -17,6 +17,7 @@ from shared.registry import prepare_local_registry, clear_registry, registry
 from shared.services import ensure_buildkit, clear_stargz_cache
 from shared.artifacts import clear_artifacts
 from shared.model import cleanup_pull_experiment
+from shared.split_llm import compute_optimal_params
 from shared.stargz_config import read_base_config
 from pull_performance.prepare import (
     prepare_chunks,
@@ -29,9 +30,9 @@ from pull_performance.images import (
 )
 
 EXPERIMENTS = [
-    ("openai-community/gpt2", "docker.io/library/python:3.12-slim", 12),         # ~0.5GB     ~50 MB
-    # ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim", 12),                      # ~3.09 GB     ~3.4 GB
-    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama", 12),    # ~6.0 GB     ~3.4 GB
+    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    # ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
+    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
 ]
 CFG = load_config()
 VERBOSE = True
@@ -387,7 +388,7 @@ def main():
     log.info(f"Runs: {CFG.pull_n_runs}")
 
     log.info("Pre-run cleanup...")
-    for model, _, _ in EXPERIMENTS:
+    for model, _ in EXPERIMENTS:
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
 
     stargz_config_path = pull_stargz_config_path(SCRIPT_DIR, execution_ts)
@@ -397,7 +398,9 @@ def main():
     log.result(f"Stargz config snapshot saved to {stargz_config_path}")
 
     all_results: list[PullRow] = []
-    for model, base_image, max_allowed_splits in EXPERIMENTS:
+    for model, base_image in EXPERIMENTS:
+        # max_allowed_splits = N_max derived from the model. Cached on disk.
+        max_allowed_splits, _, _ = compute_optimal_params(model)
         log.result(f"\n===== Experiment: {model} / {base_image} (max_splits={max_allowed_splits}) =====")
         chunk_paths = prepare_chunks(model, max_allowed_splits)
 

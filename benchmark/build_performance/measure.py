@@ -28,18 +28,20 @@ from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_stargz as bs
 from build_performance import build_base as bb
-from build_performance.prepare import prepare, clear_chunks
+from build_performance.prepare import prepare, print_packing_table
+from shared.split_llm import compute_optimal_params
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXPERIMENTS = [
-    ("openai-community/gpt2",        "docker.io/library/python:3.12-slim", 12),  # ~0.5GB     ~50 MB
-    # ("Qwen/Qwen2-1.5B",              "docker.io/library/python:3.12-slim",            12),  # ~3.09 GB     ~3.4 GB
-    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama",           12),  # ~6.0 GB     ~3.4 GB
+    # ("openai-community/gpt2",        "docker.io/library/python:3.12-slim"),  # ~0.5GB     ~50 MB
+    # ("Qwen/Qwen2-1.5B",              "docker.io/library/python:3.12-slim"),  # ~3.09 GB     ~3.4 GB
+    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),  # ~6.0 GB     ~3.4 GB
+    ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim")
 ]
 CFG = load_config()
-VERBOSE = True
-MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
+VERBOSE = False
+MODES = ["2dfs"]
 CAPACITIES = [0, 25, 50, 75, 100]
 SCHEMA_VERSION = 1
 
@@ -173,7 +175,6 @@ def measure_builds(
         for cap in CAPACITIES:
             num_layers = num_layers_for_capacity(cap, max_allowed_splits)
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing capacity={cap}% ({num_layers} layer(s)) ===")
-            clear_chunks(model)
             prepare(model, max_allowed_splits, num_layers, source_image, cfg)
             if execution_ts:
                 snapshot_artifacts(
@@ -426,8 +427,17 @@ def main():
 
     all_results: list[BuildRow] = []
     all_samples: list[ResourceRow] = []
-    for model, base_image, max_allowed_splits in EXPERIMENTS:
+    for model, base_image in EXPERIMENTS:
+        # max_allowed_splits = N_max derived from the model (largest bucket count
+        # that still satisfies target ≥ M). Cached on disk by compute_optimal_params.
+        max_allowed_splits, _, _ = compute_optimal_params(model)
         log.result(f"\n===== Experiment: {model} / {base_image} (max_allowed_splits={max_allowed_splits}) =====")
+
+        prepare(model, max_allowed_splits, max_allowed_splits, base_image, CFG)
+        num_layers_list = [num_layers_for_capacity(c, max_allowed_splits) for c in CAPACITIES]
+        labels = [f"{c}%" for c in CAPACITIES]
+        print_packing_table(model, max_allowed_splits, labels, num_layers_list)
+
         prepare_local_registry(base_image, registry(CFG))
 
         monitor = None

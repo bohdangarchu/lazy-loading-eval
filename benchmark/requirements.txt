@@ -2,3 +2,4 @@ huggingface_hub
 matplotlib
 psutil
 python-dotenv
+requests

@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import struct
 
 import numpy as np
 
@@ -35,6 +36,19 @@ def mutate_chunk(path: str) -> None:
         np.bitwise_not(data, out=data)
         f.seek(0)
         data.tofile(f)
+
+
+def mutate_safetensors(path: str) -> None:
+    """XOR the first byte of the tensor data region with 0xFF. Calling twice
+    restores original content."""
+    with open(path, "r+b") as f:
+        hlen = struct.unpack("<Q", f.read(8))[0]
+        f.seek(8 + hlen)
+        b = f.read(1)
+        if not b:
+            return
+        f.seek(8 + hlen)
+        f.write(bytes([b[0] ^ 0xFF]))
 
 
 def chunks_to_groups(chunk_paths: list[str], num_layers: int) -> list[list[str]]:
