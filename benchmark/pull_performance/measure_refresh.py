@@ -44,10 +44,11 @@ VERBOSE = True
 N_RUNS = 1
 MODE = "2dfs-stargz"
 MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
-SOURCE_IMAGE = "docker.io/library/python:3.12-slim"
+SOURCE_IMAGE = "docker.io/ollama/ollama"
 MUTATED_FILENAME = "tokenizer_config.json"
 MUTATION_STRING = b"added string"
 OP_TYPES = ["on_demand_bytes_fetched"]
+WEIGHT_SUFFIXES = (".safetensors", ".bin")  # safetensors or PyTorch pickle weights
 PROM_SETTLE_S = 1.0  # > scrape_interval (500ms) so post-op scrape is visible
 SCHEMA_VERSION = 1
 
@@ -103,7 +104,7 @@ def download_snapshot() -> list[str]:
 
     has_cfg = os.path.exists(os.path.join(local_dir, MUTATED_FILENAME))
     has_weights = any(
-        f.endswith(".safetensors") for f in os.listdir(local_dir)
+        f.endswith(WEIGHT_SUFFIXES) for f in os.listdir(local_dir)
     )
     if has_cfg and has_weights:
         log.info(f"Model snapshot present at {local_dir}, skipping download")
@@ -114,7 +115,7 @@ def download_snapshot() -> list[str]:
             repo_id=MODEL,
             local_dir=local_dir,
             token=token,
-            allow_patterns=["*.safetensors", "*.json", "*.txt", "*.model"],
+            allow_patterns=["*.safetensors", "*.bin", "*.json", "*.txt", "*.model"],
         )
 
     files = sorted(
@@ -122,6 +123,11 @@ def download_snapshot() -> list[str]:
         for f in os.listdir(local_dir)
         if os.path.isfile(os.path.join(local_dir, f))
     )
+    if not any(f.endswith(WEIGHT_SUFFIXES) for f in files):
+        raise RuntimeError(
+            f"no weight files {WEIGHT_SUFFIXES} found in {local_dir}; refresh "
+            f"experiment requires large weight files to be meaningful"
+        )
     return files
 
 
@@ -324,7 +330,7 @@ def _delta(before: dict[str, dict[str, int]],
     return out
 
 
-def _fmt_bytes(n: int) -> str:
+def _fmt_bytes(n: float) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if abs(n) < 1024:
             return f"{n:.1f}{unit}" if unit != "B" else f"{n}{unit}"
@@ -337,24 +343,22 @@ def _model_size_str() -> str | None:
     if not os.path.isdir(d):
         return None
     total = 0
-    for root, _, files in os.walk(d):
-        for f in files:
-            try:
-                total += os.path.getsize(os.path.join(root, f))
-            except OSError:
-                pass
+    for f in os.listdir(d):
+        p = os.path.join(d, f)
+        if os.path.isfile(p):
+            total += os.path.getsize(p)
     return _fmt_bytes(total) if total > 0 else None
 
 
 def _snapshot_stats(snapshot_files: list[str]) -> dict:
     """Model snapshot summary for run metadata (sizes in MB)."""
     sizes = [os.path.getsize(p) for p in snapshot_files]
-    safetensors = [s for p, s in zip(snapshot_files, sizes) if p.endswith(".safetensors")]
+    weights = [s for p, s in zip(snapshot_files, sizes) if p.endswith(WEIGHT_SUFFIXES)]
     return {
         "num_files": len(snapshot_files),
-        "num_safetensors": len(safetensors),
+        "num_weights": len(weights),
         "total_mb": round(sum(sizes) / (1024 ** 2), 1),
-        "safetensors_mb": round(sum(safetensors) / (1024 ** 2), 1),
+        "weights_mb": round(sum(weights) / (1024 ** 2), 1),
     }
 
 
