@@ -8,6 +8,7 @@ from shared.config import EnvConfig
 from shared.registry import plain_base_image
 from shared.split_llm import (
     compute_split_stats, copy_splits_to_work_dir, run_split_llm, repack,
+    split_metadata_paths,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,7 +25,7 @@ def prepare_model_splits(model_name: str) -> tuple[str, int]:
     """Ensure splits exist on disk and return (chunks_dir, max_allotments)."""
     splits_dir = run_split_llm(model_name)
     chunks_dir = paths.model_chunks_dir(SCRIPT_DIR, model_name)
-    safetensor_paths = copy_splits_to_work_dir(splits_dir, chunks_dir)
+    safetensor_paths, _ = copy_splits_to_work_dir(splits_dir, chunks_dir)
     max_allotments, _, _ = compute_split_stats(safetensor_paths)
     return chunks_dir, max_allotments
 
@@ -42,18 +43,9 @@ def generate_build_artifacts(
     """
     files = sorted(os.path.join(chunks_dir, f) for f in os.listdir(chunks_dir))
     safetensor_paths = [p for p in files if p.endswith(".safetensors")]
-    # Carry the small model-metadata files (config, tokenizer, generation
-    # config, ...) into the image too, so the served model is self-sufficient.
-    # Pin them to bucket 0 — small, present in every layout, never the
-    # bottleneck. Excludes manifest.json which is only a cache key.
-    metadata_files = [
-        p for p in files
-        if not p.endswith(".safetensors") and os.path.basename(p) != "manifest.json"
-    ]
+    metadata_files = split_metadata_paths(chunks_dir)
 
-    groups = repack(safetensor_paths, num_layers)
-    if groups:
-        groups[0] = metadata_files + groups[0]
+    groups = repack(safetensor_paths, num_layers, extra_files=metadata_files)
 
     write_2dfs_json(groups, SCRIPT_DIR)
     create_stargz_dockerfile(groups, plain_base_image(source_image, cfg), SCRIPT_DIR)
@@ -73,18 +65,13 @@ def preview_packings(
             f"preview_packings()."
         )
 
-    metadata_files = [
-        p for p in files
-        if not p.endswith(".safetensors") and os.path.basename(p) != "manifest.json"
-    ]
+    metadata_files = split_metadata_paths(chunks_dir)
 
     n_available = len(safetensor_paths)
     results: list[list[list[str]]] = []
     for n in num_layers_list:
         n_eff = min(max(1, n), n_available)
-        groups = repack(safetensor_paths, n_eff)
-        if groups:
-            groups[0] = metadata_files + groups[0]
+        groups = repack(safetensor_paths, n_eff, extra_files=metadata_files)
         results.append(groups)
     return results
 

@@ -30,13 +30,14 @@ from pull_performance.images import (
 )
 
 EXPERIMENTS = [
-    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
     # ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
     # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
+    ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim")
 ]
 CFG = load_config()
 VERBOSE = True
-MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
+MODES = ["2dfs-stargz"]
 PARTITION_PERCENTS = [25, 50, 75, 100]
 SCHEMA_VERSION = 1
 
@@ -81,6 +82,7 @@ def _run_cmd(allotments: list[list[str]], n: int) -> list[str]:
         f"/{os.path.basename(p)}"
         for a in allotments[:n] for p in a
     )
+    log.info(f"  reading files: {files}")
     return ["sh", "-c", f"cat {files} > /dev/null"]
 
 
@@ -234,6 +236,23 @@ def _splits_for(max_allowed_splits: int) -> list[int]:
     return [max(1, max_allowed_splits * pct // 100) for pct in PARTITION_PERCENTS]
 
 
+def print_packing_table(allotments: list[list[str]], model: str, max_allowed_splits: int) -> None:
+    """Print per-partition-pct (#allotments read, allotment sizes in MB)."""
+    log.result(
+        f"\n=== Packing preview: {model} "
+        f"(max_allowed_splits={max_allowed_splits}) ==="
+    )
+    log.result(f"{'pct':>10}  {'allotments':>11}  sizes (MB)")
+    log.result("-" * 60)
+    for pct in PARTITION_PERCENTS:
+        n = max(1, max_allowed_splits * pct // 100)
+        sizes_mb = [
+            sum(os.path.getsize(p) for p in a) / (1024 ** 2) for a in allotments[:n]
+        ]
+        sizes_str = "[" + ", ".join(f"{s:.1f}" for s in sizes_mb) + "]"
+        log.result(f"{pct:>9}%  {n:>11}  {sizes_str}")
+
+
 def measure(
     allotments: list[list[str]], max_allowed_splits: int, source_image: str, cfg,
     model: str, execution_ts: str,
@@ -242,7 +261,7 @@ def measure(
 
     base_splits = _splits_for(max_allowed_splits)
 
-    clear_registry(cfg, preserve_base=True)
+    clear_registry(cfg, preserve_base=True, verbose=False)
     for mode in MODES:
         log.info(f"\n=== Preparing mode: {mode} ===")
         prepare_local_registry(source_image, registry(cfg))
@@ -407,6 +426,7 @@ def main():
     for model, base_image in EXPERIMENTS:
         allotments, max_allowed_splits = prepare_model_splits(model)
         log.result(f"\n===== Experiment: {model} / {base_image} (max_splits={max_allowed_splits}) =====")
+        print_packing_table(allotments, model, max_allowed_splits)
 
         results = measure(allotments, max_allowed_splits, base_image, CFG, model, execution_ts)
 

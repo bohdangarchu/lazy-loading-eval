@@ -44,9 +44,10 @@ def prepare_model_splits(model_name: str) -> tuple[list[list[str]], int]:
     """
     splits_dir = run_split_llm(model_name)
     chunks_dir = paths.model_chunks_dir(SCRIPT_DIR, model_name)
-    safetensor_paths = copy_splits_to_work_dir(splits_dir, chunks_dir)
+    safetensor_paths, metadata_files = copy_splits_to_work_dir(splits_dir, chunks_dir)
     max_allotments, _, _ = compute_split_stats(safetensor_paths)
-    allotments = repack(safetensor_paths, max_allotments)
+    allotments = repack(safetensor_paths, max_allotments, extra_files=metadata_files)
+
     return allotments, max_allotments
 
 

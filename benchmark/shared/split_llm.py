@@ -2,7 +2,7 @@
 
 Flow:
   1. run_split_llm(model)              — run split_llm.py with defaults via its own venv; cache by model.
-  2. copy_splits_to_work_dir(...)      — copy into the build context.
+  2. copy_splits_to_work_dir(...)      — copy into the build context; returns (safetensors, metadata).
   3. compute_split_stats(paths)        — derive (max_allotments, total_size, max_file_size) from disk.
   4. repack(paths, num_allotments)     — best-fit pack into N buckets.
 """
@@ -68,12 +68,25 @@ def run_split_llm(model: str) -> str:
 # ── 2. copy into build context ─────────────────────────────────────────
 
 
-def copy_splits_to_work_dir(splits_dir: str, work_dir: str) -> list[str]:
+def split_metadata_paths(work_dir: str) -> list[str]:
+    """Sorted absolute paths of model-metadata files (config,
+    tokenizer, generation config, ...) in work_dir.
+    """
+    return sorted(
+        os.path.join(work_dir, f)
+        for f in os.listdir(work_dir)
+        if not f.endswith(".safetensors") and f != "manifest.json"
+    )
+
+
+def copy_splits_to_work_dir(splits_dir: str, work_dir: str) -> tuple[list[str], list[str]]:
     """Copy .safetensors + model metadata (config/tokenizer/...) from splits_dir
     into work_dir so that 2dfs.json and Dockerfile COPY paths stay inside the
     build context. Skips copy when work_dir/manifest.json already matches.
 
-    Returns sorted absolute paths of the .safetensors files in work_dir.
+    Returns (safetensor_paths, metadata_paths): the .safetensors weights and the
+    metadata files in work_dir, both sorted. Callers pack both into the image —
+    metadata is typically pinned to allotment 0.
     """
     os.makedirs(work_dir, exist_ok=True)
 
@@ -93,11 +106,12 @@ def copy_splits_to_work_dir(splits_dir: str, work_dir: str) -> list[str]:
                 shutil.copy2(src, os.path.join(work_dir, f))
         log.result(f"Copied splits into {work_dir}")
 
-    return sorted(
+    safetensor_paths = sorted(
         os.path.join(work_dir, f)
         for f in os.listdir(work_dir)
         if f.endswith(".safetensors")
     )
+    return safetensor_paths, split_metadata_paths(work_dir)
 
 
 def _read(path: str) -> bytes:
@@ -135,18 +149,15 @@ def compute_split_stats(safetensor_paths: list[str]) -> tuple[int, int, int]:
 
 def repack(
     safetensor_paths: list[str], num_allotments: int,
+    extra_files: list[str] | None = None,
 ) -> list[list[str]]:
-    """Best-fit pack files into `num_allotments` groups, balanced by file size.
-
-    Assumes num_allotments ≤ max_allotments from compute_split_stats so
-    target ≥ max_file_size. Under that invariant the largest file (embedding)
-    lands alone in bucket 0 and the rest pack into [0.5·target, target].
-    """
+    """Best-fit pack weights + extra_files into num_allotments size-balanced buckets."""
+    paths = list(safetensor_paths) + list(extra_files or [])
     if num_allotments <= 1:
-        return [list(safetensor_paths)]
+        return [paths]
 
     files_with_sizes = sorted(
-        ((p, os.path.getsize(p)) for p in safetensor_paths),
+        ((p, os.path.getsize(p)) for p in paths),
         key=lambda x: x[1], reverse=True,
     )
     total_size = sum(sz for _, sz in files_with_sizes)
