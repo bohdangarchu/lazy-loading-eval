@@ -76,12 +76,47 @@ def preview_packings(
     return results
 
 
+def split_stats(chunks_dir: str) -> dict:
+    """Aggregate split-pool stats (sizes in MB) for run metadata."""
+    files = sorted(os.path.join(chunks_dir, f) for f in os.listdir(chunks_dir))
+    safetensor_paths = [p for p in files if p.endswith(".safetensors")]
+    _, total_size, max_file_size = compute_split_stats(safetensor_paths)
+    return {
+        "num_safetensors": len(safetensor_paths),
+        "total_mb": round(total_size / (1024 ** 2), 1),
+        "max_file_mb": round(max_file_size / (1024 ** 2), 1),
+    }
+
+
+def packing_preview_data(
+    chunks_dir: str, labels: list[str], num_layers_list: list[int],
+    capacities: list[int] | None = None,
+) -> list[dict]:
+    """Structured per-label packing: #allotments + allotment sizes (MB)."""
+    packings = preview_packings(chunks_dir, num_layers_list)
+    out: list[dict] = []
+    for i, (label, groups) in enumerate(zip(labels, packings)):
+        sizes_mb = [
+            round(sum(os.path.getsize(p) for p in g) / (1024 ** 2), 1) for g in groups
+        ]
+        entry: dict = {}
+        if capacities is not None:
+            entry["capacity"] = capacities[i]
+        entry.update({
+            "label": label,
+            "num_layers": len(groups),
+            "allotment_sizes_mb": sizes_mb,
+        })
+        out.append(entry)
+    return out
+
+
 def print_packing_table(
     chunks_dir: str, model_name: str, max_allowed_splits: int,
     labels: list[str], num_layers_list: list[int],
 ) -> None:
     """Print per-label (#allotments, allotment sizes in MB)."""
-    packings = preview_packings(chunks_dir, num_layers_list)
+    preview = packing_preview_data(chunks_dir, labels, num_layers_list)
 
     log.result(
         f"\n=== Packing preview: {model_name} "
@@ -89,9 +124,6 @@ def print_packing_table(
     )
     log.result(f"{'label':>10}  {'allotments':>11}  sizes (MB)")
     log.result("-" * 60)
-    for label, groups in zip(labels, packings):
-        sizes_mb = [
-            sum(os.path.getsize(p) for p in g) / (1024 ** 2) for g in groups
-        ]
-        sizes_str = "[" + ", ".join(f"{s:.1f}" for s in sizes_mb) + "]"
-        log.result(f"{label:>10}  {len(groups):>11}  {sizes_str}")
+    for entry in preview:
+        sizes_str = "[" + ", ".join(f"{s:.1f}" for s in entry["allotment_sizes_mb"]) + "]"
+        log.result(f"{entry['label']:>10}  {entry['num_layers']:>11}  {sizes_str}")

@@ -125,6 +125,12 @@ def pull_stargz_config_path(base_dir: str, execution_ts: str) -> str:
 def pull_merged_csv_path(base_dir: str, execution_ts: str) -> str:
     return os.path.join(pull_run_dir(base_dir, execution_ts), "merged.csv")
 
+def pull_run_metadata_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_run_dir(base_dir, execution_ts), "run.json")
+
+def refresh_run_metadata_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(refresh_run_dir(base_dir, execution_ts), "run.json")
+
 def refresh_layer_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(refresh_layer_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_refresh_layer.csv")
 

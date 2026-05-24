@@ -11,8 +11,9 @@ import numpy as np
 
 from shared import log
 from shared.charts import MODE_COLORS, figure_footer, save_figure, write_csv
-from pull_performance.paths import pull_csv_path, pull_chart_path, pull_artifacts_dir, pull_stargz_config_path, pull_merged_csv_path
+from pull_performance.paths import pull_csv_path, pull_chart_path, pull_artifacts_dir, pull_stargz_config_path, pull_merged_csv_path, pull_run_metadata_path
 from shared.config import load_config
+from shared.run_metadata import write_run_json
 from shared.registry import prepare_local_registry, clear_registry, registry
 from shared.services import ensure_buildkit, clear_stargz_cache
 from shared.artifacts import clear_artifacts
@@ -33,7 +34,8 @@ EXPERIMENTS = [
     # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
     # ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
     # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
-    ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim")
+    # ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim"),
+    ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim")    # ~6.0 GB     ~3.4 GB
 ]
 CFG = load_config()
 VERBOSE = True
@@ -236,6 +238,38 @@ def _splits_for(max_allowed_splits: int) -> list[int]:
     return [max(1, max_allowed_splits * pct // 100) for pct in PARTITION_PERCENTS]
 
 
+def split_stats(allotments: list[list[str]]) -> dict:
+    """Aggregate split-pool stats (sizes in MB) for run metadata."""
+    sizes = [
+        os.path.getsize(p)
+        for a in allotments for p in a if p.endswith(".safetensors")
+    ]
+    return {
+        "num_safetensors": len(sizes),
+        "total_mb": round(sum(sizes) / (1024 ** 2), 1),
+        "max_file_mb": round(max(sizes) / (1024 ** 2), 1) if sizes else 0.0,
+    }
+
+
+def packing_preview_data(allotments: list[list[str]], max_allowed_splits: int) -> list[dict]:
+    """Structured per-partition-pct: #allotments read + their sizes (MB).
+
+    Cumulative: each pct reads the first n allotments."""
+    out: list[dict] = []
+    for pct in PARTITION_PERCENTS:
+        n = max(1, max_allowed_splits * pct // 100)
+        sizes_mb = [
+            round(sum(os.path.getsize(p) for p in a) / (1024 ** 2), 1)
+            for a in allotments[:n]
+        ]
+        out.append({
+            "partition_pct": pct,
+            "num_splits": n,
+            "allotment_sizes_mb": sizes_mb,
+        })
+    return out
+
+
 def print_packing_table(allotments: list[list[str]], model: str, max_allowed_splits: int) -> None:
     """Print per-partition-pct (#allotments read, allotment sizes in MB)."""
     log.result(
@@ -244,13 +278,9 @@ def print_packing_table(allotments: list[list[str]], model: str, max_allowed_spl
     )
     log.result(f"{'pct':>10}  {'allotments':>11}  sizes (MB)")
     log.result("-" * 60)
-    for pct in PARTITION_PERCENTS:
-        n = max(1, max_allowed_splits * pct // 100)
-        sizes_mb = [
-            sum(os.path.getsize(p) for p in a) / (1024 ** 2) for a in allotments[:n]
-        ]
-        sizes_str = "[" + ", ".join(f"{s:.1f}" for s in sizes_mb) + "]"
-        log.result(f"{pct:>9}%  {n:>11}  {sizes_str}")
+    for e in packing_preview_data(allotments, max_allowed_splits):
+        sizes_str = "[" + ", ".join(f"{s:.1f}" for s in e["allotment_sizes_mb"]) + "]"
+        log.result(f"{e['partition_pct']:>9}%  {e['num_splits']:>11}  {sizes_str}")
 
 
 def measure(
@@ -408,6 +438,7 @@ def main():
     clear_artifacts(SCRIPT_DIR)
     ensure_buildkit()
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_started = datetime.now(timezone.utc)
     log.info(f"Modes: {MODES}")
     log.info(f"Partition percents: {PARTITION_PERCENTS}")
     log.info(f"Runs: {CFG.pull_n_runs}")
@@ -423,10 +454,19 @@ def main():
     log.result(f"Stargz config snapshot saved to {stargz_config_path}")
 
     all_results: list[PullRow] = []
+    experiments_meta: list[dict] = []
     for model, base_image in EXPERIMENTS:
         allotments, max_allowed_splits = prepare_model_splits(model)
         log.result(f"\n===== Experiment: {model} / {base_image} (max_splits={max_allowed_splits}) =====")
         print_packing_table(allotments, model, max_allowed_splits)
+
+        experiments_meta.append({
+            "model": model,
+            "base_image": base_image,
+            "max_allowed_splits": max_allowed_splits,
+            "splits": split_stats(allotments),
+            "packing_preview": packing_preview_data(allotments, max_allowed_splits),
+        })
 
         results = measure(allotments, max_allowed_splits, base_image, CFG, model, execution_ts)
 
@@ -438,6 +478,23 @@ def main():
 
     if all_results:
         save_merged_csv(all_results, execution_ts)
+
+    write_run_json(
+        pull_run_metadata_path(SCRIPT_DIR, execution_ts),
+        execution_ts=execution_ts,
+        started_at=run_started,
+        config={
+            "registry": registry(CFG),
+            "tdfs_binary": CFG.tdfs_binary,
+            "pull_n_runs": CFG.pull_n_runs,
+            "pull_cooldown": CFG.pull_cooldown,
+        },
+        sections={
+            "modes": MODES,
+            "partition_percents": PARTITION_PERCENTS,
+            "experiments": experiments_meta,
+        },
+    )
 
     clear_artifacts(SCRIPT_DIR)
 

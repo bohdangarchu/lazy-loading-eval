@@ -8,17 +8,24 @@ import numpy as np
 
 from shared import log
 from shared.build_result import BuildResult
-from build_performance.paths import rebuild_charts_run_dir, rebuild_csv_path, rebuild_chart_path, rebuild_artifacts_dir, rebuild_merged_csv_path
+from build_performance.paths import (
+    rebuild_charts_run_dir, rebuild_csv_path, rebuild_chart_path,
+    rebuild_artifacts_dir, rebuild_merged_csv_path, rebuild_run_metadata_path,
+)
 from shared.charts import MODE_COLORS, figure_footer, save_figure, write_csv
 from shared.config import load_config
 from shared.artifacts import mutate_safetensors, snapshot_artifacts, clear_artifacts
 from shared.registry import prepare_local_registry, registry, image_slug
+from shared.run_metadata import write_run_json
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_base as bb
 from build_performance import build_stargz as bs
-from build_performance.prepare import generate_build_artifacts, prepare_model_splits, print_packing_table
+from build_performance.prepare import (
+    generate_build_artifacts, prepare_model_splits, print_packing_table,
+    packing_preview_data, split_stats,
+)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -79,22 +86,36 @@ def get_buckets_to_mutate(
     return groups[:n_buckets]
 
 
-def print_mutation_table(groups: list[list[str]]) -> None:
-    """Print mutated MB per (layers_mutated_pct, direction)."""
+def mutation_preview_data(groups: list[list[str]]) -> list[dict]:
+    """Structured mutated MB per (layers_mutated_pct, direction)."""
     def mutated_mb(buckets: list[list[str]]) -> float:
-        return sum(
+        return round(sum(
             os.path.getsize(p)
             for b in buckets for p in b if p.endswith(".safetensors")
-        ) / (1024 ** 2)
+        ) / (1024 ** 2), 1)
 
+    out: list[dict] = []
+    for pct in LAYERS_MUTATED_PERCENTS:
+        n = max(1, len(groups) * pct // 100)
+        out.append({
+            "layers_mutated_pct": pct,
+            "n_layers_mutated": n,
+            "top_to_bottom_mb": mutated_mb(get_buckets_to_mutate(groups, n, "top_to_bottom")),
+            "bottom_to_top_mb": mutated_mb(get_buckets_to_mutate(groups, n, "bottom_to_top")),
+        })
+    return out
+
+
+def print_mutation_table(groups: list[list[str]]) -> None:
+    """Print mutated MB per (layers_mutated_pct, direction)."""
     log.result(f"\n=== Mutation preview: {len(groups)} allotment(s) ===")
     log.result(f"{'pct':>5}  {'n_buckets':>9}  {'top_to_bottom (MB)':>20}  {'bottom_to_top (MB)':>20}")
     log.result("-" * 62)
-    for pct in LAYERS_MUTATED_PERCENTS:
-        n = max(1, len(groups) * pct // 100)
-        ttb = mutated_mb(get_buckets_to_mutate(groups, n, "top_to_bottom"))
-        btt = mutated_mb(get_buckets_to_mutate(groups, n, "bottom_to_top"))
-        log.result(f"{pct:>4}%  {n:>9}  {ttb:>20.1f}  {btt:>20.1f}")
+    for e in mutation_preview_data(groups):
+        log.result(
+            f"{e['layers_mutated_pct']:>4}%  {e['n_layers_mutated']:>9}  "
+            f"{e['top_to_bottom_mb']:>20.1f}  {e['bottom_to_top_mb']:>20.1f}"
+        )
 
 
 def _mutate_buckets(buckets: list[list[str]]) -> list[str]:
@@ -212,8 +233,10 @@ def plot(results: list[RebuildRow], model: str, base_image: str, max_allowed_spl
 def main():
     log.set_verbose(VERBOSE)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_started = datetime.now(timezone.utc)
 
     all_results: list[RebuildRow] = []
+    experiments_meta: list[dict] = []
     for model, base_image in EXPERIMENTS:
         chunks_dir, max_allowed_splits = prepare_model_splits(model)
         log.result(f"\n===== Experiment: {model} / {base_image} (max_allowed_splits={max_allowed_splits}) =====")
@@ -225,6 +248,15 @@ def main():
         groups = generate_build_artifacts(chunks_dir, max_allowed_splits, base_image, CFG)
         print_packing_table(chunks_dir, model, max_allowed_splits, ["full"], [max_allowed_splits])
         print_mutation_table(groups)
+
+        experiments_meta.append({
+            "model": model,
+            "base_image": base_image,
+            "max_allowed_splits": max_allowed_splits,
+            "splits": split_stats(chunks_dir),
+            "packing_preview": packing_preview_data(chunks_dir, ["full"], [max_allowed_splits]),
+            "mutation_preview": mutation_preview_data(groups),
+        })
         snapshot_artifacts(
             SCRIPT_DIR,
             rebuild_artifacts_dir(SCRIPT_DIR, execution_ts, model, base_image),
@@ -244,6 +276,24 @@ def main():
 
     if all_results:
         save_merged_csv(all_results, execution_ts)
+
+    write_run_json(
+        rebuild_run_metadata_path(SCRIPT_DIR, execution_ts),
+        execution_ts=execution_ts,
+        started_at=run_started,
+        config={
+            "registry": registry(CFG),
+            "tdfs_binary": CFG.tdfs_binary,
+            "rebuild_n_runs": CFG.rebuild_n_runs,
+            "build_cooldown": CFG.build_cooldown,
+        },
+        sections={
+            "modes": MODES,
+            "layers_mutated_percents": LAYERS_MUTATED_PERCENTS,
+            "directions": DIRECTIONS,
+            "experiments": experiments_meta,
+        },
+    )
 
     clear_artifacts(SCRIPT_DIR)
 

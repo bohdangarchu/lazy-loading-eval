@@ -18,17 +18,22 @@ from build_performance.paths import (
     resource_cpu_charts_run_dir, resource_ram_charts_run_dir,
     build_artifacts_dir,
     build_merged_csv_path, resource_merged_csv_path,
+    build_run_metadata_path,
 )
 from shared.artifacts import snapshot_artifacts, clear_artifacts
 from shared.config import load_config
 from shared.charts import MODE_COLORS, figure_footer, bar_group_xticks, save_figure, write_csv
 from shared.registry import prepare_local_registry, registry, image_slug
+from shared.run_metadata import write_run_json
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_stargz as bs
 from build_performance import build_base as bb
-from build_performance.prepare import generate_build_artifacts, prepare_model_splits, print_packing_table
+from build_performance.prepare import (
+    generate_build_artifacts, prepare_model_splits, print_packing_table,
+    packing_preview_data, split_stats,
+)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -423,9 +428,11 @@ def plot_resource_individual(
 def main():
     log.set_verbose(VERBOSE)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_started = datetime.now(timezone.utc)
 
     all_results: list[BuildRow] = []
     all_samples: list[ResourceRow] = []
+    experiments_meta: list[dict] = []
     for model, base_image in EXPERIMENTS:
         chunks_dir, max_allowed_splits = prepare_model_splits(model)
         log.result(f"\n===== Experiment: {model} / {base_image} (max_allowed_splits={max_allowed_splits}) =====")
@@ -434,6 +441,14 @@ def main():
         num_layers_list = [num_layers_for_capacity(c, max_allowed_splits) for c in CAPACITIES]
         labels = [f"{c}%" for c in CAPACITIES]
         print_packing_table(chunks_dir, model, max_allowed_splits, labels, num_layers_list)
+
+        experiments_meta.append({
+            "model": model,
+            "base_image": base_image,
+            "max_allowed_splits": max_allowed_splits,
+            "splits": split_stats(chunks_dir),
+            "packing_preview": packing_preview_data(chunks_dir, labels, num_layers_list, CAPACITIES),
+        })
 
         prepare_local_registry(base_image, registry(CFG))
 
@@ -472,6 +487,24 @@ def main():
         save_merged_csv(all_results, execution_ts)
     if all_samples:
         save_merged_resource_csv(all_samples, execution_ts)
+
+    write_run_json(
+        build_run_metadata_path(SCRIPT_DIR, execution_ts),
+        execution_ts=execution_ts,
+        started_at=run_started,
+        config={
+            "registry": registry(CFG),
+            "tdfs_binary": CFG.tdfs_binary,
+            "build_n_runs": CFG.build_n_runs,
+            "build_cooldown": CFG.build_cooldown,
+            "build_with_resource": CFG.build_with_resource,
+        },
+        sections={
+            "modes": MODES,
+            "capacities": CAPACITIES,
+            "experiments": experiments_meta,
+        },
+    )
 
     clear_artifacts(SCRIPT_DIR)
 

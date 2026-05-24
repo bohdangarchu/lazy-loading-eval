@@ -30,8 +30,9 @@ from pull_performance.paths import (
     refresh_artifacts_dir, refresh_bytes_chart_path, refresh_bytes_csv_path,
     refresh_chart_path, refresh_csv_path, refresh_log_path,
     refresh_merged_csv_path, refresh_merged_bytes_csv_path,
-    refresh_stargz_config_path,
+    refresh_stargz_config_path, refresh_run_metadata_path,
 )
+from shared.run_metadata import write_run_json
 from pull_performance.refresh_common import (
     base_image, build_mode, extra_flags, start_container, stop_container, timed_pull,
 )
@@ -343,6 +344,18 @@ def _model_size_str() -> str | None:
             except OSError:
                 pass
     return _fmt_bytes(total) if total > 0 else None
+
+
+def _snapshot_stats(snapshot_files: list[str]) -> dict:
+    """Model snapshot summary for run metadata (sizes in MB)."""
+    sizes = [os.path.getsize(p) for p in snapshot_files]
+    safetensors = [s for p, s in zip(snapshot_files, sizes) if p.endswith(".safetensors")]
+    return {
+        "num_files": len(snapshot_files),
+        "num_safetensors": len(safetensors),
+        "total_mb": round(sum(sizes) / (1024 ** 2), 1),
+        "safetensors_mb": round(sum(safetensors) / (1024 ** 2), 1),
+    }
 
 
 def _log_deltas(label: str, deltas: dict[str, dict[str, int]]) -> None:
@@ -787,6 +800,7 @@ def plot_bytes(bytes_rows: list[RefreshBytesRow], execution_ts: str) -> None:
 def main(execution_ts: str | None = None) -> None:
     if execution_ts is None:
         execution_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    run_started = datetime.now(timezone.utc)
     log.set_verbose(VERBOSE)
     log.info(f"Model: {MODEL}")
     log.info(f"Mode: {MODE}")
@@ -822,6 +836,36 @@ def main(execution_ts: str | None = None) -> None:
         save_merged_bytes_csv(bytes_rows, execution_ts)
     plot(time_rows, execution_ts)
     plot_bytes(bytes_rows, execution_ts)
+
+    write_run_json(
+        refresh_run_metadata_path(SCRIPT_DIR, execution_ts),
+        execution_ts=execution_ts,
+        started_at=run_started,
+        config={
+            "registry": registry(CFG),
+            "tdfs_binary": CFG.tdfs_binary,
+            "pull_cooldown": CFG.pull_cooldown,
+        },
+        sections={
+            "mode": MODE,
+            "n_runs": N_RUNS,
+            "update_strategies": ["baseline", "refresh"],
+            "op_types": OP_TYPES,
+            "prom_settle_s": PROM_SETTLE_S,
+            "mutation": {
+                "filename": MUTATED_FILENAME,
+                "target": "chat_template",
+                "inserted_string": MUTATION_STRING.decode("utf-8", "replace"),
+            },
+            "experiments": [{
+                "model": MODEL,
+                "base_image": SOURCE_IMAGE,
+                "mode": MODE,
+                "splits": _snapshot_stats(snapshot_files),
+            }],
+        },
+    )
+
     clear_artifacts(SCRIPT_DIR)
 
 
