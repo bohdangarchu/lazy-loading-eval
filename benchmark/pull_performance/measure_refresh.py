@@ -1,6 +1,5 @@
 import os
 import subprocess
-import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, fields
@@ -35,8 +34,8 @@ from pull_performance.paths import (
 )
 from shared.run_metadata import write_run_json
 from pull_performance.refresh_common import (
-    base_image, build_mode, delete_container, extra_flags, kill_container,
-    start_container, stop_container, timed_pull,
+    base_image, build_mode, extra_flags, start_container, stop_container,
+    timed_pull,
 )
 
 load_dotenv()
@@ -70,7 +69,10 @@ class RefreshTimeRow:
     update_strategy: UpdateStrategy
     setup_cold_read_s: float
     setup_warm_read_s: float
-    stop_s: float | None
+    stop_total_s: float | None
+    stop_kill_s: float | None
+    stop_task_delete_s: float | None
+    stop_container_delete_s: float | None
     pull_s: float | None
     run_s: float | None
     refresh_s: float | None
@@ -109,7 +111,10 @@ class StrategyResult:
     update_bytes_fetched: dict[str, dict[str, int]]
     read_s: float
     total_s: float
-    stop_s: float | None = None
+    stop_total_s: float | None = None
+    stop_kill_s: float | None = None
+    stop_task_delete_s: float | None = None
+    stop_container_delete_s: float | None = None
     pull_s: float | None = None
     run_s: float | None = None
     refresh_s: float | None = None
@@ -448,13 +453,11 @@ def _run_baseline_strategy(
 
     update_before = _snapshot_bytes()
 
-    # Time only the kill. Deleting the old container is slow but a new one
-    # doesn't wait on it, so do it in the background.
-    t0 = time.perf_counter()
-    kill_container(name)
-    stop_t = time.perf_counter() - t0
-    delete_old = threading.Thread(target=delete_container, args=(name,), daemon=True)
-    delete_old.start()
+    # Stop the old container before pulling the new image. The task delete
+    # dominates: unmounting the FUSE rootfs blocks until the snapshotter tears
+    # the mount down (~6s).
+    kill_t, task_del_t, container_del_t = stop_container(name)
+    stop_t = kill_t + task_del_t + container_del_t
 
     pull_t = timed_pull(
         ["sudo", "ctr-remote", "images", "rpull", "--plain-http", after_ref]
@@ -469,10 +472,10 @@ def _run_baseline_strategy(
     _assert_mutated(name2, expected=True)
     time.sleep(PROM_SETTLE_S)
     update_bytes_fetched = _bytes_fetched_delta(update_before, _snapshot_bytes())
-    delete_old.join()
     stop_container(name2)
     log.result(
-        f"  baseline: stop={stop_t:.2f}s pull={pull_t:.2f}s "
+        f"  baseline: stop={stop_t:.2f}s (kill={kill_t:.2f} task-del={task_del_t:.2f} "
+        f"container-del={container_del_t:.2f}) pull={pull_t:.2f}s "
         f"run={run_t:.2f}s read={read_t:.2f}s"
     )
     _log_bytes_fetched("baseline update", update_bytes_fetched)
@@ -484,7 +487,10 @@ def _run_baseline_strategy(
         update_bytes_fetched=update_bytes_fetched,
         read_s=read_t,
         total_s=stop_t + pull_t + run_t + read_t,
-        stop_s=stop_t,
+        stop_total_s=stop_t,
+        stop_kill_s=kill_t,
+        stop_task_delete_s=task_del_t,
+        stop_container_delete_s=container_del_t,
         pull_s=pull_t,
         run_s=run_t,
     )
@@ -538,7 +544,10 @@ def _time_row(run: int, strategy: UpdateStrategy, r: StrategyResult) -> RefreshT
         update_strategy=strategy,
         setup_cold_read_s=r.setup.cold_read_s,
         setup_warm_read_s=r.setup.warm_read_s,
-        stop_s=r.stop_s,
+        stop_total_s=r.stop_total_s,
+        stop_kill_s=r.stop_kill_s,
+        stop_task_delete_s=r.stop_task_delete_s,
+        stop_container_delete_s=r.stop_container_delete_s,
         pull_s=r.pull_s,
         run_s=r.run_s,
         refresh_s=r.refresh_s,
@@ -616,7 +625,7 @@ def print_results(time_rows: list[RefreshTimeRow]) -> None:
     refresh = [r for r in time_rows if r.update_strategy == "refresh"]
 
     if baseline:
-        arr = np.array([(r.stop_s, r.pull_s, r.run_s, r.read_s) for r in baseline], dtype=float)
+        arr = np.array([(r.stop_total_s, r.pull_s, r.run_s, r.read_s) for r in baseline], dtype=float)
         tot = np.array([r.total_s for r in baseline])
         log.result(
             f"baseline:  stop={arr[:,0].mean():.2f}±{arr[:,0].std():.2f}  "
@@ -695,7 +704,7 @@ def plot(time_rows: list[RefreshTimeRow], execution_ts: str) -> None:
     refresh = [r for r in time_rows if r.update_strategy == "refresh"]
 
     if baseline:
-        arr = np.array([(r.stop_s, r.pull_s, r.run_s, r.read_s) for r in baseline], dtype=float)
+        arr = np.array([(r.stop_total_s, r.pull_s, r.run_s, r.read_s) for r in baseline], dtype=float)
         means = arr.mean(axis=0)
         cum_stds = np.cumsum(arr, axis=1).std(axis=0, ddof=0)
         left = 0.0

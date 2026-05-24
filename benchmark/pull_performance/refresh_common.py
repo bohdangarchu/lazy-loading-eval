@@ -72,30 +72,31 @@ def cat_chunks_in_container(name: str, n: int) -> None:
     )
 
 
-def kill_container(name: str) -> None:
-    """Send SIGKILL to the container."""
+def kill_container(name: str) -> float:
+    """SIGKILL the container; return seconds taken."""
     t0 = time.perf_counter()
     subprocess.run(["sudo", "nerdctl", "kill", name], check=True,
                    capture_output=not log.VERBOSE)
-    log.info(f"  stop[kill]={time.perf_counter() - t0:.2f}s")
+    return time.perf_counter() - t0
 
 
-def delete_container(name: str) -> None:
-    """Delete the task and container record. The task delete is slow (FUSE
-    rootfs unmount)."""
+def delete_container(name: str) -> tuple[float, float]:
+    """Delete the task then the container record; return (task_s, container_s).
+    Task delete is the slow part: it unmounts the FUSE rootfs, and the unmount
+    blocks until the stargz snapshotter tears the mount down (~6s here)."""
     t0 = time.perf_counter()
     subprocess.run(["sudo", "ctr", "tasks", "delete", name], check=True,
                    capture_output=not log.VERBOSE)
-    task_dt = time.perf_counter() - t0
+    task_s = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     subprocess.run(["sudo", "ctr", "containers", "delete", name], check=True,
                    capture_output=not log.VERBOSE)
-    log.info(f"  cleanup[task-delete]={task_dt:.2f}s "
-             f"container-delete={time.perf_counter() - t0:.2f}s")
+    return task_s, time.perf_counter() - t0
 
 
-def stop_container(name: str) -> None:
-    """Kill and delete. For cleanup where timing doesn't matter."""
-    kill_container(name)
-    delete_container(name)
+def stop_container(name: str) -> tuple[float, float, float]:
+    """Kill, delete task, delete container; return (kill_s, task_s, container_s)."""
+    kill_s = kill_container(name)
+    task_s, container_s = delete_container(name)
+    return kill_s, task_s, container_s
