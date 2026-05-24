@@ -25,13 +25,13 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPERIMENTS = [
     # ("openai-community/gpt2",        "docker.io/library/python:3.12-slim"),  # ~0.5GB     ~50 MB
     # ("Qwen/Qwen2-1.5B",              "docker.io/library/python:3.12-slim"),  # ~3.09 GB     ~3.4 GB
-    # ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),  # ~6.0 GB     ~3.4 GB
-    ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim")
+    # ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim"),
+    ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim")    # ~6.0 GB     ~3.4 GB
 ]
 CFG = load_config()
 VERBOSE = False
 DIRECTIONS = ["top_to_bottom", "bottom_to_top"]
-MODES = ["2dfs", "base"]
+MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 LAYERS_MUTATED_PERCENTS = [25, 50, 75, 100]
 # v2: 
 # - n_chunks_mutated -> n_layers_mutated
