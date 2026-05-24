@@ -72,13 +72,54 @@ def cat_chunks_in_container(name: str, n: int) -> None:
     )
 
 
+def _task_pid(name: str) -> str | None:
+    """Host PID of the container's init process, via `ctr tasks ls`."""
+    r = subprocess.run(["sudo", "ctr", "tasks", "ls"],
+                       capture_output=True, text=True)
+    for line in r.stdout.splitlines():
+        parts = line.split()
+        if parts and parts[0] == name:
+            return parts[1]
+    return None
+
+
 def stop_container(name: str) -> None:
-    # TEMP investigation: per-call timing to locate the ~6s stop cost.
-    for label, cmd in (
-        ("kill", ["sudo", "nerdctl", "kill", name]),
-        ("task-delete", ["sudo", "ctr", "tasks", "delete", name]),
-        ("container-delete", ["sudo", "ctr", "containers", "delete", name]),
-    ):
-        t0 = time.perf_counter()
-        subprocess.run(cmd, check=True, capture_output=not log.VERBOSE)
-        log.info(f"  stop[{label}]={time.perf_counter() - t0:.2f}s")
+    # TEMP investigation: per-call timing + sample the init process's kernel
+    # state during the ~6s task-delete stall to confirm it wedges in D state.
+    t0 = time.perf_counter()
+    subprocess.run(["sudo", "nerdctl", "kill", name], check=True,
+                   capture_output=not log.VERBOSE)
+    log.info(f"  stop[kill]={time.perf_counter() - t0:.2f}s")
+
+    pid = _task_pid(name)
+    sampler = None
+    if pid:
+        # Sample STAT + wchan every 0.2s for up to 12s, in the background.
+        sampler = subprocess.Popen(
+            ["sudo", "sh", "-c",
+             f"for i in $(seq 1 60); do "
+             f"printf '%s ' \"$(date +%T.%2N)\"; "
+             f"ps -o stat=,wchan:32= -p {pid} 2>/dev/null || echo gone; "
+             f"sleep 0.2; done"],
+            stdout=subprocess.PIPE, text=True,
+        )
+
+    t0 = time.perf_counter()
+    subprocess.run(["sudo", "ctr", "tasks", "delete", name], check=True,
+                   capture_output=not log.VERBOSE)
+    log.info(f"  stop[task-delete]={time.perf_counter() - t0:.2f}s (pid={pid})")
+
+    if sampler:
+        sampler.terminate()
+        out, _ = sampler.communicate(timeout=5)
+        last = None  # print only on state change, with the timestamp it began
+        for line in out.splitlines():
+            ts, _, state = line.partition(" ")
+            if state != last:
+                log.info(f"    sample {ts} {state}")
+                last = state
+
+    t0 = time.perf_counter()
+    subprocess.run(["sudo", "ctr", "containers", "delete", name], check=True,
+                   capture_output=not log.VERBOSE)
+    log.info(f"  stop[container-delete]={time.perf_counter() - t0:.2f}s")
