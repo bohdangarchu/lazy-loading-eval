@@ -50,7 +50,7 @@ MUTATION_STRING = b"added string"
 OP_TYPES = ["on_demand_bytes_fetched"]
 WEIGHT_SUFFIXES = (".safetensors", ".bin")  # safetensors or PyTorch pickle weights
 PROM_SETTLE_S = 1.0  # > scrape_interval (500ms) so post-op scrape is visible
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -66,6 +66,8 @@ class RefreshTimeRow:
     mode: str
     run: int
     update_strategy: UpdateStrategy
+    setup_cold_read_s: float
+    setup_warm_read_s: float
     stop_s: float | None
     pull_s: float | None
     run_s: float | None
@@ -86,6 +88,29 @@ class RefreshBytesRow:
     layer: str
     op_type: str
     bytes: int
+
+
+@dataclass(frozen=True)
+class SetupResult:
+    """Outcome of the before-image warm-up phase (shared by both strategies)."""
+    name: str
+    cold_read_s: float
+    warm_read_s: float
+    bytes_fetched: dict[str, dict[str, int]]
+
+
+@dataclass(frozen=True)
+class StrategyResult:
+    """Outcome of one update strategy. Phase timings are populated per-strategy:
+    baseline sets stop/pull/run; refresh sets refresh_s."""
+    setup: SetupResult
+    update_bytes_fetched: dict[str, dict[str, int]]
+    read_s: float
+    total_s: float
+    stop_s: float | None = None
+    pull_s: float | None = None
+    run_s: float | None = None
+    refresh_s: float | None = None
 
 
 # ── snapshot download ──────────────────────────────────────────────────
@@ -284,6 +309,7 @@ def _cat_all_in_container(name: str, in_paths: list[str]) -> float:
     """Exec cat over all snapshot files inside container, return elapsed seconds."""
     exec_id = uuid.uuid4().hex[:8]
     files = " ".join(in_paths)
+    log.info(f"Reading {len(in_paths)} files in {name}: {in_paths}")
     start = time.perf_counter()
     subprocess.run(
         ["sudo", "ctr", "tasks", "exec", "--exec-id", exec_id,
@@ -314,9 +340,10 @@ def _snapshot_bytes() -> dict[str, dict[str, int]]:
     return {op: bytes_by_layer(op) for op in OP_TYPES}
 
 
-def _delta(before: dict[str, dict[str, int]],
-           after: dict[str, dict[str, int]]) -> dict[str, dict[str, int]]:
-    """Per-op_type, per-layer delta. Layers present only in `after` count as new."""
+def _bytes_fetched_delta(before: dict[str, dict[str, int]],
+                         after: dict[str, dict[str, int]]) -> dict[str, dict[str, int]]:
+    """Per-op_type, per-layer bytes fetched between two counter snapshots.
+    Layers present only in `after` count as new."""
     out: dict[str, dict[str, int]] = {}
     for op in OP_TYPES:
         b = before.get(op, {})
@@ -362,16 +389,14 @@ def _snapshot_stats(snapshot_files: list[str]) -> dict:
     }
 
 
-def _log_deltas(label: str, deltas: dict[str, dict[str, int]]) -> None:
+def _log_bytes_fetched(label: str, bytes_fetched: dict[str, dict[str, int]]) -> None:
     for op in OP_TYPES:
-        total = sum(deltas.get(op, {}).values())
+        total = sum(bytes_fetched.get(op, {}).values())
         log.result(f"  {label} {op}: total={_fmt_bytes(total)} "
-                   f"layers={len(deltas.get(op, {}))}")
+                   f"layers={len(bytes_fetched.get(op, {}))}")
 
 
-def _setup(
-    in_paths: list[str],
-) -> tuple[str, dict[str, dict[str, int]]]:
+def _setup(in_paths: list[str]) -> SetupResult:
     """Clear stargz cache, pull before-image, start container, warm page cache
     via cat.
 
@@ -395,7 +420,7 @@ def _setup(
     warm_t = _cat_all_in_container(name, in_paths)
     _assert_mutated(name, expected=False)
     time.sleep(PROM_SETTLE_S)
-    setup_deltas = _delta(bytes_before, _snapshot_bytes())
+    setup_bytes_fetched = _bytes_fetched_delta(bytes_before, _snapshot_bytes())
     log.result(
         f"DIAGNOSTICS: warm-up cat#1 (cold)={cold_t:.2f}s "
         f"cat#2 (re-read)={warm_t:.2f}s"
@@ -406,18 +431,17 @@ def _setup(
             f"DIAGNOSTICS: re-read/cold ratio={ratio:.2f} "
             f"({'kernel page cache effective' if ratio < 0.5 else 'kernel page cache NOT effective — FUSE likely bypasses it'})"
         )
-    _log_deltas("setup", setup_deltas)
-    return name, setup_deltas
+    _log_bytes_fetched("setup", setup_bytes_fetched)
+    return SetupResult(name, cold_t, warm_t, bytes_fetched=setup_bytes_fetched)
 
 
 def _run_baseline_strategy(
     in_paths: list[str], log_path: str | None = None,
-) -> tuple[float, float, float, float,
-           dict[str, dict[str, int]], dict[str, dict[str, int]]]:
-    """stop -> rpull after-image -> run -> read.
-    Returns (stop_s, pull_s, run_s, read_s, setup_deltas, update_deltas)."""
+) -> StrategyResult:
+    """stop -> rpull after-image -> run -> read."""
     log_window_start = time.time()
-    name, setup_deltas = _setup(in_paths)
+    setup = _setup(in_paths)
+    name = setup.name
     after_ref = _pull_ref("after")
 
     update_before = _snapshot_bytes()
@@ -438,27 +462,34 @@ def _run_baseline_strategy(
     read_t = _cat_all_in_container(name2, in_paths)
     _assert_mutated(name2, expected=True)
     time.sleep(PROM_SETTLE_S)
-    update_deltas = _delta(update_before, _snapshot_bytes())
+    update_bytes_fetched = _bytes_fetched_delta(update_before, _snapshot_bytes())
     stop_container(name2)
     log.result(
         f"  baseline: stop={stop_t:.2f}s pull={pull_t:.2f}s "
         f"run={run_t:.2f}s read={read_t:.2f}s"
     )
-    _log_deltas("baseline update", update_deltas)
+    _log_bytes_fetched("baseline update", update_bytes_fetched)
     if log_path:
         save_stargz_run_log(log_window_start, time.time(), log_path)
         log.result(f"  stargz logs -> {log_path}")
-    return stop_t, pull_t, run_t, read_t, setup_deltas, update_deltas
+    return StrategyResult(
+        setup=setup,
+        update_bytes_fetched=update_bytes_fetched,
+        read_s=read_t,
+        total_s=stop_t + pull_t + run_t + read_t,
+        stop_s=stop_t,
+        pull_s=pull_t,
+        run_s=run_t,
+    )
 
 
 def _run_refresh_strategy(
     in_paths: list[str], log_path: str | None = None,
-) -> tuple[float, float,
-           dict[str, dict[str, int]], dict[str, dict[str, int]]]:
-    """ctr-remote refresh before-image after-image -> read.
-    Returns (refresh_s, read_s, setup_deltas, update_deltas)."""
+) -> StrategyResult:
+    """ctr-remote refresh before-image after-image -> read."""
     log_window_start = time.time()
-    name, setup_deltas = _setup(in_paths)
+    setup = _setup(in_paths)
+    name = setup.name
     before_ref = _pull_ref("before")
     after_ref = _pull_ref("after")
 
@@ -474,56 +505,47 @@ def _run_refresh_strategy(
     read_t = _cat_all_in_container(name, in_paths)
     _assert_mutated(name, expected=True)
     time.sleep(PROM_SETTLE_S)
-    update_deltas = _delta(update_before, _snapshot_bytes())
+    update_bytes_fetched = _bytes_fetched_delta(update_before, _snapshot_bytes())
     stop_container(name)
     log.result(f"  refresh:  refresh={refresh_t:.2f}s read={read_t:.2f}s")
-    _log_deltas("refresh update", update_deltas)
+    _log_bytes_fetched("refresh update", update_bytes_fetched)
     if log_path:
         save_stargz_run_log(log_window_start, time.time(), log_path)
         log.result(f"  stargz logs -> {log_path}")
-    return refresh_t, read_t, setup_deltas, update_deltas
-
-
-def _baseline_row(run: int, stop: float, pull: float, run_t: float, read: float) -> RefreshTimeRow:
-    return RefreshTimeRow(
-        schema_version=SCHEMA_VERSION,
-        model=MODEL,
-        base_image=SOURCE_IMAGE,
-        mode=MODE,
-        run=run,
-        update_strategy="baseline",
-        stop_s=stop,
-        pull_s=pull,
-        run_s=run_t,
-        refresh_s=None,
-        read_s=read,
-        total_s=stop + pull + run_t + read,
+    return StrategyResult(
+        setup=setup,
+        update_bytes_fetched=update_bytes_fetched,
+        read_s=read_t,
+        total_s=refresh_t + read_t,
+        refresh_s=refresh_t,
     )
 
 
-def _refresh_row(run: int, refresh: float, read: float) -> RefreshTimeRow:
+def _time_row(run: int, strategy: UpdateStrategy, r: StrategyResult) -> RefreshTimeRow:
     return RefreshTimeRow(
         schema_version=SCHEMA_VERSION,
         model=MODEL,
         base_image=SOURCE_IMAGE,
         mode=MODE,
         run=run,
-        update_strategy="refresh",
-        stop_s=None,
-        pull_s=None,
-        run_s=None,
-        refresh_s=refresh,
-        read_s=read,
-        total_s=refresh + read,
+        update_strategy=strategy,
+        setup_cold_read_s=r.setup.cold_read_s,
+        setup_warm_read_s=r.setup.warm_read_s,
+        stop_s=r.stop_s,
+        pull_s=r.pull_s,
+        run_s=r.run_s,
+        refresh_s=r.refresh_s,
+        read_s=r.read_s,
+        total_s=r.total_s,
     )
 
 
 def _bytes_rows(
-    run: int, update_strategy: UpdateStrategy, experiment_phase: ExperimentPhase, deltas: dict[str, dict[str, int]],
+    run: int, update_strategy: UpdateStrategy, experiment_phase: ExperimentPhase, bytes_fetched: dict[str, dict[str, int]],
 ) -> list[RefreshBytesRow]:
     rows: list[RefreshBytesRow] = []
     for op in OP_TYPES:
-        for layer, b in sorted(deltas.get(op, {}).items()):
+        for layer, b in sorted(bytes_fetched.get(op, {}).items()):
             rows.append(RefreshBytesRow(
                 schema_version=SCHEMA_VERSION,
                 model=MODEL,
@@ -546,17 +568,10 @@ def measure_refresh(
     time_rows: list[RefreshTimeRow] = []
     bytes_rows: list[RefreshBytesRow] = []
 
-    def record_baseline(run: int, result: tuple) -> None:
-        stop, pull, run_t, read, setup, update = result
-        time_rows.append(_baseline_row(run, stop, pull, run_t, read))
-        bytes_rows.extend(_bytes_rows(run, "baseline", "setup", setup))
-        bytes_rows.extend(_bytes_rows(run, "baseline", "update", update))
-
-    def record_refresh(run: int, result: tuple) -> None:
-        refresh, read, setup, update = result
-        time_rows.append(_refresh_row(run, refresh, read))
-        bytes_rows.extend(_bytes_rows(run, "refresh", "setup", setup))
-        bytes_rows.extend(_bytes_rows(run, "refresh", "update", update))
+    def record(run: int, strategy: UpdateStrategy, r: StrategyResult) -> None:
+        time_rows.append(_time_row(run, strategy, r))
+        bytes_rows.extend(_bytes_rows(run, strategy, "setup", r.setup.bytes_fetched))
+        bytes_rows.extend(_bytes_rows(run, strategy, "update", r.update_bytes_fetched))
 
     for run in range(N_RUNS):
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -571,13 +586,13 @@ def measure_refresh(
 
         # Alternate update_strategy order per run to remove ordering bias.
         if run % 2 == 0:
-            record_baseline(run, _run_baseline_strategy(in_paths, baseline_log))
+            record(run, "baseline", _run_baseline_strategy(in_paths, baseline_log))
             time.sleep(CFG.pull_cooldown)
-            record_refresh(run, _run_refresh_strategy(in_paths, refresh_log))
+            record(run, "refresh", _run_refresh_strategy(in_paths, refresh_log))
         else:
-            record_refresh(run, _run_refresh_strategy(in_paths, refresh_log))
+            record(run, "refresh", _run_refresh_strategy(in_paths, refresh_log))
             time.sleep(CFG.pull_cooldown)
-            record_baseline(run, _run_baseline_strategy(in_paths, baseline_log))
+            record(run, "baseline", _run_baseline_strategy(in_paths, baseline_log))
 
         time.sleep(CFG.pull_cooldown)
 
