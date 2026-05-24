@@ -73,9 +73,12 @@ def cat_chunks_in_container(name: str, n: int) -> None:
 
 
 def stop_container(name: str) -> None:
-    subprocess.run(["sudo", "nerdctl", "kill", name], check=True,
-                   capture_output=not log.VERBOSE)
-    subprocess.run(["sudo", "ctr", "tasks", "delete", name], check=True,
-                   capture_output=not log.VERBOSE)
-    subprocess.run(["sudo", "ctr", "containers", "delete", name], check=True,
-                   capture_output=not log.VERBOSE)
+    # TEMP investigation: per-call timing to locate the ~6s stop cost.
+    for label, cmd in (
+        ("kill", ["sudo", "nerdctl", "kill", name]),
+        ("task-delete", ["sudo", "ctr", "tasks", "delete", name]),
+        ("container-delete", ["sudo", "ctr", "containers", "delete", name]),
+    ):
+        t0 = time.perf_counter()
+        subprocess.run(cmd, check=True, capture_output=not log.VERBOSE)
+        log.info(f"  stop[{label}]={time.perf_counter() - t0:.2f}s")
