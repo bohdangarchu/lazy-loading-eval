@@ -1,5 +1,6 @@
 import os
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, fields
@@ -34,7 +35,8 @@ from pull_performance.paths import (
 )
 from shared.run_metadata import write_run_json
 from pull_performance.refresh_common import (
-    base_image, build_mode, extra_flags, start_container, stop_container, timed_pull,
+    base_image, build_mode, delete_container, extra_flags, kill_container,
+    start_container, stop_container, timed_pull,
 )
 
 load_dotenv()
@@ -446,9 +448,13 @@ def _run_baseline_strategy(
 
     update_before = _snapshot_bytes()
 
+    # Time only the kill. Deleting the old container is slow but a new one
+    # doesn't wait on it, so do it in the background.
     t0 = time.perf_counter()
-    stop_container(name)
+    kill_container(name)
     stop_t = time.perf_counter() - t0
+    delete_old = threading.Thread(target=delete_container, args=(name,), daemon=True)
+    delete_old.start()
 
     pull_t = timed_pull(
         ["sudo", "ctr-remote", "images", "rpull", "--plain-http", after_ref]
@@ -463,6 +469,7 @@ def _run_baseline_strategy(
     _assert_mutated(name2, expected=True)
     time.sleep(PROM_SETTLE_S)
     update_bytes_fetched = _bytes_fetched_delta(update_before, _snapshot_bytes())
+    delete_old.join()
     stop_container(name2)
     log.result(
         f"  baseline: stop={stop_t:.2f}s pull={pull_t:.2f}s "

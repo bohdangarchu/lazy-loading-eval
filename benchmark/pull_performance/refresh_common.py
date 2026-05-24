@@ -72,54 +72,30 @@ def cat_chunks_in_container(name: str, n: int) -> None:
     )
 
 
-def _task_pid(name: str) -> str | None:
-    """Host PID of the container's init process, via `ctr tasks ls`."""
-    r = subprocess.run(["sudo", "ctr", "tasks", "ls"],
-                       capture_output=True, text=True)
-    for line in r.stdout.splitlines():
-        parts = line.split()
-        if parts and parts[0] == name:
-            return parts[1]
-    return None
-
-
-def stop_container(name: str) -> None:
-    # TEMP investigation: per-call timing + sample the init process's kernel
-    # state during the ~6s task-delete stall to confirm it wedges in D state.
+def kill_container(name: str) -> None:
+    """Send SIGKILL to the container."""
     t0 = time.perf_counter()
     subprocess.run(["sudo", "nerdctl", "kill", name], check=True,
                    capture_output=not log.VERBOSE)
     log.info(f"  stop[kill]={time.perf_counter() - t0:.2f}s")
 
-    pid = _task_pid(name)
-    sampler = None
-    if pid:
-        # Sample STAT + wchan every 0.2s for up to 12s, in the background.
-        sampler = subprocess.Popen(
-            ["sudo", "sh", "-c",
-             f"for i in $(seq 1 60); do "
-             f"printf '%s ' \"$(date +%T.%2N)\"; "
-             f"ps -o stat=,wchan:32= -p {pid} 2>/dev/null || echo gone; "
-             f"sleep 0.2; done"],
-            stdout=subprocess.PIPE, text=True,
-        )
 
+def delete_container(name: str) -> None:
+    """Delete the task and container record. The task delete is slow (FUSE
+    rootfs unmount)."""
     t0 = time.perf_counter()
     subprocess.run(["sudo", "ctr", "tasks", "delete", name], check=True,
                    capture_output=not log.VERBOSE)
-    log.info(f"  stop[task-delete]={time.perf_counter() - t0:.2f}s (pid={pid})")
-
-    if sampler:
-        sampler.terminate()
-        out, _ = sampler.communicate(timeout=5)
-        last = None  # print only on state change, with the timestamp it began
-        for line in out.splitlines():
-            ts, _, state = line.partition(" ")
-            if state != last:
-                log.info(f"    sample {ts} {state}")
-                last = state
+    task_dt = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     subprocess.run(["sudo", "ctr", "containers", "delete", name], check=True,
                    capture_output=not log.VERBOSE)
-    log.info(f"  stop[container-delete]={time.perf_counter() - t0:.2f}s")
+    log.info(f"  cleanup[task-delete]={task_dt:.2f}s "
+             f"container-delete={time.perf_counter() - t0:.2f}s")
+
+
+def stop_container(name: str) -> None:
+    """Kill and delete. For cleanup where timing doesn't matter."""
+    kill_container(name)
+    delete_container(name)
