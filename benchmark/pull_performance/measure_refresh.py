@@ -51,7 +51,7 @@ MUTATION_STRING = b"added string"
 OP_TYPES = ["on_demand_bytes_fetched"]
 WEIGHT_SUFFIXES = (".safetensors", ".bin")  # safetensors or PyTorch pickle weights
 PROM_SETTLE_S = 1.0  # > scrape_interval (500ms) so post-op scrape is visible
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
