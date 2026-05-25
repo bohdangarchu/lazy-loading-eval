@@ -268,12 +268,6 @@ def main():
         plot(results, model, base_image, max_allowed_splits, execution_ts)
         all_results.extend(results)
 
-        log.result(f"\n{'run':>4}  {'pct':>4}  {'n_mut':>5}  {'direction':<16}  {'mode':<14}  {'total':>8}")
-        log.result("-" * 60)
-        for row in results:
-            log.result(f"{row.run:>4}  {row.layers_mutated_pct:>3}%  {row.n_layers_mutated:>5}  {row.direction:<16}  {row.mode:<14}  "
-                       f"{row.total_s:>8.2f}")
-
     if all_results:
         save_merged_csv(all_results, execution_ts)
 

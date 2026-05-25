@@ -4,7 +4,7 @@ import socket
 import subprocess
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def git_commit() -> str:
@@ -18,8 +18,41 @@ def git_commit() -> str:
         return ""
 
 
+def _cmd(args: list[str]) -> str:
+    try:
+        return subprocess.check_output(args, stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        return ""
+
+
+def _version(args: list[str]) -> str:
+    out = _cmd(args)
+    return out.splitlines()[0] if out else ""
+
+
 def hostname() -> str:
-    return socket.gethostname()
+    return _cmd(["hostname", "-f"]) or socket.gethostname()
+
+
+def tool_versions() -> dict:
+    return {
+        "containerd": _version(["containerd", "--version"]),
+        "nerdctl": _version(["nerdctl", "--version"]),
+        "runc": _version(["runc", "--version"]),
+        "buildkitd": _version(["buildkitd", "--version"]),
+        "containerd-stargz-grpc": _version(["containerd-stargz-grpc", "--version"]),
+        "tdfs": _version(["tdfs", "version"]),
+    }
+
+
+def system_info() -> dict:
+    return {
+        "hostname": hostname(),
+        "uname": _cmd(["uname", "-a"]),
+        "lscpu": _cmd(["lscpu"]),
+        "meminfo": _cmd(["free", "-h"]),
+        "versions": tool_versions(),
+    }
 
 
 def write_run_json(
@@ -40,7 +73,7 @@ def write_run_json(
         "finished_at": finished.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "duration_s": round((finished - started).total_seconds(), 1),
         "git_commit": git_commit(),
-        "hostname": hostname(),
+        "system_info": system_info(),
         "config": config,
         **sections,
     }

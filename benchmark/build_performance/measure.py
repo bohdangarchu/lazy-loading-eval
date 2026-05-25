@@ -467,19 +467,6 @@ def main():
             plot_resource_individual(samples, model, base_image, execution_ts, max_allowed_splits)
             all_samples.extend(samples)
 
-        capacities = sorted(set(r.capacity for r in results))
-        log.result("\n=== Comparison (median across runs) ===")
-        col = 16
-        header_modes = "  ".join(f"{m:>{col}}" for m in MODES)
-        log.result(f"{'capacity':>10}  {header_modes}")
-        log.result("-" * (12 + (col + 2) * len(MODES)))
-        for cap in capacities:
-            row_vals = []
-            for m in MODES:
-                group = [r.total_s for r in results if r.mode == m and r.capacity == cap]
-                row_vals.append(f"{np.median(group):>{col}.2f}" if group else f"{'N/A':>{col}}")
-            log.result(f"{cap:>9}%  {'  '.join(row_vals)}")
-
         save_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, max_allowed_splits, execution_ts)
         all_results.extend(results)
