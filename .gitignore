@@ -25,3 +25,4 @@ config.yaml
 nohup.out
 *-local.md
 artifacts
+.venv*

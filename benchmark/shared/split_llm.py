@@ -53,7 +53,7 @@ def run_split_llm(model: str) -> str:
             log.info(f"Splits manifest unreadable at {manifest_path} — regenerating")
         fs.rmtree(out_dir)
 
-    venv_py = os.path.join(_SPLIT_REPO, ".venv/bin/python")
+    venv_py = os.path.join(_SPLIT_REPO, ".venv-split-llm/bin/python")
     script = os.path.join(_SPLIT_REPO, "split_llm.py")
     if not os.path.exists(venv_py):
         raise RuntimeError(f"split-llm-simple venv not found at {venv_py}")
