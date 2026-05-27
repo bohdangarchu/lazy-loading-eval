@@ -4,7 +4,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Callable, Literal
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -18,8 +18,8 @@ from shared.charts import figure_footer, save_figure, write_csv
 from shared.config import load_config
 from shared.prometheus import bytes_by_layer
 from shared.registry import (
-    clear_registry, fetch_layer_digests, image_slug, prepare_local_registry,
-    registry, save_toc, tdfs_cmd,
+    clear_registry, fetch_layer_digests, fetch_layer_sizes, image_slug,
+    prepare_local_registry, registry, save_toc, tdfs_cmd,
 )
 from shared.services import (
     clear_2dfs_cache, clear_stargz_cache, ensure_buildkit, save_stargz_run_log,
@@ -43,7 +43,8 @@ load_dotenv()
 CFG = load_config()
 VERBOSE = True
 N_RUNS = 1
-MODE = "2dfs-stargz"
+LAZY_MODE = "2dfs-stargz"   # used by manual-lazy + refresh
+NO_LAZY_MODE = "oci"        # used by manual-oci (full pull)
 MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 SOURCE_IMAGE = "docker.io/ollama/ollama"
 MUTATED_FILENAME = "tokenizer_config.json"
@@ -51,13 +52,14 @@ MUTATION_STRING = b"added string"
 OP_TYPES = ["on_demand_bytes_fetched"]
 WEIGHT_SUFFIXES = (".safetensors", ".bin")  # safetensors or PyTorch pickle weights
 PROM_SETTLE_S = 1.0  # > scrape_interval (500ms) so post-op scrape is visible
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-UpdateStrategy = Literal["baseline", "refresh"]
+UpdateStrategy = Literal["manual-lazy", "manual-oci", "refresh"]
 ExperimentPhase = Literal["setup", "update"]
 ImageVersion = Literal["before", "after"]
+StrategyRunner = Callable[[list[str], str | None], "StrategyResult"]
 
 @dataclass(frozen=True)
 class RefreshTimeRow:
@@ -67,8 +69,8 @@ class RefreshTimeRow:
     mode: str
     run: int
     update_strategy: UpdateStrategy
-    setup_cold_read_s: float
-    setup_warm_read_s: float
+    setup_cold_read_s: float | None
+    setup_warm_read_s: float | None
     stop_total_s: float | None
     stop_kill_s: float | None
     stop_task_delete_s: float | None
@@ -106,8 +108,9 @@ class SetupResult:
 @dataclass(frozen=True)
 class StrategyResult:
     """Outcome of one update strategy. Phase timings are populated per-strategy:
-    baseline sets stop/pull/run; refresh sets refresh_s."""
-    setup: SetupResult
+    manual-lazy sets stop/pull/run; manual-oci sets pull/run (no before
+    container to stop); refresh sets refresh_s. setup is None for manual-oci."""
+    setup: SetupResult | None
     update_bytes_fetched: dict[str, dict[str, int]]
     read_s: float
     total_s: float
@@ -208,19 +211,19 @@ def _restore_byte(offset: int, length: int) -> None:
 # ── image naming ───────────────────────────────────────────────────────
 
 
-def _build_target(image_version: ImageVersion) -> str:
-    return f"{registry(CFG)}/{image_slug(SOURCE_IMAGE)}-{MODE}-refresh:{image_version}"
+def _build_target(image_version: ImageVersion, mode: str = LAZY_MODE) -> str:
+    return f"{registry(CFG)}/{image_slug(SOURCE_IMAGE)}-{mode}-refresh:{image_version}"
 
 
-def _pull_ref(image_version: ImageVersion) -> str:
-    return f"{registry(CFG)}/library/{image_slug(SOURCE_IMAGE)}-{MODE}-refresh:{image_version}--0.0.0.0"
+def _pull_ref(image_version: ImageVersion, mode: str = LAZY_MODE) -> str:
+    return f"{registry(CFG)}/library/{image_slug(SOURCE_IMAGE)}-{mode}-refresh:{image_version}--0.0.0.0"
 
 
 # ── TOC export ─────────────────────────────────────────────────────────
 
 
-def _repo() -> str:
-    return f"library/{image_slug(SOURCE_IMAGE)}-{MODE}-refresh"
+def _repo(mode: str = LAZY_MODE) -> str:
+    return f"library/{image_slug(SOURCE_IMAGE)}-{mode}-refresh"
 
 
 def _export_tocs(image_version: ImageVersion, toc_dir: str) -> list[str]:
@@ -239,15 +242,17 @@ def _export_tocs(image_version: ImageVersion, toc_dir: str) -> list[str]:
 # ── build helpers ──────────────────────────────────────────────────────
 
 
-def _build_version(snapshot_files: list[str], image_version: ImageVersion) -> None:
-    target = _build_target(image_version)
-    base = base_image(SOURCE_IMAGE, CFG, MODE)
+def _build_version(
+    snapshot_files: list[str], image_version: ImageVersion, mode: str = LAZY_MODE,
+) -> None:
+    target = _build_target(image_version, mode)
+    base = base_image(SOURCE_IMAGE, CFG, mode)
 
     write_2dfs_json([snapshot_files], SCRIPT_DIR)
 
     cmd = tdfs_cmd(CFG, SCRIPT_DIR) + [
         "build", "--platforms", "linux/amd64",
-        *extra_flags(MODE),
+        *extra_flags(mode),
         "--force-http", "-f", "2dfs.json",
         base, target,
     ]
@@ -268,8 +273,9 @@ def prepare_refresh(
     artifacts_dir: str | None = None,
     toc_dir: str | None = None,
 ) -> list[str]:
-    """Download snapshot, build & push before-image, mutate one byte, build &
-    push after-image, restore. Returns snapshot file list.
+    """Download snapshot, build & push before/after images for both the lazy
+    (stargz) and the no-lazy (OCI) modes, mutating one byte for the after
+    images. Returns snapshot file list.
     """
     snapshot_files = download_snapshot()
 
@@ -277,7 +283,8 @@ def prepare_refresh(
     clear_registry(CFG, preserve_base=True, verbose=False)
     clear_artifacts(SCRIPT_DIR)
 
-    _build_version(snapshot_files, "before")
+    _build_version(snapshot_files, "before", LAZY_MODE)
+    _build_version(snapshot_files, "before", NO_LAZY_MODE)
     if artifacts_dir:
         snapshot_artifacts(SCRIPT_DIR, artifacts_dir)
     before_digests: list[str] = []
@@ -286,7 +293,8 @@ def prepare_refresh(
 
     offset, original = _mutate_chat_template()
     try:
-        _build_version(snapshot_files, "after")
+        _build_version(snapshot_files, "after", LAZY_MODE)
+        _build_version(snapshot_files, "after", NO_LAZY_MODE)
     finally:
         _restore_byte(offset, original)
 
@@ -403,25 +411,34 @@ def _log_bytes_fetched(label: str, bytes_fetched: dict[str, dict[str, int]]) -> 
                    f"layers={len(bytes_fetched.get(op, {}))}")
 
 
-def _setup(in_paths: list[str]) -> SetupResult:
+def _setup(in_paths: list[str], mode: str = LAZY_MODE) -> SetupResult:
     """Clear stargz cache, pull before-image, start container, warm page cache
     via cat.
+
+    LAZY_MODE pulls lazily (rpull, stargz snapshotter); NO_LAZY_MODE pulls the
+    full image (overlayfs). Setup bytes are the on-demand bytes fetched during
+    warm-up — always 0 for NO_LAZY_MODE since the full image is already local.
 
     Diagnostic: cat twice back-to-back. If second cat is fast, the kernel page
     cache is being used; if both are ~same, FUSE is bypassing it (in which case
     refresh cannot help regardless of mount preservation).
     """
+    lazy = mode == LAZY_MODE
+    snapshotter = "stargz" if lazy else "overlayfs"
     clear_stargz_cache()
     time.sleep(PROM_SETTLE_S)
     bytes_before = _snapshot_bytes()
-    before_ref = _pull_ref("before")
-    log.info(f"Pulling before-image (setup): {before_ref}")
-    subprocess.run(
-        ["sudo", "ctr-remote", "images", "rpull", "--plain-http", before_ref],
-        check=True, capture_output=not log.VERBOSE,
-    )
+    before_ref = _pull_ref("before", mode)
+    log.info(f"Pulling before-image (setup, {mode}): {before_ref}")
+    if lazy:
+        pull_cmd = ["sudo", "ctr-remote", "images", "rpull",
+                    "--plain-http", before_ref]
+    else:
+        pull_cmd = ["sudo", "ctr-remote", "images", "pull",
+                    "--snapshotter", "overlayfs", "--plain-http", before_ref]
+    subprocess.run(pull_cmd, check=True, capture_output=not log.VERBOSE)
     name = _next_container_name("refresh-before")
-    start_container(before_ref, name)
+    start_container(before_ref, name, snapshotter=snapshotter)
 
     cold_t = _cat_all_in_container(name, in_paths)
     warm_t = _cat_all_in_container(name, in_paths)
@@ -442,7 +459,65 @@ def _setup(in_paths: list[str]) -> SetupResult:
     return SetupResult(name, cold_t, warm_t, bytes_fetched=setup_bytes_fetched)
 
 
-def _run_baseline_strategy(
+def _oci_after_layer_bytes() -> dict[str, int]:
+    """Per-layer compressed sizes of the whole OCI after-image, from the
+    registry manifest. Represents the full image a no-lazy pull downloads."""
+    return fetch_layer_sizes(registry(CFG), _repo(NO_LAZY_MODE), "after--0.0.0.0")
+
+
+def _run_manual_oci_strategy(
+    in_paths: list[str], log_path: str | None = None,
+) -> StrategyResult:
+    """No lazy loading: stop -> full pull after-image -> run -> read.
+    Mirrors manual-lazy but pulls the whole image over overlayfs."""
+    log_window_start = time.time()
+    setup = _setup(in_paths, NO_LAZY_MODE)
+    name = setup.name
+    after_ref = _pull_ref("after", NO_LAZY_MODE)
+
+    # overlayfs rootfs unmounts cheaply, so this stop should be fast (vs stargz FUSE).
+    kill_t, task_del_t, container_del_t = stop_container(name)
+    stop_t = kill_t + task_del_t + container_del_t
+
+    log.info(f"Full-pulling OCI after-image: {after_ref}")
+    pull_t = timed_pull(
+        ["sudo", "ctr-remote", "images", "pull",
+         "--snapshotter", "overlayfs", "--plain-http", after_ref]
+    )
+
+    name2 = _next_container_name("refresh-oci-after")
+    t0 = time.perf_counter()
+    start_container(after_ref, name2, snapshotter="overlayfs")
+    run_t = time.perf_counter() - t0
+
+    read_t = _cat_all_in_container(name2, in_paths)
+    _assert_mutated(name2, expected=True)
+    update_bytes_fetched = {OP_TYPES[0]: _oci_after_layer_bytes()}
+    stop_container(name2)
+    log.result(
+        f"  manual-oci: stop={stop_t:.2f}s (kill={kill_t:.2f} task-del={task_del_t:.2f} "
+        f"container-del={container_del_t:.2f}) pull={pull_t:.2f}s "
+        f"run={run_t:.2f}s read={read_t:.2f}s"
+    )
+    _log_bytes_fetched("manual-oci update", update_bytes_fetched)
+    if log_path:
+        save_stargz_run_log(log_window_start, time.time(), log_path)
+        log.result(f"  stargz logs -> {log_path}")
+    return StrategyResult(
+        setup=setup,
+        update_bytes_fetched=update_bytes_fetched,
+        read_s=read_t,
+        total_s=stop_t + pull_t + run_t + read_t,
+        stop_total_s=stop_t,
+        stop_kill_s=kill_t,
+        stop_task_delete_s=task_del_t,
+        stop_container_delete_s=container_del_t,
+        pull_s=pull_t,
+        run_s=run_t,
+    )
+
+
+def _run_manual_lazy_strategy(
     in_paths: list[str], log_path: str | None = None,
 ) -> StrategyResult:
     """stop -> rpull after-image -> run -> read."""
@@ -474,11 +549,11 @@ def _run_baseline_strategy(
     update_bytes_fetched = _bytes_fetched_delta(update_before, _snapshot_bytes())
     stop_container(name2)
     log.result(
-        f"  baseline: stop={stop_t:.2f}s (kill={kill_t:.2f} task-del={task_del_t:.2f} "
+        f"  manual-lazy: stop={stop_t:.2f}s (kill={kill_t:.2f} task-del={task_del_t:.2f} "
         f"container-del={container_del_t:.2f}) pull={pull_t:.2f}s "
         f"run={run_t:.2f}s read={read_t:.2f}s"
     )
-    _log_bytes_fetched("baseline update", update_bytes_fetched)
+    _log_bytes_fetched("manual-lazy update", update_bytes_fetched)
     if log_path:
         save_stargz_run_log(log_window_start, time.time(), log_path)
         log.result(f"  stargz logs -> {log_path}")
@@ -534,16 +609,18 @@ def _run_refresh_strategy(
     )
 
 
-def _time_row(run: int, strategy: UpdateStrategy, r: StrategyResult) -> RefreshTimeRow:
+def _time_row(
+    run: int, strategy: UpdateStrategy, mode: str, r: StrategyResult,
+) -> RefreshTimeRow:
     return RefreshTimeRow(
         schema_version=SCHEMA_VERSION,
         model=MODEL,
         base_image=SOURCE_IMAGE,
-        mode=MODE,
+        mode=mode,
         run=run,
         update_strategy=strategy,
-        setup_cold_read_s=r.setup.cold_read_s,
-        setup_warm_read_s=r.setup.warm_read_s,
+        setup_cold_read_s=r.setup.cold_read_s if r.setup else None,
+        setup_warm_read_s=r.setup.warm_read_s if r.setup else None,
         stop_total_s=r.stop_total_s,
         stop_kill_s=r.stop_kill_s,
         stop_task_delete_s=r.stop_task_delete_s,
@@ -557,7 +634,7 @@ def _time_row(run: int, strategy: UpdateStrategy, r: StrategyResult) -> RefreshT
 
 
 def _bytes_rows(
-    run: int, update_strategy: UpdateStrategy, experiment_phase: ExperimentPhase, bytes_fetched: dict[str, dict[str, int]],
+    run: int, update_strategy: UpdateStrategy, mode: str, experiment_phase: ExperimentPhase, bytes_fetched: dict[str, dict[str, int]],
 ) -> list[RefreshBytesRow]:
     rows: list[RefreshBytesRow] = []
     for op in OP_TYPES:
@@ -566,7 +643,7 @@ def _bytes_rows(
                 schema_version=SCHEMA_VERSION,
                 model=MODEL,
                 base_image=SOURCE_IMAGE,
-                mode=MODE,
+                mode=mode,
                 run=run,
                 update_strategy=update_strategy,
                 experiment_phase=experiment_phase,
@@ -584,33 +661,34 @@ def measure_refresh(
     time_rows: list[RefreshTimeRow] = []
     bytes_rows: list[RefreshBytesRow] = []
 
-    def record(run: int, strategy: UpdateStrategy, r: StrategyResult) -> None:
-        time_rows.append(_time_row(run, strategy, r))
-        bytes_rows.extend(_bytes_rows(run, strategy, "setup", r.setup.bytes_fetched))
-        bytes_rows.extend(_bytes_rows(run, strategy, "update", r.update_bytes_fetched))
+    def record(run: int, strategy: UpdateStrategy, mode: str, r: StrategyResult) -> None:
+        time_rows.append(_time_row(run, strategy, mode, r))
+        if r.setup is not None:
+            bytes_rows.extend(
+                _bytes_rows(run, strategy, mode, "setup", r.setup.bytes_fetched)
+            )
+        bytes_rows.extend(
+            _bytes_rows(run, strategy, mode, "update", r.update_bytes_fetched)
+        )
 
     for run in range(N_RUNS):
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         log.info(f"\n[{ts}] === run {run + 1}/{N_RUNS} ===")
 
-        baseline_log = refresh_log_path(
-            SCRIPT_DIR, MODEL, SOURCE_IMAGE, "baseline", run, execution_ts,
-        )
-        refresh_log = refresh_log_path(
-            SCRIPT_DIR, MODEL, SOURCE_IMAGE, "refresh", run, execution_ts,
-        )
-
-        # Alternate update_strategy order per run to remove ordering bias.
-        if run % 2 == 0:
-            record(run, "baseline", _run_baseline_strategy(in_paths, baseline_log))
+        # (strategy, build mode, runner) per arm; log path derived from name.
+        strategies: list[tuple[UpdateStrategy, str, StrategyRunner]] = [
+            ("manual-lazy", LAZY_MODE, _run_manual_lazy_strategy),
+            ("manual-oci", NO_LAZY_MODE, _run_manual_oci_strategy),
+            ("refresh", LAZY_MODE, _run_refresh_strategy),
+        ]
+        # Rotate order per run to remove ordering bias.
+        rot = run % len(strategies)
+        for strategy, mode, runner in strategies[rot:] + strategies[:rot]:
+            log_path = refresh_log_path(
+                SCRIPT_DIR, MODEL, SOURCE_IMAGE, strategy, run, execution_ts,
+            )
+            record(run, strategy, mode, runner(in_paths, log_path))
             time.sleep(CFG.pull_cooldown)
-            record(run, "refresh", _run_refresh_strategy(in_paths, refresh_log))
-        else:
-            record(run, "refresh", _run_refresh_strategy(in_paths, refresh_log))
-            time.sleep(CFG.pull_cooldown)
-            record(run, "baseline", _run_baseline_strategy(in_paths, baseline_log))
-
-        time.sleep(CFG.pull_cooldown)
 
     return time_rows, bytes_rows
 
@@ -621,14 +699,25 @@ def measure_refresh(
 def print_results(time_rows: list[RefreshTimeRow]) -> None:
     log.result(f"\n=== Refresh-vs-Baseline Results (mean ± stddev, n={N_RUNS} runs) ===")
 
-    baseline = [r for r in time_rows if r.update_strategy == "baseline"]
+    manual_lazy = [r for r in time_rows if r.update_strategy == "manual-lazy"]
+    manual_oci = [r for r in time_rows if r.update_strategy == "manual-oci"]
     refresh = [r for r in time_rows if r.update_strategy == "refresh"]
 
-    if baseline:
-        arr = np.array([(r.stop_total_s, r.pull_s, r.run_s, r.read_s) for r in baseline], dtype=float)
-        tot = np.array([r.total_s for r in baseline])
+    if manual_lazy:
+        arr = np.array([(r.stop_total_s, r.pull_s, r.run_s, r.read_s) for r in manual_lazy], dtype=float)
+        tot = np.array([r.total_s for r in manual_lazy])
         log.result(
-            f"baseline:  stop={arr[:,0].mean():.2f}±{arr[:,0].std():.2f}  "
+            f"manual-lazy:  stop={arr[:,0].mean():.2f}±{arr[:,0].std():.2f}  "
+            f"pull={arr[:,1].mean():.2f}±{arr[:,1].std():.2f}  "
+            f"run={arr[:,2].mean():.2f}±{arr[:,2].std():.2f}  "
+            f"read={arr[:,3].mean():.2f}±{arr[:,3].std():.2f}  "
+            f"total={tot.mean():.2f}±{tot.std():.2f}"
+        )
+    if manual_oci:
+        arr = np.array([(r.stop_total_s, r.pull_s, r.run_s, r.read_s) for r in manual_oci], dtype=float)
+        tot = np.array([r.total_s for r in manual_oci])
+        log.result(
+            f"manual-oci:   stop={arr[:,0].mean():.2f}±{arr[:,0].std():.2f}  "
             f"pull={arr[:,1].mean():.2f}±{arr[:,1].std():.2f}  "
             f"run={arr[:,2].mean():.2f}±{arr[:,2].std():.2f}  "
             f"read={arr[:,3].mean():.2f}±{arr[:,3].std():.2f}  "
@@ -695,45 +784,36 @@ PHASE_COLORS = {
 
 
 def plot(time_rows: list[RefreshTimeRow], execution_ts: str) -> None:
-    fig, ax = plt.subplots(figsize=(10, 3.6))
+    fig, ax = plt.subplots(figsize=(10, 4.2))
 
-    y_positions = [0, 1]
-    labels = ["manual update", "refresh"]
+    # (y, label, strategy, phase keys, per-row value extractor)
+    arms = [
+        (0, "manual update (lazy)", "manual-lazy", ("stop", "pull", "run", "read"),
+         lambda r: (r.stop_total_s, r.pull_s, r.run_s, r.read_s)),
+        (1, "manual update (OCI)", "manual-oci", ("stop", "pull", "run", "read"),
+         lambda r: (r.stop_total_s, r.pull_s, r.run_s, r.read_s)),
+        (2, "refresh", "refresh", ("refresh", "read"),
+         lambda r: (r.refresh_s, r.read_s)),
+    ]
+    y_positions = [a[0] for a in arms]
+    labels = [a[1] for a in arms]
 
-    baseline = [r for r in time_rows if r.update_strategy == "baseline"]
-    refresh = [r for r in time_rows if r.update_strategy == "refresh"]
-
-    if baseline:
-        arr = np.array([(r.stop_total_s, r.pull_s, r.run_s, r.read_s) for r in baseline], dtype=float)
+    for y, _, strategy, keys, value_fn in arms:
+        rows = [r for r in time_rows if r.update_strategy == strategy]
+        if not rows:
+            continue
+        arr = np.array([value_fn(r) for r in rows], dtype=float)
         means = arr.mean(axis=0)
         cum_stds = np.cumsum(arr, axis=1).std(axis=0, ddof=0)
         left = 0.0
-        for value, key in zip(means, ("stop", "pull", "run", "read")):
+        for value, key in zip(means, keys):
             ax.barh(
-                0, value, left=left, height=0.5,
+                y, value, left=left, height=0.5,
                 color=PHASE_COLORS[key], edgecolor=PHASE_COLORS[key], linewidth=0.5,
             )
             left += value
-        cum = np.cumsum(means)
         ax.errorbar(
-            cum, [0] * len(cum), xerr=cum_stds,
-            fmt="none", capsize=3, ecolor="black", elinewidth=1,
-        )
-
-    if refresh:
-        arr = np.array([(r.refresh_s, r.read_s) for r in refresh], dtype=float)
-        means = arr.mean(axis=0)
-        cum_stds = np.cumsum(arr, axis=1).std(axis=0, ddof=0)
-        left = 0.0
-        for value, key in zip(means, ("refresh", "read")):
-            ax.barh(
-                1, value, left=left, height=0.5,
-                color=PHASE_COLORS[key], edgecolor=PHASE_COLORS[key], linewidth=0.5,
-            )
-            left += value
-        cum = np.cumsum(means)
-        ax.errorbar(
-            cum, [1] * len(cum), xerr=cum_stds,
+            np.cumsum(means), [y] * len(means), xerr=cum_stds,
             fmt="none", capsize=3, ecolor="black", elinewidth=1,
         )
 
@@ -768,8 +848,9 @@ def plot_bytes(bytes_rows: list[RefreshBytesRow], execution_ts: str) -> None:
     """One bar per (update_strategy, experiment_phase). Bytes = on_demand_bytes_fetched, mean across runs."""
     op = OP_TYPES[0]
     groups = [
-        ("baseline", "update", "manual update"),
-        ("refresh",  "update", "refresh"),
+        ("manual-lazy", "update", "manual update (lazy)"),
+        ("manual-oci",  "update", "manual update (OCI)"),
+        ("refresh",     "update", "refresh"),
     ]
 
     per_run_totals: dict[tuple[int, str, str], int] = {}
@@ -815,7 +896,7 @@ def plot_bytes(bytes_rows: list[RefreshBytesRow], execution_ts: str) -> None:
 
     ax.set_ylabel("GiB")
     ax.set_title(
-        f"on-demand bytes fetched after config update",
+        f"bytes fetched after config update",
         pad=24,
     )
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")
@@ -838,7 +919,7 @@ def main(execution_ts: str | None = None) -> None:
     run_started = datetime.now(timezone.utc)
     log.set_verbose(VERBOSE)
     log.info(f"Model: {MODEL}")
-    log.info(f"Mode: {MODE}")
+    log.info(f"Mode: {LAZY_MODE}")
     log.info(f"N_RUNS: {N_RUNS}")
 
     ensure_buildkit()
@@ -851,7 +932,7 @@ def main(execution_ts: str | None = None) -> None:
     log.result(f"Stargz config snapshot saved to {stargz_config_path}")
 
     artifacts_dir = refresh_artifacts_dir(
-        SCRIPT_DIR, execution_ts, MODEL, SOURCE_IMAGE, build_mode(MODE)
+        SCRIPT_DIR, execution_ts, MODEL, SOURCE_IMAGE, build_mode(LAZY_MODE)
     )
     toc_dir = os.path.join(artifacts_dir, "toc")
     log.result(f"TOC artifacts -> {toc_dir}")
@@ -882,9 +963,10 @@ def main(execution_ts: str | None = None) -> None:
             "pull_cooldown": CFG.pull_cooldown,
         },
         sections={
-            "mode": MODE,
+            "mode": LAZY_MODE,
+            "oci_mode": NO_LAZY_MODE,
             "n_runs": N_RUNS,
-            "update_strategies": ["baseline", "refresh"],
+            "update_strategies": ["manual-lazy", "manual-oci", "refresh"],
             "op_types": OP_TYPES,
             "prom_settle_s": PROM_SETTLE_S,
             "mutation": {
@@ -895,7 +977,7 @@ def main(execution_ts: str | None = None) -> None:
             "experiments": [{
                 "model": MODEL,
                 "base_image": SOURCE_IMAGE,
-                "mode": MODE,
+                "mode": LAZY_MODE,
                 "splits": _snapshot_stats(snapshot_files),
             }],
         },

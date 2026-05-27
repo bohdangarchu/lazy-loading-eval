@@ -3,7 +3,7 @@ import time
 import uuid
 
 from shared import log
-from shared.registry import stargz_base_image, zstd_base_image
+from shared.registry import plain_base_image, stargz_base_image, zstd_base_image
 
 EXPERIMENTS = [
     # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
@@ -26,6 +26,8 @@ def build_mode(mode: str) -> str:
 
 def extra_flags(mode: str) -> list[str]:
     base = build_mode(mode)
+    if base == "oci":
+        return []
     if base == "2dfs-stargz":
         return ["--enable-stargz", "--stargz-chunk-size", "2097152"]
     if base == "2dfs-stargz-zstd":
@@ -35,6 +37,8 @@ def extra_flags(mode: str) -> list[str]:
 
 def base_image(source_image: str, cfg, mode: str) -> str:
     base = build_mode(mode)
+    if base == "oci":
+        return plain_base_image(source_image, cfg)
     if base == "2dfs-stargz":
         return stargz_base_image(source_image, cfg)
     if base == "2dfs-stargz-zstd":
@@ -53,10 +57,13 @@ def timed_pull(cmd: list[str]) -> float:
     return time.perf_counter() - start
 
 
-def start_container(image: str, name: str) -> None:
-    """Start a detached stargz container that stays alive via sleep infinity."""
+def start_container(image: str, name: str, snapshotter: str = "stargz") -> None:
+    """Start a detached container that stays alive via sleep infinity.
+
+    snapshotter="stargz" for lazy pulls; "overlayfs" for a fully-pulled OCI image.
+    """
     subprocess.run(
-        ["sudo", "ctr-remote", "run", "--detach", "--snapshotter=stargz",
+        ["sudo", "ctr-remote", "run", "--detach", f"--snapshotter={snapshotter}",
          image, name, "sleep", "infinity"],
         check=True, capture_output=not log.VERBOSE,
     )

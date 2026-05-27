@@ -114,8 +114,8 @@ def _parse_name_tag(local_tag: str, registry_url: str) -> tuple[str, str]:
     return name, tag
 
 
-def fetch_layer_digests(registry_url: str, repo: str, tag: str) -> list[str]:
-    """Fetch layer digests for a given image tag from the registry v2 API.
+def _fetch_manifest(registry_url: str, repo: str, tag: str) -> dict:
+    """Fetch an image manifest from the registry v2 API.
 
     Resolves index manifests to the linux/amd64 entry (falls back to first entry).
     """
@@ -128,9 +128,9 @@ def fetch_layer_digests(registry_url: str, repo: str, tag: str) -> list[str]:
     ])
     req = urllib.request.Request(f"{base}/{tag}", headers={"Accept": accept})
     with urllib.request.urlopen(req) as resp:
-        m = json.loads(resp.read())
-    if "manifests" in m:
-        entries = m["manifests"]
+        manifest = json.loads(resp.read())
+    if "manifests" in manifest:
+        entries = manifest["manifests"]
         chosen = None
         for entry in entries:
             plat = entry.get("platform", {})
@@ -142,8 +142,20 @@ def fetch_layer_digests(registry_url: str, repo: str, tag: str) -> list[str]:
             chosen = entries[0]
         req2 = urllib.request.Request(f"{base}/{chosen['digest']}", headers={"Accept": accept})
         with urllib.request.urlopen(req2) as resp2:
-            m = json.loads(resp2.read())
-    return [layer["digest"] for layer in m["layers"]]
+            manifest = json.loads(resp2.read())
+    return manifest
+
+
+def fetch_layer_digests(registry_url: str, repo: str, tag: str) -> list[str]:
+    """Fetch layer digests for a given image tag from the registry v2 API."""
+    manifest = _fetch_manifest(registry_url, repo, tag)
+    return [layer["digest"] for layer in manifest["layers"]]
+
+
+def fetch_layer_sizes(registry_url: str, repo: str, tag: str) -> dict[str, int]:
+    """Fetch {layer_digest: compressed_size_bytes} for an image tag."""
+    manifest = _fetch_manifest(registry_url, repo, tag)
+    return {layer["digest"]: int(layer["size"]) for layer in manifest["layers"]}
 
 
 def save_toc(registry_url: str, repo: str, digest: str, out_path: str) -> None:
