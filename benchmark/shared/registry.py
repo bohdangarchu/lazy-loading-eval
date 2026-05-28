@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import subprocess
 import urllib.error
 import urllib.request
@@ -10,6 +11,18 @@ from shared.config import EnvConfig
 
 def registry(cfg: EnvConfig) -> str:
     return cfg.registry
+
+
+def check_reachable(cfg: EnvConfig, timeout: float = 5.0) -> None:
+    host, _, port = cfg.registry.partition(":")
+    if not port:
+        raise RuntimeError(f"registry {cfg.registry!r} has no port")
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            pass
+    except OSError as e:
+        raise RuntimeError(f"registry {cfg.registry} not reachable: {e}") from e
+    log.info(f"registry {cfg.registry} reachable")
 
 
 def stargz_base_image(source_image: str, cfg: EnvConfig) -> str:

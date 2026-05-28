@@ -35,7 +35,7 @@ EXPERIMENTS = [
     # ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
     # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
     # ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim"),
-    ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim")    # ~6.0 GB     ~3.4 GB
+    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama")    # ~6.0 GB     ~3.4 GB
 ]
 CFG = load_config()
 VERBOSE = True

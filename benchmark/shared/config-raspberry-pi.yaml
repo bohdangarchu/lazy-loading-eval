@@ -1,0 +1,22 @@
+registry: "131.159.25.169:5000"
+tdfs_home_dir: null
+tmpdir: null
+tdfs_binary: "tdfs"
+
+build_cooldown: 5
+pull_cooldown: 5
+
+# build_performance/measure.py
+build_n_runs: 5
+build_with_resource: true
+
+# build_performance/measure_rebuild.py
+rebuild_n_runs: 5
+
+# pull_performance/measure.py
+pull_n_runs: 5
+
+# pull_performance/measure_stargz_config.py
+stargz_config_n_splits: 10
+stargz_config_base_splits: [2, 4, 6, 8, 10]
+stargz_config_n_runs: 3

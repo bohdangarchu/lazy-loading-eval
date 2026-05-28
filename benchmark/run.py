@@ -2,7 +2,7 @@ import os
 import socket
 import time
 
-from shared import log, notify, paths
+from shared import log, notify, paths, registry
 from shared.config import load_config
 from shared.model import cleanup_build_artifacts, cleanup_pull_artifacts
 
@@ -16,6 +16,7 @@ _BENCHMARK_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def run_phases():
     cfg = load_config()
+    registry.check_reachable(cfg)
 
     log.result("=== Phase 1: Build Performance ===")
     bm.main()
