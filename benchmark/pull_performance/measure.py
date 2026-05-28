@@ -292,13 +292,16 @@ def measure(
     base_splits = _splits_for(max_allowed_splits)
 
     clear_registry(cfg, preserve_base=True, verbose=False)
+
+    # Prepare all base images up front
+    prepare_local_registry(source_image, registry(cfg))
     for mode in MODES:
         log.info(f"\n=== Preparing mode: {mode} ===")
-        prepare_local_registry(source_image, registry(cfg))
         _prepare_mode(mode, allotments, base_splits, source_image, cfg, model, execution_ts)
 
-        for run in range(CFG.pull_n_runs):
-            log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{CFG.pull_n_runs} ===")
+    for run in range(CFG.pull_n_runs):
+        log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{CFG.pull_n_runs} ===")
+        for mode in MODES:
             for pct in PARTITION_PERCENTS:
                 n = max(1, max_allowed_splits * pct // 100)
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -321,7 +324,7 @@ def measure(
                 log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
                 time.sleep(cfg.pull_cooldown)
 
-        clear_registry(cfg, preserve_base=True)
+    clear_registry(cfg, preserve_base=True)
 
     return results
 
