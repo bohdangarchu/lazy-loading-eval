@@ -44,6 +44,14 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+# -------------------------------------------------------------------
+# Registry reachability check (fail fast before installing anything)
+# -------------------------------------------------------------------
+if ! curl -sf --connect-timeout 5 "http://${REGISTRY_NODE}:5000/v2/" > /dev/null; then
+  echo "Error: registry ${REGISTRY_NODE}:5000 is not accessible"
+  exit 1
+fi
+
 if [[ -z "${GRAFANA_API_KEY:-}" ]]; then
   echo "Warning: GRAFANA_API_KEY not set — Grafana remote_write will be disabled"
 fi
