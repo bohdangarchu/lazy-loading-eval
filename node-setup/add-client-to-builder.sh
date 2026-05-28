@@ -25,7 +25,7 @@ fi
 # Step 1: Install FUSE (required for stargz snapshotter)
 # -------------------------------------------------------------------
 apt-get update
-apt-get install -y fuse
+apt-get install -y fuse3
 modprobe fuse
 
 # -------------------------------------------------------------------

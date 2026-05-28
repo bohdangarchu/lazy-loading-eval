@@ -80,7 +80,7 @@ tar Cxzvf /opt/cni/bin "cni-plugins-${OS}-${ARCH}-v${CNI_VERSION}.tgz"
 # Step 4: Install FUSE (required for stargz)
 # -------------------------------------------------------------------
 apt-get update
-apt-get install -y fuse
+apt-get install -y fuse3
 modprobe fuse
 
 # -------------------------------------------------------------------

@@ -89,7 +89,7 @@ apt-get install -y python3 python3-pip python3.12-venv
 # -------------------------------------------------------------------
 # Step 4: FUSE (required for stargz snapshotter)
 # -------------------------------------------------------------------
-apt-get install -y fuse
+apt-get install -y fuse3
 modprobe fuse
 
 # -------------------------------------------------------------------
