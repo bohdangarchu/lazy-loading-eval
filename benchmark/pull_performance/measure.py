@@ -15,7 +15,7 @@ from pull_performance.paths import pull_csv_path, pull_chart_path, pull_artifact
 from shared.config import load_config
 from shared.run_metadata import write_run_json
 from shared.registry import prepare_local_registry, clear_registry, registry
-from shared.services import ensure_buildkit, clear_stargz_cache
+from shared.services import ensure_buildkit, clear_stargz_cache, prune_buildkit
 from shared.artifacts import clear_artifacts
 from shared.model import cleanup_pull_experiment
 from shared.stargz_config import read_base_config
@@ -296,6 +296,8 @@ def measure(
         log.info(f"\n=== Preparing mode: {mode} ===")
         prepare_local_registry(source_image, registry(cfg))
         _prepare_mode(mode, allotments, base_splits, source_image, cfg, model, execution_ts)
+        clear_2dfs_cache(cfg)
+        prune_buildkit()
 
         for run in range(CFG.pull_n_runs):
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{CFG.pull_n_runs} ===")

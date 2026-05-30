@@ -49,8 +49,8 @@ def save_stargz_run_log(pull_start_s: float, run_end_s: float, log_path: str) ->
 def clear_2dfs_cache(cfg) -> None:
     log.info("Clearing 2dfs cache...")
     home = cfg.tdfs_home_dir or os.path.expanduser("~/.2dfs")
-    cmd = f"sudo rm -rf {home}/blobs/* {home}/uncompressed-keys/* {home}/index/*"
-    subprocess.run(cmd, shell=True, check=True)
+    for sub in ("blobs", "uncompressed-keys", "index"):
+        subprocess.run(["sudo", "rm", "-rf", f"{home}/{sub}"], check=True)
 
 
 STARGZ_ROOT = "/var/lib/containerd-stargz-grpc"
