@@ -31,8 +31,11 @@ cd "$WORKDIR"
 
 sudo docker build -t 2dfs/registry:latest .
 
+REGISTRY_DATA="/mydata/2dfs-registry-data"
+sudo mkdir -p "$REGISTRY_DATA"
+
 sudo docker run -d \
   --name 2dfs-registry \
   -p 5000:5000 \
-  -v 2dfs-registry-data:/var/lib/registry \
+  -v "$REGISTRY_DATA":/var/lib/registry \
   2dfs/registry:latest
