@@ -24,6 +24,7 @@ from shared.artifacts import snapshot_artifacts, clear_artifacts
 from shared.config import load_config
 from shared.charts import MODE_COLORS, figure_footer, bar_group_xticks, save_figure, write_csv
 from shared.registry import prepare_local_registry, registry, image_slug
+from shared.services import ensure_buildkit, prune_buildkit, clear_2dfs_cache
 from shared.run_metadata import write_run_json
 from build_performance import build_2dfs as b2
 from build_performance import build_2dfs_stargz as b2s
@@ -423,6 +424,9 @@ def plot_resource_individual(
 
 def main():
     log.set_verbose(VERBOSE)
+    ensure_buildkit()
+    prune_buildkit()
+    clear_2dfs_cache(CFG)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_started = datetime.now(timezone.utc)
 
