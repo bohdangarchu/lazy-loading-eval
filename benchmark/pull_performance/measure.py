@@ -25,6 +25,7 @@ from pull_performance.prepare import (
     build_and_push_stargz, build_and_push_base,
 )
 from shared.services import clear_2dfs_cache
+from shared.split_llm import layers_for_percent
 from pull_performance.images import (
     pull_name_2dfs, pull_name_2dfs_stargz, pull_name_2dfs_stargz_zstd,
     pull_name_stargz, pull_name_base,
@@ -235,7 +236,7 @@ def _measure_one(mode: str, allotments: list[list[str]], n: int, source_image: s
 
 
 def _splits_for(max_allowed_splits: int) -> list[int]:
-    return [max(1, max_allowed_splits * pct // 100) for pct in PARTITION_PERCENTS]
+    return [layers_for_percent(max_allowed_splits, pct) for pct in PARTITION_PERCENTS]
 
 
 def split_stats(allotments: list[list[str]]) -> dict:
@@ -257,7 +258,7 @@ def packing_preview_data(allotments: list[list[str]], max_allowed_splits: int) -
     Cumulative: each pct reads the first n allotments."""
     out: list[dict] = []
     for pct in PARTITION_PERCENTS:
-        n = max(1, max_allowed_splits * pct // 100)
+        n = layers_for_percent(max_allowed_splits, pct)
         sizes_mb = [
             round(sum(os.path.getsize(p) for p in a) / (1024 ** 2), 1)
             for a in allotments[:n]
@@ -302,7 +303,7 @@ def measure(
         for run in range(CFG.pull_n_runs):
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{CFG.pull_n_runs} ===")
             for pct in PARTITION_PERCENTS:
-                n = max(1, max_allowed_splits * pct // 100)
+                n = layers_for_percent(max_allowed_splits, pct)
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 log.info(f"\n[{ts}] === {mode}: {pct}% ({n} allotments) ===")
                 clear_stargz_cache()

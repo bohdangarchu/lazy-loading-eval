@@ -147,6 +147,15 @@ def compute_split_stats(safetensor_paths: list[str]) -> tuple[int, int, int]:
 # ── 4. capacity-driven repacking ───────────────────────────────────────
 
 
+def layers_for_percent(total: int, pct: int) -> int:
+    """Map a 0-100% knob onto a layer/bucket count in [1, total].
+
+    round (not floor): for small `total` the product lands on .5
+    (e.g. 3 * 50% = 1.5) and floor would collapse it onto a lower pct.
+    """
+    return max(1, round(total * pct / 100))
+
+
 def repack(
     safetensor_paths: list[str], num_allotments: int,
     extra_files: list[str] | None = None,

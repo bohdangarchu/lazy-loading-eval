@@ -30,6 +30,7 @@ from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_stargz as bs
 from build_performance import build_base as bb
+from shared.split_llm import layers_for_percent
 from build_performance.prepare import (
     generate_build_artifacts, prepare_model_splits, print_packing_table,
     packing_preview_data, split_stats,
@@ -49,12 +50,6 @@ VERBOSE = False
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 CAPACITIES = [0, 25, 50, 75, 100]
 SCHEMA_VERSION = 1
-
-def num_layers_for_capacity(capacity: int, max_allowed_splits: int) -> int:
-    if capacity <= 0:
-        return 1
-    return max(1, max_allowed_splits * capacity // 100)
-
 
 @dataclass(frozen=True)
 class BuildRow:
@@ -178,7 +173,7 @@ def measure_builds(
     for run in range(cfg.build_n_runs):
         log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{cfg.build_n_runs} ===")
         for cap in CAPACITIES:
-            num_layers = num_layers_for_capacity(cap, max_allowed_splits)
+            num_layers = layers_for_percent(max_allowed_splits, cap)
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing capacity={cap}% ({num_layers} layer(s)) ===")
             generate_build_artifacts(chunks_dir, num_layers, source_image, cfg)
             if execution_ts:
@@ -439,7 +434,7 @@ def main():
         log.result(f"\n===== Experiment: {model} / {base_image} (max_allowed_splits={max_allowed_splits}) =====")
 
         generate_build_artifacts(chunks_dir, max_allowed_splits, base_image, CFG)
-        num_layers_list = [num_layers_for_capacity(c, max_allowed_splits) for c in CAPACITIES]
+        num_layers_list = [layers_for_percent(max_allowed_splits, c) for c in CAPACITIES]
         labels = [f"{c}%" for c in CAPACITIES]
         print_packing_table(chunks_dir, model, max_allowed_splits, labels, num_layers_list)
 

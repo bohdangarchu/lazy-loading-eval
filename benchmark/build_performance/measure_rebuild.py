@@ -22,6 +22,7 @@ from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_base as bb
 from build_performance import build_stargz as bs
+from shared.split_llm import layers_for_percent
 from build_performance.prepare import (
     generate_build_artifacts, prepare_model_splits, print_packing_table,
     packing_preview_data, split_stats,
@@ -96,7 +97,7 @@ def mutation_preview_data(groups: list[list[str]]) -> list[dict]:
 
     out: list[dict] = []
     for pct in LAYERS_MUTATED_PERCENTS:
-        n = max(1, len(groups) * pct // 100)
+        n = layers_for_percent(len(groups), pct)
         out.append({
             "layers_mutated_pct": pct,
             "n_layers_mutated": n,
@@ -138,7 +139,7 @@ def measure_rebuilds(
     for run in range(CFG.rebuild_n_runs):
         log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{CFG.rebuild_n_runs} ===")
         for pct in LAYERS_MUTATED_PERCENTS:
-            n_layers_mutated = max(1, len(groups) * pct // 100)
+            n_layers_mutated = layers_for_percent(len(groups), pct)
             for direction in DIRECTIONS:
                 target_buckets = get_buckets_to_mutate(groups, n_layers_mutated, direction)
 
