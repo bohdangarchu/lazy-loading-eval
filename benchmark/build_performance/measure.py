@@ -38,10 +38,10 @@ from build_performance.prepare import (
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXPERIMENTS = [
-    # ("openai-community/gpt2",        "docker.io/library/python:3.12-slim"),  # ~0.5GB     ~50 MB
+    ("openai-community/gpt2",        "docker.io/library/python:3.12-slim"),  # ~0.5GB     ~50 MB
     # ("Qwen/Qwen2-1.5B",              "docker.io/library/python:3.12-slim"),  # ~3.09 GB     ~3.4 GB
     # ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim"), # 3 GB
-    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama")    # ~6.0 GB     ~3.4 GB
+    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama")    # ~6.0 GB     ~3.4 GB
     # ("openlm-research/open_llama_7b", "docker.io/ollama/ollama")                # 14 GB
 ]
 CFG = load_config()
