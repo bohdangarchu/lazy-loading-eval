@@ -11,8 +11,16 @@ import numpy as np
 
 from shared import log
 from shared.charts import MODE_COLORS, figure_footer, save_figure, write_csv
-from pull_performance.paths import pull_csv_path, pull_chart_path, pull_artifacts_dir, pull_stargz_config_path, pull_merged_csv_path, pull_run_metadata_path
-from shared.config import load_config
+from pull_performance.paths import (
+    pull_csv_path, pull_chart_path, pull_artifacts_dir, pull_stargz_config_path,
+    pull_merged_csv_path, pull_run_metadata_path,
+    pull_resource_csv_path, pull_resource_merged_csv_path, pull_resource_chart_path,
+    pull_resource_cpu_charts_run_dir, pull_resource_ram_charts_run_dir,
+    pull_resource_cores_charts_run_dir, pull_resource_disk_charts_run_dir,
+)
+from shared.config import load_config, build_tmpdir
+from shared.resource_monitor import ResourceMonitor, ResourceRow, derive_samples, write_resource_csv
+from shared.resource_charts import plot_resource_aggregate, plot_resource_timeseries
 from shared.run_metadata import write_run_json
 from shared.registry import prepare_local_registry, clear_registry, registry
 from shared.services import ensure_buildkit, clear_stargz_cache, prune_buildkit
@@ -32,16 +40,16 @@ from pull_performance.images import (
 )
 
 EXPERIMENTS = [
-    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
+    ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
     # ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
     # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
     # ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim"),
-    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama")    # ~6.0 GB     ~3.4 GB
+    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama")    # ~6.0 GB     ~3.4 GB
 ]
 CFG = load_config()
 VERBOSE = True
-MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
-PARTITION_PERCENTS = [25, 50, 75, 100]
+MODES = ["2dfs", "2dfs-stargz"]
+PARTITION_PERCENTS = [25, 50]
 SCHEMA_VERSION = 1
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -286,7 +294,7 @@ def print_packing_table(allotments: list[list[str]], model: str, max_allowed_spl
 
 def measure(
     allotments: list[list[str]], max_allowed_splits: int, source_image: str, cfg,
-    model: str, execution_ts: str,
+    model: str, execution_ts: str, monitor: ResourceMonitor | None = None,
 ) -> list[PullRow]:
     results: list[PullRow] = []
 
@@ -307,7 +315,11 @@ def measure(
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 log.info(f"\n[{ts}] === {mode}: {pct}% ({n} allotments) ===")
                 clear_stargz_cache()
+                if monitor:
+                    monitor.set_context(mode, pct, run)
                 _, pull_t, run_t = _measure_one(mode, allotments, n, source_image, cfg)
+                if monitor:
+                    monitor.set_idle()
                 results.append(PullRow(
                     schema_version=SCHEMA_VERSION,
                     model=model,
@@ -376,6 +388,14 @@ def save_csv(results: list[PullRow], model: str, base_image: str, execution_ts: 
 
 def save_merged_csv(results: list[PullRow], execution_ts: str) -> None:
     _write_pull_rows(pull_merged_csv_path(SCRIPT_DIR, execution_ts), results)
+
+
+def save_resource_csv(samples: list[ResourceRow], model: str, base_image: str, execution_ts: str) -> None:
+    write_resource_csv(pull_resource_csv_path(SCRIPT_DIR, model, base_image, execution_ts), samples, "partition_pct")
+
+
+def save_merged_resource_csv(samples: list[ResourceRow], execution_ts: str) -> None:
+    write_resource_csv(pull_resource_merged_csv_path(SCRIPT_DIR, execution_ts), samples, "partition_pct")
 
 
 def plot(results: list[PullRow], model: str, base_image: str, execution_ts: str) -> None:
@@ -457,6 +477,7 @@ def main():
     log.result(f"Stargz config snapshot saved to {stargz_config_path}")
 
     all_results: list[PullRow] = []
+    all_samples: list[ResourceRow] = []
     experiments_meta: list[dict] = []
     for model, base_image in EXPERIMENTS:
         allotments, max_allowed_splits = prepare_model_splits(model)
@@ -471,7 +492,31 @@ def main():
             "packing_preview": packing_preview_data(allotments, max_allowed_splits),
         })
 
-        results = measure(allotments, max_allowed_splits, base_image, CFG, model, execution_ts)
+        monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG))
+        monitor.start()
+
+        results = measure(allotments, max_allowed_splits, base_image, CFG, model, execution_ts, monitor=monitor)
+
+        samples = monitor.stop()
+        save_resource_csv(samples, model, base_image, execution_ts)  # raw counters
+        enriched = derive_samples(samples)
+        plot_resource_aggregate(
+            enriched, modes=MODES, n_runs=CFG.pull_n_runs,
+            xlabel="Partition size (%)",
+            title=f"Resource usage during pull+run (mean ± std, n={CFG.pull_n_runs} runs)",
+            model=model, base_image=base_image, max_allowed_splits=max_allowed_splits,
+            output_path=pull_resource_chart_path(SCRIPT_DIR, model, base_image, execution_ts),
+        )
+        plot_resource_timeseries(
+            enriched, model=model, base_image=base_image,
+            max_allowed_splits=max_allowed_splits,
+            dimension_label="partition", dimension_tag="pct",
+            cpu_dir=pull_resource_cpu_charts_run_dir(SCRIPT_DIR, execution_ts),
+            ram_dir=pull_resource_ram_charts_run_dir(SCRIPT_DIR, execution_ts),
+            cores_dir=pull_resource_cores_charts_run_dir(SCRIPT_DIR, execution_ts),
+            disk_dir=pull_resource_disk_charts_run_dir(SCRIPT_DIR, execution_ts),
+        )
+        all_samples.extend(samples)
 
         print_results(results)
         save_csv(results, model, base_image, execution_ts)
@@ -481,6 +526,8 @@ def main():
 
     if all_results:
         save_merged_csv(all_results, execution_ts)
+    if all_samples:
+        save_merged_resource_csv(all_samples, execution_ts)
 
     write_run_json(
         pull_run_metadata_path(SCRIPT_DIR, execution_ts),

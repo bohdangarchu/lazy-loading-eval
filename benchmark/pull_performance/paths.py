@@ -119,6 +119,30 @@ def pull_csv_path(base_dir: str, model: str, base_image: str, n_splits: int, exe
 def pull_chart_path(base_dir: str, model: str, base_image: str, n_splits: int, execution_ts: str) -> str:
     return os.path.join(pull_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_pull_{n_splits}.png")
 
+def pull_resource_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(pull_run_dir(base_dir, execution_ts), "resource", f"{_model_slug(model)}_{_image_slug(base_image)}_resource.csv")
+
+def pull_resource_merged_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_run_dir(base_dir, execution_ts), "resource", "merged.csv")
+
+def pull_resource_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_charts_run_dir(base_dir, execution_ts), "resource")
+
+def pull_resource_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(pull_resource_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_resource.png")
+
+def pull_resource_cpu_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_resource_charts_run_dir(base_dir, execution_ts), "cpu")
+
+def pull_resource_ram_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_resource_charts_run_dir(base_dir, execution_ts), "ram")
+
+def pull_resource_cores_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_resource_charts_run_dir(base_dir, execution_ts), "cores")
+
+def pull_resource_disk_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_resource_charts_run_dir(base_dir, execution_ts), "disk")
+
 def pull_stargz_config_path(base_dir: str, execution_ts: str) -> str:
     return os.path.join(pull_run_dir(base_dir, execution_ts), "stargz-config.toml")
 
