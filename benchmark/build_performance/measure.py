@@ -16,12 +16,14 @@ from build_performance.paths import (
     build_csv_path, build_chart_path,
     resource_csv_path, resource_chart_path,
     resource_cpu_charts_run_dir, resource_ram_charts_run_dir,
+    resource_cores_charts_run_dir, resource_disk_charts_run_dir,
     build_artifacts_dir,
     build_merged_csv_path, resource_merged_csv_path,
     build_run_metadata_path,
 )
 from shared.artifacts import snapshot_artifacts, clear_artifacts
-from shared.config import load_config
+from shared.config import load_config, build_tmpdir
+from shared.fs import physical_device
 from shared.charts import MODE_COLORS, figure_footer, bar_group_xticks, save_figure, write_csv
 from shared.registry import prepare_local_registry, registry, image_slug
 from shared.services import ensure_buildkit, prune_buildkit, clear_2dfs_cache
@@ -40,17 +42,18 @@ from build_performance.prepare import (
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXPERIMENTS = [
-    ("openai-community/gpt2",        "docker.io/library/python:3.12-slim"),  # ~0.5GB     ~50 MB
+    # ("openai-community/gpt2",        "docker.io/library/python:3.12-slim"),  # ~0.5GB     ~50 MB
     # ("Qwen/Qwen2-1.5B",              "docker.io/library/python:3.12-slim"),  # ~3.09 GB     ~3.4 GB
-    # ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim"), # 3 GB
-    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama")    # ~6.0 GB     ~3.4 GB
+    ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim"), # 3 GB
+    # ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim")    # ~6.0 GB     ~3.4 GB
     # ("openlm-research/open_llama_7b", "docker.io/ollama/ollama")                # 14 GB
 ]
 CFG = load_config()
 VERBOSE = False
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 CAPACITIES = [0, 25, 50, 75, 100]
-SCHEMA_VERSION = 1
+BUILD_SCHEMA_VERSION = 2
+RESOURCE_SCHEMA_VERSION = 4
 
 @dataclass(frozen=True)
 class BuildRow:
@@ -63,31 +66,91 @@ class BuildRow:
     num_layers: int
     mode: str
     total_s: float
+    pull_s: float
+    build_s: float
+    export_s: float
 
 
 @dataclass
 class RunSamples:
-    """CPU and RAM samples collected during one (capacity, mode, run) window."""
+    """Derived per-window rates collected during one (capacity, mode, run) window."""
     cpu: list[float] = field(default_factory=list)
     mem: list[float] = field(default_factory=list)
+    disk_read_mb: list[float] = field(default_factory=list)
+    disk_write_mb: list[float] = field(default_factory=list)
+    disk_read_iops: list[float] = field(default_factory=list)
+    disk_write_iops: list[float] = field(default_factory=list)
+    disk_util: list[float] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class ResourceRow:
+    """One sample. Disk fields are RAW cumulative-since-boot counters; all rates,
+    util% and await are derived at plot/analysis time (see derive_samples)."""
     schema_version: int
     model: str
     base_image: str
     max_allowed_splits: int
     timestamp_ms: int
     cpu_percent: float
+    cpu_per_core: str
     mem_mb: float
+    disk_read_bytes: int
+    disk_write_bytes: int
+    disk_read_count: int
+    disk_write_count: int
+    disk_read_time_ms: int
+    disk_write_time_ms: int
+    disk_busy_time_ms: int
     mode: str
     capacity: int | None
     run: int | None
 
 
+@dataclass
+class DiskRates:
+    """Rates derived from the delta between two consecutive raw ResourceRow counters."""
+    read_mb_s: float = 0.0
+    write_mb_s: float = 0.0
+    read_iops: float = 0.0
+    write_iops: float = 0.0
+    util_pct: float = 0.0  # busy_time -> wall fraction the device was active (<=100%)
+
+
+@dataclass
+class DerivedSample:
+    """A raw ResourceRow paired with the disk rates derived against the previous sample."""
+    row: ResourceRow
+    disk: DiskRates
+
+
+def derive_samples(samples: list[ResourceRow]) -> list[DerivedSample]:
+    """Attach per-window disk rates to each row, deriving from consecutive raw
+    counters over the full continuous capture (so no window loses its first point)."""
+    ordered = sorted(samples, key=lambda r: r.timestamp_ms)
+    out: list[DerivedSample] = []
+    prev: ResourceRow | None = None
+    for row in ordered:
+        rates = DiskRates()
+        if prev is not None:
+            dt = (row.timestamp_ms - prev.timestamp_ms) / 1000.0
+            if dt > 0:
+                def rate(attr: str) -> float:
+                    return (getattr(row, attr) - getattr(prev, attr)) / dt
+                rates = DiskRates(
+                    read_mb_s=rate("disk_read_bytes") / (1024 * 1024),
+                    write_mb_s=rate("disk_write_bytes") / (1024 * 1024),
+                    read_iops=rate("disk_read_count"),
+                    write_iops=rate("disk_write_count"),
+                    util_pct=rate("disk_busy_time_ms") / 1000 * 100,
+                )
+        out.append(DerivedSample(row=row, disk=rates))
+        prev = row
+    return out
+
+
 class ResourceMonitor:
-    def __init__(self, model: str, base_image: str, max_allowed_splits: int):
+    def __init__(self, model: str, base_image: str, max_allowed_splits: int, tmpdir: str):
         self._samples: list[ResourceRow] = []
         self._model = model
         self._base_image = base_image
@@ -96,6 +159,17 @@ class ResourceMonitor:
         self._capacity: int | None = None
         self._run: int | None = None
         self._stop = threading.Event()
+        # builds stage through this TMPDIR; sample the physical disk backing it
+        self._disk_dev = physical_device(tmpdir)
+        if self._disk_dev:
+            log.info(f"Disk metrics sampling physical device: {self._disk_dev}")
+        else:
+            log.info("Disk device detection failed; disk util% is whole-system sum (may exceed 100%)")
+
+    def _disk_counters(self):
+        if self._disk_dev:
+            return psutil.disk_io_counters(perdisk=True).get(self._disk_dev)
+        return psutil.disk_io_counters()
 
     def set_context(self, mode: str, capacity: int, run: int) -> None:
         self._mode = mode
@@ -119,17 +193,30 @@ class ResourceMonitor:
 
     def _poll(self) -> None:
         while not self._stop.is_set():
-            cpu = psutil.cpu_percent(interval=1)
+            # percpu sample blocks for the interval; aggregate cpu = mean of cores
+            per_core = psutil.cpu_percent(interval=1, percpu=True)
+            cpu = sum(per_core) / len(per_core) if per_core else 0.0
             mem = psutil.virtual_memory().used / (1024 * 1024)  # MB
+
+            # record RAW cumulative counters; rates/util/await derived at plot time
+            disk = self._disk_counters()
             ts = int(time.time() * 1000)
             self._samples.append(ResourceRow(
-                schema_version=SCHEMA_VERSION,
+                schema_version=RESOURCE_SCHEMA_VERSION,
                 model=self._model,
                 base_image=self._base_image,
                 max_allowed_splits=self._max_allowed_splits,
                 timestamp_ms=ts,
                 cpu_percent=cpu,
+                cpu_per_core="|".join(f"{c:.1f}" for c in per_core),
                 mem_mb=mem,
+                disk_read_bytes=disk.read_bytes if disk else 0,
+                disk_write_bytes=disk.write_bytes if disk else 0,
+                disk_read_count=disk.read_count if disk else 0,
+                disk_write_count=disk.write_count if disk else 0,
+                disk_read_time_ms=disk.read_time if disk else 0,
+                disk_write_time_ms=disk.write_time if disk else 0,
+                disk_busy_time_ms=disk.busy_time if disk else 0,
                 mode=self._mode,
                 capacity=self._capacity,
                 run=self._run,
@@ -191,7 +278,7 @@ def measure_builds(
                 if monitor:
                     monitor.set_idle()
                 results.append(BuildRow(
-                    schema_version=SCHEMA_VERSION,
+                    schema_version=BUILD_SCHEMA_VERSION,
                     model=model,
                     base_image=source_image,
                     max_allowed_splits=max_allowed_splits,
@@ -200,6 +287,9 @@ def measure_builds(
                     num_layers=num_layers,
                     mode=mode,
                     total_s=br.total_s,
+                    pull_s=br.pull_s,
+                    build_s=br.build_s,
+                    export_s=br.export_s,
                 ))
 
                 is_last = (i == len(MODES) - 1) and (cap == CAPACITIES[-1]) and (run == cfg.build_n_runs - 1)
@@ -213,7 +303,16 @@ def measure_builds(
 def _write_build_rows(output_path: str, results: list[BuildRow]) -> None:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fieldnames = [f.name for f in fields(BuildRow)]
-    rows = [{**asdict(r), "total_s": f"{r.total_s:.4f}"} for r in results]
+    rows = [
+        {
+            **asdict(r),
+            "total_s": f"{r.total_s:.4f}",
+            "pull_s": f"{r.pull_s:.4f}",
+            "build_s": f"{r.build_s:.4f}",
+            "export_s": f"{r.export_s:.4f}",
+        }
+        for r in results
+    ]
     write_csv(output_path, fieldnames, rows)
 
 
@@ -279,15 +378,47 @@ def save_merged_resource_csv(samples: list[ResourceRow], execution_ts: str) -> N
     _write_resource_rows(resource_merged_csv_path(SCRIPT_DIR, execution_ts), samples)
 
 
+def _bar_stats(by_cap_mode, capacities, mode: str, attr: str):
+    """Per-capacity (mean-of-run-medians, std) for one RunSamples attribute."""
+    heights, errs = [], []
+    for cap in capacities:
+        runs = by_cap_mode.get((cap, mode), {})
+        medians = [float(np.median(getattr(rs, attr))) for rs in runs.values() if getattr(rs, attr)]
+        heights.append(float(np.mean(medians)) if medians else 0.0)
+        errs.append(float(np.std(medians, ddof=0)) if medians else 0.0)
+    return heights, errs
+
+
+def _grouped_bars(ax, x, capacities, x_labels, series, ylabel,
+                  xlabel=None, ylim=None, title=None) -> None:
+    """series: list of dicts with keys label, color, hatch, heights, errs."""
+    n = len(series)
+    width = 0.8 / n
+    for i, s in enumerate(series):
+        offsets = [pos + i * width for pos in x]
+        ax.bar(offsets, s["heights"], width, yerr=s["errs"], label=s["label"],
+               color=s["color"], hatch=s["hatch"], edgecolor="black", linewidth=0.5,
+               error_kw={"ecolor": "black", "capsize": 3, "elinewidth": 1})
+    bar_group_xticks(ax, len(capacities), n, width, x_labels)
+    ax.set_ylabel(ylabel)
+    if xlabel:
+        ax.set_xlabel(xlabel)
+    if ylim:
+        ax.set_ylim(*ylim)
+    if title:
+        ax.set_title(title)
+    ax.legend(fontsize="small")
+    ax.grid(True, linestyle="--", alpha=0.5, axis="y")
+
+
 def plot_resource(
-    samples: list[ResourceRow],
+    samples: list[DerivedSample],
     model: str, base_image: str, max_allowed_splits: int, execution_ts: str,
 ) -> None:
     if not samples:
         return
 
     colors = {mode: MODE_COLORS[mode] for mode in MODES}
-    labels = {mode: mode for mode in MODES}
 
     # (capacity, mode) -> {run_index: RunSamples}
     by_cap_mode: dict[tuple[int, str], dict[int, RunSamples]] = defaultdict(
@@ -295,11 +426,17 @@ def plot_resource(
     )
 
     for s in samples:
-        if s.mode == "idle" or s.capacity is None or s.run is None:
+        r = s.row
+        if r.mode == "idle" or r.capacity is None or r.run is None:
             continue
-        bucket = by_cap_mode[(s.capacity, s.mode)][s.run]
-        bucket.cpu.append(s.cpu_percent)
-        bucket.mem.append(s.mem_mb)
+        bucket = by_cap_mode[(r.capacity, r.mode)][r.run]
+        bucket.cpu.append(r.cpu_percent)
+        bucket.mem.append(r.mem_mb)
+        bucket.disk_read_mb.append(s.disk.read_mb_s)
+        bucket.disk_write_mb.append(s.disk.write_mb_s)
+        bucket.disk_read_iops.append(s.disk.read_iops)
+        bucket.disk_write_iops.append(s.disk.write_iops)
+        bucket.disk_util.append(s.disk.util_pct)
 
     capacities = sorted({cap for (cap, _) in by_cap_mode.keys()})
     if not capacities:
@@ -307,47 +444,37 @@ def plot_resource(
 
     x_labels = [f"{c}" for c in capacities]
     x = range(len(capacities))
-    n_modes = len(MODES)
-    bar_width = 0.8 / n_modes
 
-    fig, (ax_cpu, ax_mem) = plt.subplots(2, 1, figsize=(max(8, len(capacities) * 2), 8))
+    # read = solid fill, write = "//" hatch; color encodes mode. util = total only.
+    cpu_series, mem_series, tput_series, util_series, iops_series = [], [], [], [], []
+    for mode in MODES:
+        color = colors[mode]
 
-    for i, mode in enumerate(MODES):
-        cpu_run_medians_by_cap = []
-        mem_run_medians_by_cap = []
-        for cap in capacities:
-            runs = by_cap_mode.get((cap, mode), {})
-            cpu_run_medians_by_cap.append(
-                [float(np.median(rs.cpu)) for rs in runs.values() if rs.cpu]
-            )
-            mem_run_medians_by_cap.append(
-                [float(np.median(rs.mem)) for rs in runs.values() if rs.mem]
-            )
+        def stat(attr: str):
+            return _bar_stats(by_cap_mode, capacities, mode, attr)
 
-        offsets = [pos + i * bar_width for pos in x]
-        cpu_bar_heights = [float(np.mean(v)) if v else 0.0 for v in cpu_run_medians_by_cap]
-        mem_bar_heights = [float(np.mean(v)) if v else 0.0 for v in mem_run_medians_by_cap]
-        cpu_errs = [float(np.std(v, ddof=0)) if v else 0.0 for v in cpu_run_medians_by_cap]
-        mem_errs = [float(np.std(v, ddof=0)) if v else 0.0 for v in mem_run_medians_by_cap]
+        def entry(label, attr, hatch=None):
+            heights, errs = stat(attr)
+            return {"label": label, "color": color, "hatch": hatch, "heights": heights, "errs": errs}
 
-        ax_cpu.bar(offsets, cpu_bar_heights, bar_width, yerr=cpu_errs, label=labels[mode],
-                   color=colors[mode], edgecolor="black", linewidth=0.5,
-                   error_kw={"ecolor": "black", "capsize": 3, "elinewidth": 1})
-        ax_mem.bar(offsets, mem_bar_heights, bar_width, yerr=mem_errs, label=labels[mode],
-                   color=colors[mode], edgecolor="black", linewidth=0.5,
-                   error_kw={"ecolor": "black", "capsize": 3, "elinewidth": 1})
+        cpu_series.append(entry(mode, "cpu"))
+        mem_series.append(entry(mode, "mem"))
+        tput_series.append(entry(f"{mode} read", "disk_read_mb"))
+        tput_series.append(entry(f"{mode} write", "disk_write_mb", hatch="//"))
+        util_series.append(entry(f"{mode} total", "disk_util"))
+        iops_series.append(entry(f"{mode} read", "disk_read_iops"))
+        iops_series.append(entry(f"{mode} write", "disk_write_iops", hatch="//"))
 
-    bar_group_xticks(ax_cpu, len(capacities), n_modes, bar_width, x_labels)
-    ax_cpu.set_ylabel("CPU Usage (%)")
-    ax_cpu.set_title(f"Resource usage during builds (mean ± std, n={CFG.build_n_runs} runs)")
-    ax_cpu.legend(fontsize="small")
-    ax_cpu.grid(True, linestyle="--", alpha=0.5, axis="y")
+    fig, (ax_cpu, ax_mem, ax_tput, ax_util, ax_iops) = plt.subplots(
+        5, 1, figsize=(max(8, len(capacities) * 2), 18))
 
-    bar_group_xticks(ax_mem, len(capacities), n_modes, bar_width, x_labels)
-    ax_mem.set_xlabel("Split capacity (%)")
-    ax_mem.set_ylabel("Memory Usage (MB)")
-    ax_mem.legend(fontsize="small")
-    ax_mem.grid(True, linestyle="--", alpha=0.5, axis="y")
+    _grouped_bars(ax_cpu, x, capacities, x_labels, cpu_series, "CPU Usage (%)",
+                  title=f"Resource usage during builds (mean ± std, n={CFG.build_n_runs} runs)")
+    _grouped_bars(ax_mem, x, capacities, x_labels, mem_series, "Memory Usage (MB)")
+    _grouped_bars(ax_tput, x, capacities, x_labels, tput_series, "Disk throughput (MB/s)")
+    _grouped_bars(ax_util, x, capacities, x_labels, util_series, "Disk util (%)")
+    _grouped_bars(ax_iops, x, capacities, x_labels, iops_series, "Disk IOPS (ops/s)",
+                  xlabel="Split capacity (%)")
 
     output_path = resource_chart_path(SCRIPT_DIR, model, base_image, execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -357,32 +484,42 @@ def plot_resource(
 
 
 def plot_resource_individual(
-    samples: list[ResourceRow],
+    samples: list[DerivedSample],
     model: str, base_image: str, execution_ts: str, max_allowed_splits: int,
 ) -> None:
     if not samples:
         return
 
-    series: dict[tuple[str, int, int], list[tuple[int, float, float]]] = defaultdict(list)
+    series: dict[tuple[str, int, int], list[DerivedSample]] = defaultdict(list)
+
+    def _per_core(per_core: str) -> list[float]:
+        return [float(c) for c in per_core.split("|") if c]
 
     for s in samples:
-        if s.mode == "idle" or s.capacity is None or s.run is None:
+        r = s.row
+        if r.mode == "idle" or r.capacity is None or r.run is None:
             continue
-        series[(s.mode, s.capacity, s.run)].append((s.timestamp_ms, s.cpu_percent, s.mem_mb))
+        series[(r.mode, r.capacity, r.run)].append(s)
 
     model_slug = model.replace("/", "--")
     img_slug = image_slug(base_image)
     cpu_dir = resource_cpu_charts_run_dir(SCRIPT_DIR, execution_ts)
     ram_dir = resource_ram_charts_run_dir(SCRIPT_DIR, execution_ts)
+    cores_dir = resource_cores_charts_run_dir(SCRIPT_DIR, execution_ts)
+    disk_dir = resource_disk_charts_run_dir(SCRIPT_DIR, execution_ts)
     os.makedirs(cpu_dir, exist_ok=True)
     os.makedirs(ram_dir, exist_ok=True)
+    os.makedirs(cores_dir, exist_ok=True)
+    os.makedirs(disk_dir, exist_ok=True)
 
-    for (mode_name, cap, run), points in sorted(series.items()):
-        points.sort(key=lambda p: p[0])
-        t0 = points[0][0]
-        t_sec = [(p[0] - t0) / 1000.0 for p in points]
-        cpu_vals = [p[1] for p in points]
-        mem_vals = [p[2] for p in points]
+    for (mode_name, cap, run), samps in sorted(series.items()):
+        samps.sort(key=lambda s: s.row.timestamp_ms)
+        rows = [s.row for s in samps]
+        t0 = rows[0].timestamp_ms
+        t_sec = [(r.timestamp_ms - t0) / 1000.0 for r in rows]
+        cpu_vals = [r.cpu_percent for r in rows]
+        mem_vals = [r.mem_mb for r in rows]
+        per_core_rows = [_per_core(r.cpu_per_core) for r in rows]
 
         mode_slug = mode_name.replace("-", "_")
         file_stem = f"{model_slug}_{img_slug}_{mode_slug}_run{run + 1}_cap{cap}"
@@ -418,8 +555,52 @@ def plot_resource_individual(
         _add_run_footer(fig)
         save_figure(fig, os.path.join(ram_dir, f"{file_stem}.png"), log_path=False)
 
+        # per-core heatmap: rows = cores, cols = time; truncate to common core count
+        ncores = min((len(r) for r in per_core_rows), default=0)
+        if ncores > 0 and len(t_sec) > 1:
+            heat = np.array([r[:ncores] for r in per_core_rows]).T  # [core, time]
+            fig, ax = plt.subplots(figsize=(8, max(3, ncores * 0.18)))
+            im = ax.imshow(
+                heat, aspect="auto", origin="lower", cmap="inferno",
+                vmin=0, vmax=100,
+                extent=(t_sec[0], t_sec[-1], -0.5, ncores - 0.5),
+            )
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Core index")
+            ax.set_title("Per-core CPU usage over time")
+            fig.colorbar(im, ax=ax, label="CPU (%)")
+            fig.tight_layout()
+            _add_run_footer(fig)
+            save_figure(fig, os.path.join(cores_dir, f"{file_stem}.png"), log_path=False)
+
+        # disk over time: throughput (read/write), util (total only), IOPS (read/write)
+        read_c, write_c, total_c = "#1f77b4", "#d62728", "#999999"
+        disk = [s.disk for s in samps]
+        fig, (ax_t, ax_u, ax_i) = plt.subplots(3, 1, figsize=(8, 9), sharex=True)
+        ax_t.plot(t_sec, [d.read_mb_s for d in disk], color=read_c, linewidth=1, label="read")
+        ax_t.plot(t_sec, [d.write_mb_s for d in disk], color=write_c, linewidth=1, label="write")
+        ax_t.set_ylabel("Throughput (MB/s)")
+        ax_t.set_title("Disk activity over time")
+
+        ax_u.plot(t_sec, [d.util_pct for d in disk], color=total_c, linewidth=1.5, label="total")
+        ax_u.set_ylabel("Util (%)")
+
+        ax_i.plot(t_sec, [d.read_iops for d in disk], color=read_c, linewidth=1, label="read")
+        ax_i.plot(t_sec, [d.write_iops for d in disk], color=write_c, linewidth=1, label="write")
+        ax_i.set_ylabel("IOPS (ops/s)")
+        ax_i.set_xlabel("Time (s)")
+
+        for axis in (ax_t, ax_u, ax_i):
+            axis.grid(True, linestyle="--", alpha=0.5)
+            axis.legend(fontsize="small")
+        fig.tight_layout()
+        _add_run_footer(fig)
+        save_figure(fig, os.path.join(disk_dir, f"{file_stem}.png"), log_path=False)
+
     log.result(f"Per-run CPU charts saved to {cpu_dir}/")
     log.result(f"Per-run RAM charts saved to {ram_dir}/")
+    log.result(f"Per-run per-core heatmaps saved to {cores_dir}/")
+    log.result(f"Per-run disk charts saved to {disk_dir}/")
 
 
 def main():
@@ -454,16 +635,17 @@ def main():
 
         monitor = None
         if CFG.build_with_resource:
-            monitor = ResourceMonitor(model, base_image, max_allowed_splits)
+            monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG))
             monitor.start()
 
         results = measure_builds(model, chunks_dir, max_allowed_splits, base_image, CFG, monitor=monitor, execution_ts=execution_ts)
 
         if monitor:
             samples = monitor.stop()
-            save_resource_csv(samples, model, base_image, execution_ts)
-            plot_resource(samples, model, base_image, max_allowed_splits, execution_ts)
-            plot_resource_individual(samples, model, base_image, execution_ts, max_allowed_splits)
+            save_resource_csv(samples, model, base_image, execution_ts)  # raw counters
+            enriched = derive_samples(samples)
+            plot_resource(enriched, model, base_image, max_allowed_splits, execution_ts)
+            plot_resource_individual(enriched, model, base_image, execution_ts, max_allowed_splits)
             all_samples.extend(samples)
 
         save_csv(results, model, base_image, execution_ts)

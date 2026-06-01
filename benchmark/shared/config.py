@@ -28,3 +28,8 @@ def load_config() -> EnvConfig:
     with open(_CONFIG_PATH) as f:
         data = yaml.safe_load(f)
     return EnvConfig(**data)
+
+
+def build_tmpdir(cfg: EnvConfig) -> str:
+    """TMPDIR builds stage through: config value, else $TMPDIR, else Go's /tmp default."""
+    return cfg.tmpdir or os.environ.get("TMPDIR") or "/tmp"

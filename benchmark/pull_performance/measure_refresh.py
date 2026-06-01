@@ -42,7 +42,7 @@ load_dotenv()
 
 CFG = load_config()
 VERBOSE = True
-N_RUNS = 1
+N_RUNS = 5
 LAZY_MODE = "2dfs-stargz"   # used by manual-lazy + refresh
 NO_LAZY_MODE = "oci"        # used by manual-oci (full pull)
 MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
