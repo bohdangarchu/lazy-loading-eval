@@ -17,6 +17,7 @@ from pull_performance.paths import (
     pull_resource_csv_path, pull_resource_merged_csv_path, pull_resource_chart_path,
     pull_resource_cpu_charts_run_dir, pull_resource_ram_charts_run_dir,
     pull_resource_cores_charts_run_dir, pull_resource_disk_charts_run_dir,
+    pull_resource_net_charts_run_dir,
 )
 from shared.config import load_config, build_tmpdir
 from shared.resource_monitor import ResourceMonitor, ResourceRow, derive_samples, write_resource_csv
@@ -48,8 +49,8 @@ EXPERIMENTS = [
 ]
 CFG = load_config()
 VERBOSE = True
-MODES = ["2dfs", "2dfs-stargz"]
-PARTITION_PERCENTS = [25, 50]
+MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
+PARTITION_PERCENTS = [25, 50, 75, 100]
 SCHEMA_VERSION = 1
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -492,7 +493,7 @@ def main():
             "packing_preview": packing_preview_data(allotments, max_allowed_splits),
         })
 
-        monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG))
+        monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG), registry(CFG))
         monitor.start()
 
         results = measure(allotments, max_allowed_splits, base_image, CFG, model, execution_ts, monitor=monitor)
@@ -515,6 +516,7 @@ def main():
             ram_dir=pull_resource_ram_charts_run_dir(SCRIPT_DIR, execution_ts),
             cores_dir=pull_resource_cores_charts_run_dir(SCRIPT_DIR, execution_ts),
             disk_dir=pull_resource_disk_charts_run_dir(SCRIPT_DIR, execution_ts),
+            net_dir=pull_resource_net_charts_run_dir(SCRIPT_DIR, execution_ts),
         )
         all_samples.extend(samples)
 

@@ -143,6 +143,9 @@ def pull_resource_cores_charts_run_dir(base_dir: str, execution_ts: str) -> str:
 def pull_resource_disk_charts_run_dir(base_dir: str, execution_ts: str) -> str:
     return os.path.join(pull_resource_charts_run_dir(base_dir, execution_ts), "disk")
 
+def pull_resource_net_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(pull_resource_charts_run_dir(base_dir, execution_ts), "net")
+
 def pull_stargz_config_path(base_dir: str, execution_ts: str) -> str:
     return os.path.join(pull_run_dir(base_dir, execution_ts), "stargz-config.toml")
 

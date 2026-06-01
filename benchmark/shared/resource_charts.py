@@ -20,6 +20,8 @@ class RunSamples:
     disk_read_iops: list[float] = field(default_factory=list)
     disk_write_iops: list[float] = field(default_factory=list)
     disk_util: list[float] = field(default_factory=list)
+    net_recv_mb: list[float] = field(default_factory=list)
+    net_sent_mb: list[float] = field(default_factory=list)
 
 
 def _bar_stats(by_dim_mode, dimensions, mode: str, attr: str):
@@ -83,6 +85,8 @@ def plot_resource_aggregate(
         bucket.disk_read_iops.append(s.disk.read_iops)
         bucket.disk_write_iops.append(s.disk.write_iops)
         bucket.disk_util.append(s.disk.util_pct)
+        bucket.net_recv_mb.append(s.net.recv_mb_s)
+        bucket.net_sent_mb.append(s.net.sent_mb_s)
 
     dimensions = sorted({dim for (dim, _) in by_dim_mode.keys()})
     if not dimensions:
@@ -92,7 +96,7 @@ def plot_resource_aggregate(
     x = range(len(dimensions))
 
     # read = solid fill, write = "//" hatch; color encodes mode. util = total only.
-    cpu_series, mem_series, tput_series, util_series, iops_series = [], [], [], [], []
+    cpu_series, mem_series, tput_series, util_series, iops_series, net_series = [], [], [], [], [], []
     for mode in modes:
         color = colors[mode]
 
@@ -110,15 +114,18 @@ def plot_resource_aggregate(
         util_series.append(entry(f"{mode} total", "disk_util"))
         iops_series.append(entry(f"{mode} read", "disk_read_iops"))
         iops_series.append(entry(f"{mode} write", "disk_write_iops", hatch="//"))
+        net_series.append(entry(f"{mode} recv", "net_recv_mb"))
+        net_series.append(entry(f"{mode} sent", "net_sent_mb", hatch="//"))
 
-    fig, (ax_cpu, ax_mem, ax_tput, ax_util, ax_iops) = plt.subplots(
-        5, 1, figsize=(max(8, len(dimensions) * 2), 18))
+    fig, (ax_cpu, ax_mem, ax_tput, ax_util, ax_iops, ax_net) = plt.subplots(
+        6, 1, figsize=(max(8, len(dimensions) * 2), 21))
 
     _grouped_bars(ax_cpu, x, dimensions, x_labels, cpu_series, "CPU Usage (%)", title=title)
     _grouped_bars(ax_mem, x, dimensions, x_labels, mem_series, "Memory Usage (MB)")
     _grouped_bars(ax_tput, x, dimensions, x_labels, tput_series, "Disk throughput (MB/s)")
     _grouped_bars(ax_util, x, dimensions, x_labels, util_series, "Disk util (%)")
-    _grouped_bars(ax_iops, x, dimensions, x_labels, iops_series, "Disk IOPS (ops/s)", xlabel=xlabel)
+    _grouped_bars(ax_iops, x, dimensions, x_labels, iops_series, "Disk IOPS (ops/s)")
+    _grouped_bars(ax_net, x, dimensions, x_labels, net_series, "Network (MB/s)", xlabel=xlabel)
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout()
@@ -130,9 +137,9 @@ def plot_resource_timeseries(
     samples: list[DerivedSample], *,
     model: str, base_image: str, max_allowed_splits: int,
     dimension_label: str, dimension_tag: str,
-    cpu_dir: str, ram_dir: str, cores_dir: str, disk_dir: str,
+    cpu_dir: str, ram_dir: str, cores_dir: str, disk_dir: str, net_dir: str,
 ) -> None:
-    """Per-(mode, dimension, run) over-time charts: CPU, RAM, per-core heatmap, disk."""
+    """Per-(mode, dimension, run) over-time charts: CPU, RAM, per-core heatmap, disk, net."""
     if not samples:
         return
 
@@ -149,7 +156,7 @@ def plot_resource_timeseries(
 
     model_slug = model.replace("/", "--")
     img_slug = image_slug(base_image)
-    for d in (cpu_dir, ram_dir, cores_dir, disk_dir):
+    for d in (cpu_dir, ram_dir, cores_dir, disk_dir, net_dir):
         os.makedirs(d, exist_ok=True)
 
     for (mode_name, dim, run), samps in sorted(series.items()):
@@ -236,3 +243,17 @@ def plot_resource_timeseries(
         fig.tight_layout()
         _add_run_footer(fig)
         save_figure(fig, os.path.join(disk_dir, f"{file_stem}.png"), log_path=False)
+
+        # net over time: recv is the lazy-load signal on the registry-facing NIC
+        net = [s.net for s in samps]
+        fig, ax = plt.subplots(figsize=(8, 3))
+        ax.plot(t_sec, [n.recv_mb_s for n in net], color=read_c, linewidth=1, label="recv")
+        ax.plot(t_sec, [n.sent_mb_s for n in net], color=write_c, linewidth=1, label="sent")
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Network (MB/s)")
+        ax.set_title("Network activity over time")
+        ax.grid(True, linestyle="--", alpha=0.5)
+        ax.legend(fontsize="small")
+        fig.tight_layout()
+        _add_run_footer(fig)
+        save_figure(fig, os.path.join(net_dir, f"{file_stem}.png"), log_path=False)

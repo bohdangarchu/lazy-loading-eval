@@ -12,7 +12,7 @@ from build_performance.paths import (
     build_csv_path, build_chart_path,
     resource_csv_path, resource_chart_path,
     resource_cpu_charts_run_dir, resource_ram_charts_run_dir,
-    resource_cores_charts_run_dir, resource_disk_charts_run_dir,
+    resource_cores_charts_run_dir, resource_disk_charts_run_dir, resource_net_charts_run_dir,
     build_artifacts_dir,
     build_merged_csv_path, resource_merged_csv_path,
     build_run_metadata_path,
@@ -238,7 +238,7 @@ def main():
 
         monitor = None
         if CFG.build_with_resource:
-            monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG))
+            monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG), registry(CFG))
             monitor.start()
 
         results = measure_builds(model, chunks_dir, max_allowed_splits, base_image, CFG, monitor=monitor, execution_ts=execution_ts)
@@ -262,6 +262,7 @@ def main():
                 ram_dir=resource_ram_charts_run_dir(SCRIPT_DIR, execution_ts),
                 cores_dir=resource_cores_charts_run_dir(SCRIPT_DIR, execution_ts),
                 disk_dir=resource_disk_charts_run_dir(SCRIPT_DIR, execution_ts),
+                net_dir=resource_net_charts_run_dir(SCRIPT_DIR, execution_ts),
             )
             all_samples.extend(samples)
 

@@ -7,9 +7,9 @@ from dataclasses import asdict, dataclass, fields
 import psutil
 
 from shared import log
-from shared.fs import physical_device
+from shared.fs import network_interface, physical_device
 
-RESOURCE_SCHEMA_VERSION = 4
+RESOURCE_SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,8 @@ class ResourceRow:
     disk_read_time_ms: int
     disk_write_time_ms: int
     disk_busy_time_ms: int
+    net_recv_bytes: int  # registry-facing NIC only (see network_interface)
+    net_sent_bytes: int
     mode: str
     dimension: int | None  # capacity (build) / partition_pct (pull); CSV column renamed at write
     run: int | None
@@ -47,10 +49,18 @@ class DiskRates:
 
 
 @dataclass
+class NetRates:
+    """Rates derived from the delta between two consecutive raw ResourceRow counters."""
+    recv_mb_s: float = 0.0
+    sent_mb_s: float = 0.0
+
+
+@dataclass
 class DerivedSample:
-    """A raw ResourceRow paired with the disk rates derived against the previous sample."""
+    """A raw ResourceRow paired with disk/net rates derived against the previous sample."""
     row: ResourceRow
     disk: DiskRates
+    net: NetRates
 
 
 def derive_samples(samples: list[ResourceRow]) -> list[DerivedSample]:
@@ -60,20 +70,25 @@ def derive_samples(samples: list[ResourceRow]) -> list[DerivedSample]:
     out: list[DerivedSample] = []
     prev: ResourceRow | None = None
     for row in ordered:
-        rates = DiskRates()
+        disk = DiskRates()
+        net = NetRates()
         if prev is not None:
             dt = (row.timestamp_ms - prev.timestamp_ms) / 1000.0
             if dt > 0:
                 def rate(attr: str) -> float:
                     return (getattr(row, attr) - getattr(prev, attr)) / dt
-                rates = DiskRates(
+                disk = DiskRates(
                     read_mb_s=rate("disk_read_bytes") / (1024 * 1024),
                     write_mb_s=rate("disk_write_bytes") / (1024 * 1024),
                     read_iops=rate("disk_read_count"),
                     write_iops=rate("disk_write_count"),
                     util_pct=rate("disk_busy_time_ms") / 1000 * 100,
                 )
-        out.append(DerivedSample(row=row, disk=rates))
+                net = NetRates(
+                    recv_mb_s=rate("net_recv_bytes") / (1024 * 1024),
+                    sent_mb_s=rate("net_sent_bytes") / (1024 * 1024),
+                )
+        out.append(DerivedSample(row=row, disk=disk, net=net))
         prev = row
     return out
 
@@ -83,7 +98,8 @@ class ResourceMonitor:
     derived later via derive_samples), stamping each sample with the (mode, dimension, run)
     context set by the caller. `dimension` is an opaque bucket (capacity / partition_pct)."""
 
-    def __init__(self, model: str, base_image: str, max_allowed_splits: int, tmpdir: str):
+    def __init__(self, model: str, base_image: str, max_allowed_splits: int, tmpdir: str,
+                 registry_host: str | None = None):
         self._samples: list[ResourceRow] = []
         self._model = model
         self._base_image = base_image
@@ -98,11 +114,22 @@ class ResourceMonitor:
             log.info(f"Disk metrics sampling physical device: {self._disk_dev}")
         else:
             log.info("Disk device detection failed; disk util% is whole-system sum (may exceed 100%)")
+        # registry traffic rides one NIC; sample it so net excludes mgmt/docker-bridge noise
+        self._net_iface = network_interface(registry_host) if registry_host else None
+        if self._net_iface:
+            log.info(f"Network metrics sampling interface: {self._net_iface}")
+        else:
+            log.info("Network interface detection failed; net counters are whole-system sum")
 
     def _disk_counters(self):
         if self._disk_dev:
             return psutil.disk_io_counters(perdisk=True).get(self._disk_dev)
         return psutil.disk_io_counters()
+
+    def _net_counters(self):
+        if self._net_iface:
+            return psutil.net_io_counters(pernic=True).get(self._net_iface)
+        return psutil.net_io_counters()
 
     def set_context(self, mode: str, dimension: int, run: int) -> None:
         self._mode = mode
@@ -133,6 +160,7 @@ class ResourceMonitor:
 
             # record RAW cumulative counters; rates/util/await derived at plot time
             disk = self._disk_counters()
+            net = self._net_counters()
             ts = int(time.time() * 1000)
             self._samples.append(ResourceRow(
                 schema_version=RESOURCE_SCHEMA_VERSION,
@@ -150,6 +178,8 @@ class ResourceMonitor:
                 disk_read_time_ms=disk.read_time if disk else 0,
                 disk_write_time_ms=disk.write_time if disk else 0,
                 disk_busy_time_ms=disk.busy_time if disk else 0,
+                net_recv_bytes=net.bytes_recv if net else 0,
+                net_sent_bytes=net.bytes_sent if net else 0,
                 mode=self._mode,
                 dimension=self._dimension,
                 run=self._run,

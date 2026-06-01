@@ -1,5 +1,23 @@
 import os
 import shutil
+import subprocess
+
+
+def network_interface(host: str) -> str | None:
+    """Resolve the NIC the kernel routes to `host` (host may carry a :port).
+
+    Asks the routing table (`ip route get`) so network metrics sample only the
+    interface carrying registry traffic, not the control/mgmt NIC or docker bridge.
+    """
+    ip = host.partition(":")[0]
+    try:
+        out = subprocess.run(
+            ["ip", "route", "get", ip], capture_output=True, text=True, timeout=5
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    tokens = out.split()
+    return tokens[tokens.index("dev") + 1] if "dev" in tokens else None
 
 
 def physical_device(path: str) -> str | None:

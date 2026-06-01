@@ -79,6 +79,9 @@ def resource_cores_charts_run_dir(base_dir: str, execution_ts: str) -> str:
 def resource_disk_charts_run_dir(base_dir: str, execution_ts: str) -> str:
     return os.path.join(build_resource_charts_run_dir(base_dir, execution_ts), "disk")
 
+def resource_net_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(build_resource_charts_run_dir(base_dir, execution_ts), "net")
+
 def build_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, capacity: int) -> str:
     return os.path.join(
         base_dir, "artifacts", "build", execution_ts, "performance",
