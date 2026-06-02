@@ -127,6 +127,9 @@ def resource_merged_csv_path(base_dir: str, execution_ts: str) -> str:
 def rebuild_merged_csv_path(base_dir: str, execution_ts: str) -> str:
     return os.path.join(rebuild_run_dir(base_dir, execution_ts), "merged.csv")
 
+def rebuild_multimodel_merged_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(rebuild_run_dir(base_dir, execution_ts), "merged_multimodel.csv")
+
 def rebuild_chart_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
     return os.path.join(rebuild_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_rebuild.png")
 

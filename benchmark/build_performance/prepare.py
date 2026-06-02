@@ -6,9 +6,9 @@ from shared.artifacts import (
 )
 from shared.config import EnvConfig
 from shared.registry import plain_base_image
+from shared.packing import compute_split_stats, repack
 from shared.split_llm import (
-    compute_split_stats, copy_splits_to_work_dir, run_split_llm, repack,
-    split_metadata_paths,
+    copy_splits_to_work_dir, run_split_llm, split_metadata_paths,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

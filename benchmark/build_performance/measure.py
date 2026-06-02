@@ -1,5 +1,6 @@
 import os
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 
@@ -30,7 +31,8 @@ from build_performance import build_2dfs_stargz as b2s
 from build_performance import build_2dfs_stargz_zstd as b2sz
 from build_performance import build_stargz as bs
 from build_performance import build_base as bb
-from shared.split_llm import layers_for_percent
+from shared.packing import layers_for_percent
+from shared import cv_splits as cv
 from build_performance.prepare import (
     generate_build_artifacts, prepare_model_splits, print_packing_table,
     packing_preview_data, split_stats,
@@ -38,12 +40,32 @@ from build_performance.prepare import (
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
+@dataclass(frozen=True)
+class SingleModel:
+    """A single HuggingFace model split into allotments by capacity."""
+    hf_model: str
+    base_image: str
+
+
+@dataclass(frozen=True)
+class MultiModel:
+    """Several pre-split CV models from splits/ packed into one image; each
+    model is its own contiguous allotment block (stack order = list order)."""
+    label: str
+    split_dirs: list[str]
+    base_image: str
+
+
 EXPERIMENTS = [
-    # ("openai-community/gpt2",        "docker.io/library/python:3.12-slim"),  # ~0.5GB     ~50 MB
-    # ("Qwen/Qwen2-1.5B",              "docker.io/library/python:3.12-slim"),  # ~3.09 GB     ~3.4 GB
-    ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim"), # 3 GB
-    # ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim")    # ~6.0 GB     ~3.4 GB
-    # ("openlm-research/open_llama_7b", "docker.io/ollama/ollama")                # 14 GB
+    # SingleModel("openai-community/gpt2",        "docker.io/library/python:3.12-slim"),  # ~0.5GB
+    # SingleModel("Qwen/Qwen2-1.5B",              "docker.io/library/python:3.12-slim"),  # ~3.09 GB
+    # SingleModel("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim"),  # 3 GB
+    # SingleModel("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),  # ~6.0 GB
+    MultiModel("cv-4model",
+               ["resnet50_seperated", "deeplab_v3_seperated",
+                "efficientnet_v2M_seperated", "yolov3_seperated"],
+               "docker.io/library/python:3.12-slim"),
 ]
 CFG = load_config()
 VERBOSE = False
@@ -97,34 +119,36 @@ def _run_one(mode: str, n: int, cfg, source_image: str) -> BuildResult:
 
 
 def measure_builds(
-    model: str, chunks_dir: str, max_allowed_splits: int, source_image: str, cfg=CFG,
+    model: str, base_image: str, max_allowed_splits: int,
+    make_artifacts: Callable[[int], tuple[list[list[str]], int]], cfg=CFG,
     monitor: ResourceMonitor | None = None, execution_ts: str = "",
 ) -> list[BuildRow]:
+    """make_artifacts(cap) writes 2dfs.json + Dockerfiles for that capacity and
+    returns (groups, num_layers); it's the only per-arm (single vs multi) seam."""
     results: list[BuildRow] = []
 
     for run in range(cfg.build_n_runs):
         log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{cfg.build_n_runs} ===")
         for cap in CAPACITIES:
-            num_layers = layers_for_percent(max_allowed_splits, cap)
+            _, num_layers = make_artifacts(cap)
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Preparing capacity={cap}% ({num_layers} layer(s)) ===")
-            generate_build_artifacts(chunks_dir, num_layers, source_image, cfg)
             if execution_ts:
                 snapshot_artifacts(
                     SCRIPT_DIR,
-                    build_artifacts_dir(SCRIPT_DIR, execution_ts, model, source_image, cap),
+                    build_artifacts_dir(SCRIPT_DIR, execution_ts, model, base_image, cap),
                 )
             for i, mode in enumerate(MODES):
                 if monitor:
                     monitor.set_context(mode, cap, run)
                 log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === {mode}: capacity={cap}% ({num_layers} layer(s)) ===")
                 _clear_cache(mode, cfg)
-                br = _run_one(mode, num_layers, cfg, source_image)
+                br = _run_one(mode, num_layers, cfg, base_image)
                 if monitor:
                     monitor.set_idle()
                 results.append(BuildRow(
                     schema_version=BUILD_SCHEMA_VERSION,
                     model=model,
-                    base_image=source_image,
+                    base_image=base_image,
                     max_allowed_splits=max_allowed_splits,
                     run=run,
                     capacity=cap,
@@ -206,6 +230,61 @@ def save_merged_resource_csv(samples: list[ResourceRow], execution_ts: str) -> N
     write_resource_csv(resource_merged_csv_path(SCRIPT_DIR, execution_ts), samples, "capacity")
 
 
+@dataclass(frozen=True)
+class Prepared:
+    """Uniform handle the run loop consumes, regardless of experiment kind."""
+    model: str
+    base_image: str
+    max_allowed_splits: int
+    make_artifacts: Callable[[int], tuple[list[list[str]], int]]
+    meta: dict
+
+
+def prepare_single(exp: SingleModel) -> Prepared:
+    chunks_dir, max_allowed_splits = prepare_model_splits(exp.hf_model)
+    generate_build_artifacts(chunks_dir, max_allowed_splits, exp.base_image, CFG)
+    num_layers_list = [layers_for_percent(max_allowed_splits, c) for c in CAPACITIES]
+    labels = [f"{c}%" for c in CAPACITIES]
+    print_packing_table(chunks_dir, exp.hf_model, max_allowed_splits, labels, num_layers_list)
+
+    meta = {
+        "model": exp.hf_model,
+        "base_image": exp.base_image,
+        "max_allowed_splits": max_allowed_splits,
+        "splits": split_stats(chunks_dir),
+        "packing_preview": packing_preview_data(chunks_dir, labels, num_layers_list, CAPACITIES),
+    }
+
+    def make_artifacts(cap: int) -> tuple[list[list[str]], int]:
+        num_layers = layers_for_percent(max_allowed_splits, cap)
+        groups = generate_build_artifacts(chunks_dir, num_layers, exp.base_image, CFG)
+        return groups, num_layers
+
+    return Prepared(exp.hf_model, exp.base_image, max_allowed_splits, make_artifacts, meta)
+
+
+def prepare_multi(exp: MultiModel) -> Prepared:
+    models = cv.prepare_cv_splits(exp.label, exp.split_dirs, SCRIPT_DIR)
+    max_allowed_splits = sum(cv.full_columns(models))
+    cv.print_cv_packing_table(exp.label, models, CAPACITIES)
+
+    meta = {
+        "model": exp.label,
+        "base_image": exp.base_image,
+        "max_allowed_splits": max_allowed_splits,
+        "splits": cv.cv_split_stats(models),
+        "packing_preview": cv.cv_packing_preview_data(models, CAPACITIES),
+    }
+
+    def make_artifacts(cap: int) -> tuple[list[list[str]], int]:
+        groups, _ = cv.generate_cv_build_artifacts(
+            models, cv.allocate_columns(models, cap), exp.base_image, CFG, SCRIPT_DIR,
+        )
+        return groups, len(groups)
+
+    return Prepared(exp.label, exp.base_image, max_allowed_splits, make_artifacts, meta)
+
+
 def main():
     log.set_verbose(VERBOSE)
     ensure_buildkit()
@@ -217,22 +296,13 @@ def main():
     all_results: list[BuildRow] = []
     all_samples: list[ResourceRow] = []
     experiments_meta: list[dict] = []
-    for model, base_image in EXPERIMENTS:
-        chunks_dir, max_allowed_splits = prepare_model_splits(model)
+    for exp in EXPERIMENTS:
+        prepared = prepare_multi(exp) if isinstance(exp, MultiModel) else prepare_single(exp)
+        model, base_image = prepared.model, prepared.base_image
+        max_allowed_splits = prepared.max_allowed_splits
         log.result(f"\n===== Experiment: {model} / {base_image} (max_allowed_splits={max_allowed_splits}) =====")
 
-        generate_build_artifacts(chunks_dir, max_allowed_splits, base_image, CFG)
-        num_layers_list = [layers_for_percent(max_allowed_splits, c) for c in CAPACITIES]
-        labels = [f"{c}%" for c in CAPACITIES]
-        print_packing_table(chunks_dir, model, max_allowed_splits, labels, num_layers_list)
-
-        experiments_meta.append({
-            "model": model,
-            "base_image": base_image,
-            "max_allowed_splits": max_allowed_splits,
-            "splits": split_stats(chunks_dir),
-            "packing_preview": packing_preview_data(chunks_dir, labels, num_layers_list, CAPACITIES),
-        })
+        experiments_meta.append(prepared.meta)
 
         prepare_local_registry(base_image, registry(CFG))
 
@@ -241,7 +311,7 @@ def main():
             monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG), registry(CFG))
             monitor.start()
 
-        results = measure_builds(model, chunks_dir, max_allowed_splits, base_image, CFG, monitor=monitor, execution_ts=execution_ts)
+        results = measure_builds(model, base_image, max_allowed_splits, prepared.make_artifacts, CFG, monitor=monitor, execution_ts=execution_ts)
 
         if monitor:
             samples = monitor.stop()

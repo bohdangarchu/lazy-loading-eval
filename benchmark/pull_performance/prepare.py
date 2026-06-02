@@ -8,9 +8,8 @@ from shared.model import download_model, split_model
 from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_base_dockerfile, snapshot_artifacts
 from shared.registry import stargz_base_image, plain_base_image, zstd_base_image, tdfs_cmd
 from shared.services import clear_2dfs_cache
-from shared.split_llm import (
-    compute_split_stats, copy_splits_to_work_dir, run_split_llm, repack,
-)
+from shared.packing import compute_split_stats, repack
+from shared.split_llm import copy_splits_to_work_dir, run_split_llm
 from pull_performance.images import (
     build_name_2dfs, build_name_2dfs_stargz, build_name_2dfs_stargz_zstd,
     build_name_stargz, build_name_base,

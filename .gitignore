@@ -26,3 +26,4 @@ nohup.out
 *-local.md
 artifacts
 .venv*
+splits/

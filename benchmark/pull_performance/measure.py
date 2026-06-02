@@ -34,7 +34,7 @@ from pull_performance.prepare import (
     build_and_push_stargz, build_and_push_base,
 )
 from shared.services import clear_2dfs_cache
-from shared.split_llm import layers_for_percent
+from shared.packing import layers_for_percent
 from pull_performance.images import (
     pull_name_2dfs, pull_name_2dfs_stargz, pull_name_2dfs_stargz_zstd,
     pull_name_stargz, pull_name_base,
