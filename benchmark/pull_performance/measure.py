@@ -535,12 +535,7 @@ def main():
         pull_run_metadata_path(SCRIPT_DIR, execution_ts),
         execution_ts=execution_ts,
         started_at=run_started,
-        config={
-            "registry": registry(CFG),
-            "tdfs_binary": CFG.tdfs_binary,
-            "pull_n_runs": CFG.pull_n_runs,
-            "pull_cooldown": CFG.pull_cooldown,
-        },
+        config=asdict(CFG),
         sections={
             "modes": MODES,
             "partition_percents": PARTITION_PERCENTS,

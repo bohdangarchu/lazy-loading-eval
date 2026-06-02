@@ -42,7 +42,7 @@ load_dotenv()
 
 CFG = load_config()
 VERBOSE = True
-N_RUNS = 5
+N_RUNS = CFG.refresh_n_runs
 LAZY_MODE = "2dfs-stargz"   # used by manual-lazy + refresh
 NO_LAZY_MODE = "oci"        # used by manual-oci (full pull)
 MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
@@ -957,11 +957,7 @@ def main(execution_ts: str | None = None) -> None:
         refresh_run_metadata_path(SCRIPT_DIR, execution_ts),
         execution_ts=execution_ts,
         started_at=run_started,
-        config={
-            "registry": registry(CFG),
-            "tdfs_binary": CFG.tdfs_binary,
-            "pull_cooldown": CFG.pull_cooldown,
-        },
+        config=asdict(CFG),
         sections={
             "mode": LAZY_MODE,
             "oci_mode": NO_LAZY_MODE,

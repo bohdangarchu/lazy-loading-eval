@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
 from shared import log
@@ -176,12 +176,7 @@ def main():
         rebuild_run_metadata_path(SCRIPT_DIR, execution_ts),
         execution_ts=execution_ts,
         started_at=run_started,
-        config={
-            "registry": registry(CFG),
-            "tdfs_binary": CFG.tdfs_binary,
-            "rebuild_n_runs": CFG.rebuild_n_runs,
-            "build_cooldown": CFG.build_cooldown,
-        },
+        config=asdict(CFG),
         sections={
             "modes": MODES,
             "layers_mutated_percents": LAYERS_MUTATED_PERCENTS,

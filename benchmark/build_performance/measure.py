@@ -349,13 +349,7 @@ def main():
         build_run_metadata_path(SCRIPT_DIR, execution_ts),
         execution_ts=execution_ts,
         started_at=run_started,
-        config={
-            "registry": registry(CFG),
-            "tdfs_binary": CFG.tdfs_binary,
-            "build_n_runs": CFG.build_n_runs,
-            "build_cooldown": CFG.build_cooldown,
-            "build_with_resource": CFG.build_with_resource,
-        },
+        config=asdict(CFG),
         sections={
             "modes": MODES,
             "capacities": CAPACITIES,

@@ -42,6 +42,9 @@ CONFIG_OPTIONS: list[tuple[dict, str]] = [
     ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True}, "prefetch, async"),
     ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False}, "prefetch, async, bg fetch"),
 ]
+N_SPLITS = 10            # total allotments the model is chunked into
+BASE_SPLITS = [2, 4, 6, 8]  # allotment counts actually pulled/measured
+N_RUNS = 1
 CFG = load_config()
 VERBOSE = True
 
@@ -78,7 +81,7 @@ def _measure_config_option(
     config_label: str, run_idx: int, model: str, base_image: str, execution_ts: str,
 ) -> list[tuple[int, float, float]]:
     results = []
-    for n in cfg.stargz_config_base_splits:
+    for n in BASE_SPLITS:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         log.info(f"\n[{ts}] === {mode}: {n} allotments ===")
         clear_stargz_cache()
@@ -134,9 +137,9 @@ def measure(
             for mode in MODES:
                 key = (mode, label)
                 results[key] = []
-                for run in range(cfg.stargz_config_n_runs):
+                for run in range(N_RUNS):
                     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
-                             f"=== Run {run + 1}/{cfg.stargz_config_n_runs} | {mode} | {label} ===")
+                             f"=== Run {run + 1}/{N_RUNS} | {mode} | {label} ===")
                     for n, pull_t, run_t in _measure_config_option(
                         mode, source_image, cfg, label, run, model, base_image, execution_ts,
                     ):
@@ -170,7 +173,7 @@ def save_csv(
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        for run in range(CFG.stargz_config_n_runs):
+        for run in range(N_RUNS):
             for n in splits:
                 def row_vals(key: tuple[str, str]) -> list[str]:
                     match = [
@@ -237,7 +240,7 @@ def plot(
         ax.set_ylabel("Time (s)")
         ax.set_title(
             f"Pull + Run by stargz config ({mode}, "
-            f"median, n={CFG.stargz_config_n_runs} runs, dots = individual runs)"
+            f"median, n={N_RUNS} runs, dots = individual runs)"
         )
         ax.grid(True, linestyle="--", alpha=0.3, axis="y")
 
@@ -268,9 +271,9 @@ def main():
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log.info(f"Modes: {MODES}")
     log.info(f"Config options: {[label for _, label in CONFIG_OPTIONS]}")
-    log.info(f"Splits (total): {CFG.stargz_config_n_splits}")
-    log.info(f"Splits (measured): {CFG.stargz_config_base_splits}")
-    log.info(f"Runs: {CFG.stargz_config_n_runs}")
+    log.info(f"Splits (total): {N_SPLITS}")
+    log.info(f"Splits (measured): {BASE_SPLITS}")
+    log.info(f"Runs: {N_RUNS}")
 
     log.info("Pre-run cleanup...")
     for model, _ in EXPERIMENTS:
@@ -280,7 +283,7 @@ def main():
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
         prepare_local_registry(base_image, registry(CFG))
 
-        chunk_paths = prepare_chunks(model, CFG.stargz_config_n_splits)
+        chunk_paths = prepare_chunks(model, N_SPLITS)
         results = measure(chunk_paths, base_image, CFG, model, base_image, execution_ts)
 
         save_csv(results, model, base_image, execution_ts)
