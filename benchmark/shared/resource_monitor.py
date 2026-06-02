@@ -9,13 +9,14 @@ import psutil
 from shared import log
 from shared.fs import network_interface, physical_device
 
-RESOURCE_SCHEMA_VERSION = 5
+RESOURCE_SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
 class ResourceRow:
-    """One sample. Disk fields are RAW cumulative-since-boot counters; all rates,
-    util% and await are derived at plot/analysis time (see derive_samples)."""
+    """One sample. Disk *_bytes/_count/_time counters are RAW cumulative-since-boot
+    (rates/util derived later via derive_samples); disk_used_bytes is the root-fs
+    space used at sample time (absolute value)."""
     schema_version: int
     model: str
     base_image: str
@@ -31,6 +32,8 @@ class ResourceRow:
     disk_read_time_ms: int
     disk_write_time_ms: int
     disk_busy_time_ms: int
+    disk_used_bytes: int  # root-fs space used right now
+    disk_total_bytes: int  # root-fs capacity (constant per node; lets free/percent be derived)
     net_recv_bytes: int  # registry-facing NIC only (see network_interface)
     net_sent_bytes: int
     mode: str
@@ -160,6 +163,7 @@ class ResourceMonitor:
 
             # record RAW cumulative counters; rates/util/await derived at plot time
             disk = self._disk_counters()
+            disk_usage = psutil.disk_usage("/")
             net = self._net_counters()
             ts = int(time.time() * 1000)
             self._samples.append(ResourceRow(
@@ -178,6 +182,8 @@ class ResourceMonitor:
                 disk_read_time_ms=disk.read_time if disk else 0,
                 disk_write_time_ms=disk.write_time if disk else 0,
                 disk_busy_time_ms=disk.busy_time if disk else 0,
+                disk_used_bytes=disk_usage.used,
+                disk_total_bytes=disk_usage.total,
                 net_recv_bytes=net.bytes_recv if net else 0,
                 net_sent_bytes=net.bytes_sent if net else 0,
                 mode=self._mode,
