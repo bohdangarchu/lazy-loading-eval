@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 
@@ -9,7 +10,7 @@ from shared.artifacts import write_2dfs_json, create_stargz_dockerfile, create_b
 from shared.registry import stargz_base_image, plain_base_image, zstd_base_image, tdfs_cmd
 from shared.services import clear_2dfs_cache
 from shared.packing import compute_split_stats, repack
-from shared.split_llm import copy_splits_to_work_dir, run_split_llm
+from shared.split_llm import copy_splits_to_work_dir, run_split_llm, split_metadata_paths
 from pull_performance.images import (
     build_name_2dfs, build_name_2dfs_stargz, build_name_2dfs_stargz_zstd,
     build_name_stargz, build_name_base,
@@ -41,13 +42,30 @@ def prepare_model_splits(model_name: str) -> tuple[list[list[str]], int]:
     Returns (allotments, max_allotments) where allotments is the best-fit pack
     of safetensors files into max_allotments buckets.
     """
-    splits_dir = run_split_llm(model_name)
     chunks_dir = paths.model_chunks_dir(SCRIPT_DIR, model_name)
+    chunks_manifest = os.path.join(chunks_dir, "manifest.json")
+
+    if os.path.exists(chunks_manifest):
+        try:
+            with open(chunks_manifest) as f:
+                m = json.load(f)
+            if m.get("model_name") == model_name:
+                log.info(f"Chunks cache hit for {model_name} at {chunks_dir} — skipping split_llm and copy")
+                safetensor_paths = sorted(
+                    os.path.join(chunks_dir, f)
+                    for f in os.listdir(chunks_dir)
+                    if f.endswith(".safetensors")
+                )
+                metadata_files = split_metadata_paths(chunks_dir)
+                max_allotments, _, _ = compute_split_stats(safetensor_paths)
+                return repack(safetensor_paths, max_allotments, extra_files=metadata_files), max_allotments
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    splits_dir = run_split_llm(model_name)
     safetensor_paths, metadata_files = copy_splits_to_work_dir(splits_dir, chunks_dir)
     max_allotments, _, _ = compute_split_stats(safetensor_paths)
-    allotments = repack(safetensor_paths, max_allotments, extra_files=metadata_files)
-
-    return allotments, max_allotments
+    return repack(safetensor_paths, max_allotments, extra_files=metadata_files), max_allotments
 
 
 # ── build + push per mode (allotments-native) ───────────────────────
