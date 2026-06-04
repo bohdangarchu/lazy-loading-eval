@@ -29,9 +29,7 @@ sudo rm -rf /var/lib/buildkit/*
 
 # --- 2dfs builder cache ---
 for dir in ~/.2dfs /root/.2dfs; do
-    sudo rm -rf "${dir:?}/blobs/"* \
-                "${dir:?}/uncompressed-keys/"* \
-                "${dir:?}/index/"*
+    sudo rm -rf "${dir:?}/blobs" "${dir:?}/uncompressed-keys" "${dir:?}/index"
 done
 
 # --- restart ---

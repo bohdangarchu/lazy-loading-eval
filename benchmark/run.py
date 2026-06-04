@@ -30,8 +30,8 @@ def run_phases():
     # log.result("=== Phase 3: Pull Performance ===")
     # pm.main()
 
-    # log.result("=== Phase 4: Refresh Performance ===")
-    # pmr.main()
+    log.result("=== Phase 4: Refresh Performance ===")
+    pmr.main()
 
     # log.result("=== Final cleanup ===")
     # cleanup_pull_artifacts(pm.EXPERIMENTS, paths.pull_perf_dir(_BENCHMARK_DIR), cfg)
