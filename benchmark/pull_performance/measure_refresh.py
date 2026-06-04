@@ -46,9 +46,10 @@ VERBOSE = True
 N_RUNS = CFG.refresh_n_runs
 LAZY_MODE = "2dfs-stargz"   # used by manual-lazy + refresh
 NO_LAZY_MODE = "oci"        # used by manual-oci (full pull)
-MODEL = "Qwen/Qwen3.5-9B"
+MODEL = "openlm-research/open_llama_3b"
 SOURCE_IMAGE = "docker.io/ollama/ollama"
 MUTATED_FILENAME = "tokenizer_config.json"
+MUTATED_FIELD = "chat_template"
 MUTATION_STRING = b"added string"
 OP_TYPES = ["on_demand_bytes_fetched"]
 WEIGHT_SUFFIXES = (".safetensors", ".bin")  # safetensors or PyTorch pickle weights
@@ -178,15 +179,15 @@ def _mutate_chat_template() -> tuple[int, int]:
     with open(path, "rb") as f:
         data = bytearray(f.read())
 
-    marker = b'"chat_template":'
+    marker = f'"{MUTATED_FIELD}":'.encode()
     i = data.find(marker)
     if i < 0:
-        raise RuntimeError(f"chat_template not found in {path}")
+        raise RuntimeError(f"{MUTATED_FIELD} not found in {path}")
 
     # Find opening quote of the chat_template string value.
     q = data.find(b'"', i + len(marker))
     if q < 0:
-        raise RuntimeError(f"chat_template value quote not found in {path}")
+        raise RuntimeError(f"{MUTATED_FIELD} value quote not found in {path}")
 
     insert_at = q + 1
     data[insert_at:insert_at] = MUTATION_STRING
