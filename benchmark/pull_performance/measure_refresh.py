@@ -22,7 +22,8 @@ from shared.registry import (
     prepare_local_registry, registry, save_toc, tdfs_cmd,
 )
 from shared.services import (
-    clear_2dfs_cache, clear_stargz_cache, ensure_buildkit, save_stargz_run_log,
+    clear_2dfs_cache, clear_stargz_cache, ensure_buildkit, prune_buildkit,
+    save_stargz_run_log,
 )
 from shared.stargz_config import read_base_config
 from pull_performance.measure import _next_container_name
@@ -45,7 +46,7 @@ VERBOSE = True
 N_RUNS = CFG.refresh_n_runs
 LAZY_MODE = "2dfs-stargz"   # used by manual-lazy + refresh
 NO_LAZY_MODE = "oci"        # used by manual-oci (full pull)
-MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+MODEL = "Qwen/Qwen3.5-9B"
 SOURCE_IMAGE = "docker.io/ollama/ollama"
 MUTATED_FILENAME = "tokenizer_config.json"
 MUTATION_STRING = b"added string"
@@ -269,22 +270,15 @@ def _build_version(
 # ── prepare ────────────────────────────────────────────────────────────
 
 
-def prepare_refresh(
+def _build_mode_pair(
+    snapshot_files: list[str],
+    mode: str,
     artifacts_dir: str | None = None,
     toc_dir: str | None = None,
-) -> list[str]:
-    """Download snapshot, build & push before/after images for both the lazy
-    (stargz) and the no-lazy (OCI) modes, mutating one byte for the after
-    images. Returns snapshot file list.
-    """
-    snapshot_files = download_snapshot()
-
-    clear_2dfs_cache(CFG)
-    clear_registry(CFG, preserve_base=True, verbose=False)
-    clear_artifacts(SCRIPT_DIR)
-
-    _build_version(snapshot_files, "before", LAZY_MODE)
-    _build_version(snapshot_files, "before", NO_LAZY_MODE)
+) -> None:
+    """Build and push before + after images for one mode (mutates tokenizer for
+    after, restores it in a finally block)."""
+    _build_version(snapshot_files, "before", mode)
     if artifacts_dir:
         snapshot_artifacts(SCRIPT_DIR, artifacts_dir)
     before_digests: list[str] = []
@@ -293,8 +287,7 @@ def prepare_refresh(
 
     offset, original = _mutate_chat_template()
     try:
-        _build_version(snapshot_files, "after", LAZY_MODE)
-        _build_version(snapshot_files, "after", NO_LAZY_MODE)
+        _build_version(snapshot_files, "after", mode)
     finally:
         _restore_byte(offset, original)
 
@@ -308,8 +301,6 @@ def prepare_refresh(
             f"TOC: before vs after changed layer indices: {changed}"
             if changed else "TOC: no changed layers detected between before and after"
         )
-
-    return snapshot_files
 
 
 # ── measurement helpers ────────────────────────────────────────────────
@@ -656,6 +647,7 @@ def _bytes_rows(
 
 def measure_refresh(
     snapshot_files: list[str], execution_ts: str,
+    strategy_names: list[str] | None = None,
 ) -> tuple[list[RefreshTimeRow], list[RefreshBytesRow]]:
     in_paths = _container_paths(snapshot_files)
     time_rows: list[RefreshTimeRow] = []
@@ -671,19 +663,19 @@ def measure_refresh(
             _bytes_rows(run, strategy, mode, "update", r.update_bytes_fetched)
         )
 
+    all_strategies: list[tuple[UpdateStrategy, str, StrategyRunner]] = [
+        ("manual-lazy", LAZY_MODE, _run_manual_lazy_strategy),
+        ("manual-oci", NO_LAZY_MODE, _run_manual_oci_strategy),
+        ("refresh", LAZY_MODE, _run_refresh_strategy),
+    ]
+    active = [s for s in all_strategies if strategy_names is None or s[0] in strategy_names]
+
     for run in range(N_RUNS):
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         log.info(f"\n[{ts}] === run {run + 1}/{N_RUNS} ===")
 
-        # (strategy, build mode, runner) per arm; log path derived from name.
-        strategies: list[tuple[UpdateStrategy, str, StrategyRunner]] = [
-            ("manual-lazy", LAZY_MODE, _run_manual_lazy_strategy),
-            ("manual-oci", NO_LAZY_MODE, _run_manual_oci_strategy),
-            ("refresh", LAZY_MODE, _run_refresh_strategy),
-        ]
-        # Rotate order per run to remove ordering bias.
-        rot = run % len(strategies)
-        for strategy, mode, runner in strategies[rot:] + strategies[:rot]:
+        rot = run % len(active)
+        for strategy, mode, runner in active[rot:] + active[:rot]:
             log_path = refresh_log_path(
                 SCRIPT_DIR, MODEL, SOURCE_IMAGE, strategy, run, execution_ts,
             )
@@ -936,11 +928,35 @@ def main(execution_ts: str | None = None) -> None:
     )
     toc_dir = os.path.join(artifacts_dir, "toc")
     log.result(f"TOC artifacts -> {toc_dir}")
-    snapshot_files = prepare_refresh(
-        artifacts_dir=artifacts_dir, toc_dir=toc_dir,
+
+    snapshot_files = download_snapshot()
+    clear_2dfs_cache(CFG)
+    clear_registry(CFG, preserve_base=True, verbose=False)
+    clear_artifacts(SCRIPT_DIR)
+
+    # ── phase 1: stargz — build, measure, then free local caches ──────
+    log.result("=== Phase 1: stargz builds (manual-lazy + refresh) ===")
+    os.makedirs(toc_dir, exist_ok=True)
+    _build_mode_pair(snapshot_files, LAZY_MODE, artifacts_dir=artifacts_dir, toc_dir=toc_dir)
+
+    time_rows, bytes_rows = measure_refresh(
+        snapshot_files, execution_ts, ["manual-lazy", "refresh"]
     )
 
-    time_rows, bytes_rows = measure_refresh(snapshot_files, execution_ts)
+    log.result("=== Phase 1 cleanup: 2dfs cache + buildkit ===")
+    clear_2dfs_cache(CFG)
+    prune_buildkit()
+    clear_artifacts(SCRIPT_DIR)
+
+    # ── phase 2: OCI — build, measure ─────────────────────────────────
+    log.result("=== Phase 2: OCI builds (manual-oci) ===")
+    _build_mode_pair(snapshot_files, NO_LAZY_MODE)
+
+    time_rows_2, bytes_rows_2 = measure_refresh(
+        snapshot_files, execution_ts, ["manual-oci"]
+    )
+    time_rows.extend(time_rows_2)
+    bytes_rows.extend(bytes_rows_2)
 
     clear_registry(CFG, verbose=False, preserve_base=True)
     print_results(time_rows)
