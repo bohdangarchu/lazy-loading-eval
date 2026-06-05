@@ -49,7 +49,7 @@ EXPERIMENTS = [
     ("Qwen/Qwen3.5-9B", "docker.io/ollama/ollama")
 ]
 CFG = load_config()
-VERBOSE = True
+VERBOSE = False
 MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 PARTITION_PERCENTS = [25, 50, 75, 100]
 SCHEMA_VERSION = 1

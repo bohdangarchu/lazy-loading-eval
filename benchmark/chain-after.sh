@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PID="${1:?usage: chain-after.sh <pid> [next-script]}"
-NEXT="${2:-./run-bg.sh}"
+PID="661181"
+NEXT="./run-bg.sh"
 
 # Guard: never chain off a PID that was already dead — that's not "finished".
 if ! kill -0 "$PID" 2>/dev/null; then
