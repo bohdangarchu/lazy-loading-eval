@@ -19,7 +19,7 @@ from build_performance.paths import (
     build_run_metadata_path,
 )
 from shared.artifacts import snapshot_artifacts, clear_artifacts
-from shared.config import load_config, build_tmpdir
+from shared.config import load_config, build_tmpdir, data_volume
 from shared.charts import MODE_COLORS, figure_footer, save_figure, write_csv
 from shared.resource_monitor import ResourceMonitor, ResourceRow, derive_samples, write_resource_csv
 from shared.resource_charts import plot_resource_aggregate, plot_resource_timeseries
@@ -310,7 +310,8 @@ def main():
 
         monitor = None
         if CFG.build_with_resource:
-            monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG), registry(CFG))
+            monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG),
+                                      data_volume(CFG), registry(CFG))
             monitor.start()
 
         results = measure_builds(model, base_image, max_allowed_splits, prepared.make_artifacts, CFG, monitor=monitor, execution_ts=execution_ts)

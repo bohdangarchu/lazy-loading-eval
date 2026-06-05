@@ -15,7 +15,7 @@ RESOURCE_SCHEMA_VERSION = 6
 @dataclass(frozen=True)
 class ResourceRow:
     """One sample. Disk *_bytes/_count/_time counters are RAW cumulative-since-boot
-    (rates/util derived later via derive_samples); disk_used_bytes is the root-fs
+    (rates/util derived later via derive_samples); disk_used_bytes is the data-volume
     space used at sample time (absolute value)."""
     schema_version: int
     model: str
@@ -32,8 +32,8 @@ class ResourceRow:
     disk_read_time_ms: int
     disk_write_time_ms: int
     disk_busy_time_ms: int
-    disk_used_bytes: int  # root-fs space used right now
-    disk_total_bytes: int  # root-fs capacity (constant per node; lets free/percent be derived)
+    disk_used_bytes: int  # data-volume space used right now
+    disk_total_bytes: int  # data-volume capacity (constant per node; lets free/percent be derived)
     net_recv_bytes: int  # registry-facing NIC only (see network_interface)
     net_sent_bytes: int
     mode: str
@@ -102,7 +102,7 @@ class ResourceMonitor:
     context set by the caller. `dimension` is an opaque bucket (capacity / partition_pct)."""
 
     def __init__(self, model: str, base_image: str, max_allowed_splits: int, tmpdir: str,
-                 registry_host: str | None = None):
+                 data_volume: str = "/", registry_host: str | None = None):
         self._samples: list[ResourceRow] = []
         self._model = model
         self._base_image = base_image
@@ -111,6 +111,7 @@ class ResourceMonitor:
         self._dimension: int | None = None
         self._run: int | None = None
         self._stop = threading.Event()
+        self._data_volume = data_volume
         # work stages through this TMPDIR; sample the physical disk backing it
         self._disk_dev = physical_device(tmpdir)
         if self._disk_dev:
@@ -163,7 +164,7 @@ class ResourceMonitor:
 
             # record RAW cumulative counters; rates/util/await derived at plot time
             disk = self._disk_counters()
-            disk_usage = psutil.disk_usage("/")
+            disk_usage = psutil.disk_usage(self._data_volume)
             net = self._net_counters()
             ts = int(time.time() * 1000)
             self._samples.append(ResourceRow(

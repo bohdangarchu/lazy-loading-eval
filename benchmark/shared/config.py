@@ -9,6 +9,7 @@ class EnvConfig:
     registry: str
     tdfs_home_dir: Optional[str]
     tmpdir: Optional[str]
+    data_volume: Optional[str]
     hf_home: Optional[str]
     tdfs_binary: str
     build_cooldown: int
@@ -32,3 +33,8 @@ def load_config() -> EnvConfig:
 def build_tmpdir(cfg: EnvConfig) -> str:
     """TMPDIR builds stage through: config value, else $TMPDIR, else Go's /tmp default."""
     return cfg.tmpdir or os.environ.get("TMPDIR") or "/tmp"
+
+
+def data_volume(cfg: EnvConfig) -> str:
+    """Filesystem the workload writes to; disk_usage is reported for its mount. Default root."""
+    return cfg.data_volume or "/"

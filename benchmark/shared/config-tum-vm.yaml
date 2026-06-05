@@ -9,6 +9,10 @@ tdfs_home_dir: null
 # TMPDIR to set for tdfs subprocesses. null = use system default.
 tmpdir: null
 
+# Filesystem the workload writes to; resource_monitor reports disk_usage for its mount.
+# null = root ("/"). Use on nodes where data lives on a separate volume (e.g. "/mydata").
+data_volume: null
+
 # HF_HOME - HuggingFace cache/download location.
 # null = don't set it (HuggingFace uses its default ~/.cache/huggingface).
 hf_home: null

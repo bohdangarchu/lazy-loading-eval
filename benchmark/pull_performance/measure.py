@@ -19,7 +19,7 @@ from pull_performance.paths import (
     pull_resource_cores_charts_run_dir, pull_resource_disk_charts_run_dir,
     pull_resource_net_charts_run_dir,
 )
-from shared.config import load_config, build_tmpdir
+from shared.config import load_config, build_tmpdir, data_volume
 from shared.resource_monitor import ResourceMonitor, ResourceRow, derive_samples, write_resource_csv
 from shared.resource_charts import plot_resource_aggregate, plot_resource_timeseries
 from shared.run_metadata import write_run_json
@@ -494,7 +494,8 @@ def main():
             "packing_preview": packing_preview_data(allotments, max_allowed_splits),
         })
 
-        monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG), registry(CFG))
+        monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG),
+                                  data_volume(CFG), registry(CFG))
         monitor.start()
 
         results = measure(allotments, max_allowed_splits, base_image, CFG, model, execution_ts, monitor=monitor)

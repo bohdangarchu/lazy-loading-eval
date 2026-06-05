@@ -1,6 +1,7 @@
 registry: "131.159.25.169:5000"
 tdfs_home_dir: "/root/.2dfs"
 tmpdir: null
+data_volume: null
 hf_home: null
 tdfs_binary: "tdfs"
 
