@@ -7,6 +7,7 @@ import numpy as np
 
 from shared import paths
 
+MAX_DOCKERFILE_LINE_SIZE = 65535
 
 def snapshot_artifacts(work_dir: str, dest_dir: str) -> None:
     os.makedirs(dest_dir, exist_ok=True)
@@ -84,21 +85,24 @@ def write_2dfs_json(groups: list[list[str]], work_dir: str) -> None:
         json.dump(data, f, indent=4)
 
 
+def _copy_line(group: list[str], work_dir: str) -> str:
+    rels = " ".join(os.path.relpath(p, work_dir) for p in group)
+    line = f"COPY {rels} /"
+    if len(line) > MAX_DOCKERFILE_LINE_SIZE:
+        common_dir = os.path.dirname(os.path.relpath(group[0], work_dir))
+        line = f"COPY {common_dir}/ /"
+    return line
+
+
 def create_stargz_dockerfile(groups: list[list[str]], base_image: str, work_dir: str) -> None:
-    lines = [f"FROM {base_image}"]
-    for group in groups:
-        rels = " ".join(os.path.relpath(p, work_dir) for p in group)
-        lines.append(f"COPY {rels} /")
+    lines = [f"FROM {base_image}"] + [_copy_line(g, work_dir) for g in groups]
     out_path = paths.stargz_dockerfile_path(work_dir)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
 
 def create_base_dockerfile(groups: list[list[str]], base_image: str, work_dir: str) -> None:
-    lines = [f"FROM {base_image}"]
-    for group in groups:
-        rels = " ".join(os.path.relpath(p, work_dir) for p in group)
-        lines.append(f"COPY {rels} /")
+    lines = [f"FROM {base_image}"] + [_copy_line(g, work_dir) for g in groups]
     out_path = paths.base_dockerfile_path(work_dir)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
