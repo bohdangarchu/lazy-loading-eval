@@ -62,7 +62,8 @@ EXPERIMENTS = [
     # SingleModel("Qwen/Qwen2-1.5B",              "docker.io/library/python:3.12-slim"),  # ~3.09 GB
     # SingleModel("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim"),  # 3 GB
     # SingleModel("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),  # ~6.0 GB
-    SingleModel("Qwen/Qwen3.5-9B", "docker.io/ollama/ollama"),
+    # SingleModel("Qwen/Qwen3.5-9B", "docker.io/ollama/ollama"),
+    SingleModel("google/gemma-4-31B", "docker.io/ollama/ollama"),
     # MultiModel("cv-4model",
     #            ["resnet50_seperated", "deeplab_v3_seperated",
     #             "efficientnet_v2M_seperated", "yolov3_seperated"],
