@@ -23,9 +23,17 @@ def clear_chunks(model_name: str | None = None) -> None:
 
 def prepare_model_splits(model_name: str) -> tuple[str, int]:
     """Ensure splits exist on disk and return (chunks_dir, max_allotments)."""
-    splits_dir = run_split_llm(model_name)
     chunks_dir = paths.model_chunks_dir(SCRIPT_DIR, model_name)
-    safetensor_paths, _ = copy_splits_to_work_dir(splits_dir, chunks_dir)
+    safetensor_paths = sorted(
+        os.path.join(chunks_dir, f)
+        for f in os.listdir(chunks_dir)
+        if f.endswith(".safetensors")
+    ) if os.path.isdir(chunks_dir) else []
+    if safetensor_paths:
+        log.info(f"Chunks already present at {chunks_dir} — skipping split_llm")
+    else:
+        splits_dir = run_split_llm(model_name)
+        safetensor_paths, _ = copy_splits_to_work_dir(splits_dir, chunks_dir)
     max_allotments, _, _ = compute_split_stats(safetensor_paths)
     return chunks_dir, max_allotments
 
