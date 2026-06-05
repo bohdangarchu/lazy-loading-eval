@@ -9,6 +9,7 @@ class EnvConfig:
     registry: str
     tdfs_home_dir: Optional[str]
     tmpdir: Optional[str]
+    hf_home: Optional[str]
     tdfs_binary: str
     build_cooldown: int
     pull_cooldown: int

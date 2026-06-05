@@ -1,6 +1,7 @@
 registry: "10.10.1.2:5000"
 tdfs_home_dir: "/mydata/.2dfs"
 tmpdir: "/mydata/tmp"
+hf_home: "/mydata/huggingface"
 tdfs_binary: "tdfs"
 build_cooldown: 5
 pull_cooldown: 5

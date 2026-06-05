@@ -9,6 +9,10 @@ tdfs_home_dir: null
 # TMPDIR to set for tdfs subprocesses. null = use system default.
 tmpdir: null
 
+# HF_HOME - HuggingFace cache/download location.
+# null = don't set it (HuggingFace uses its default ~/.cache/huggingface).
+hf_home: null
+
 # tdfs binary to use.
 # "./tdfs" means relative to the calling script's directory (local dev binary).
 # "tdfs"   means global binary on PATH, invoked with sudo.

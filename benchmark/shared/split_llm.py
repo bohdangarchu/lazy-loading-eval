@@ -14,6 +14,7 @@ import shutil
 import subprocess
 
 from shared import fs, log
+from shared.config import load_config
 
 _SPLIT_REPO = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "split-llm-simple")
@@ -60,8 +61,13 @@ def run_split_llm(model: str) -> str:
         raise RuntimeError(f"split-llm-simple venv not found at {venv_py}")
 
     cmd = [venv_py, script, "--model", model]
+    env = os.environ.copy()
+    hf_home = load_config().hf_home
+    if hf_home:
+        env["HF_HOME"] = hf_home
+        log.info(f"Setting HF_HOME={hf_home}")
     log.info(f"Running split_llm: {' '.join(cmd)}")
-    subprocess.run(cmd, cwd=_SPLIT_REPO, check=True)
+    subprocess.run(cmd, cwd=_SPLIT_REPO, check=True, env=env)
     log.result(f"Splits generated at {out_dir}")
     return out_dir
 
