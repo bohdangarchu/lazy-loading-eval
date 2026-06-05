@@ -5,7 +5,7 @@ from shared.artifacts import (
     create_base_dockerfile, create_stargz_dockerfile, write_2dfs_json,
 )
 from shared.config import EnvConfig
-from shared.registry import plain_base_image
+from shared.registry import plain_base_image, stargz_base_image
 from shared.packing import compute_split_stats, repack
 from shared.split_llm import (
     copy_splits_to_work_dir, run_split_llm, split_metadata_paths,
@@ -56,7 +56,7 @@ def generate_build_artifacts(
     groups = repack(safetensor_paths, num_layers, extra_files=metadata_files)
 
     write_2dfs_json(groups, SCRIPT_DIR)
-    create_stargz_dockerfile(groups, plain_base_image(source_image, cfg), SCRIPT_DIR)
+    create_stargz_dockerfile(groups, stargz_base_image(source_image, cfg), SCRIPT_DIR)
     create_base_dockerfile(groups, plain_base_image(source_image, cfg), SCRIPT_DIR)
     return groups
 
