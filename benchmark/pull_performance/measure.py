@@ -73,7 +73,7 @@ EXPERIMENTS = [
 ]
 CFG = load_config()
 VERBOSE = False
-MODES = ["2dfs-stargz"]
+MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
 PARTITION_PERCENTS = [25, 50, 75, 100]
 SCHEMA_VERSION = 1
 MULTI_SCHEMA_VERSION = 1
