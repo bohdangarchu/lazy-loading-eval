@@ -26,14 +26,20 @@ def default_repo_id(model: str, api: HfApi) -> str:
     return f"{api.whoami()['name']}/llm-splits-{split_llm_slug(model)}"
 
 
-def upload_splits(model: str, repo: str | None = None, public: bool = False, do_split: bool = True) -> str:
+def upload_splits(model: str, repo: str | None = None, public: bool = False, do_split: bool = True, folder: str | None = None) -> str:
     """Split `model` (cached via run_split_llm) and push its splits dir to an HF
     dataset repo. Returns the repo id. Set do_split=False to upload only existing
-    local splits."""
+    local splits. Pass folder to override the local path entirely."""
     api = _api()
-    splits_dir = run_split_llm(model) if do_split else splits_output_dir(model)
-    if not os.path.isfile(os.path.join(splits_dir, "field.json")):
-        raise RuntimeError(f"No splits at {splits_dir} (run split_llm first)")
+    if folder:
+        splits_dir = folder
+    elif do_split:
+        splits_dir = run_split_llm(model)
+    else:
+        splits_dir = splits_output_dir(model)
+
+    if not os.path.isdir(splits_dir):
+        raise RuntimeError(f"No directory at {splits_dir}")
 
     repo_id = repo or default_repo_id(model, api)
     api.create_repo(repo_id, repo_type="dataset", private=not public, exist_ok=True)
@@ -58,19 +64,25 @@ def download_splits(model: str, repo: str | None = None, dest: str | None = None
 
 def main():
     """CLI: split a model and upload its splits to an HF dataset repo
-    (--download to pull instead). Run from benchmark/: python -m shared.hf_splits <model>"""
+    (--download to pull instead). Run from benchmark/: python -m shared.hf_splits <model>
+    Upload example:
+    python -m shared.hf_splits google/gemma-4-31B \
+    --no-split \
+    --folder build_performance/chunks/google--gemma-4-31B \
+    --repo ..."""
     parser = argparse.ArgumentParser()
     parser.add_argument("model", help="HF model id (slug) to split + upload")
     parser.add_argument("--repo", help="Repo id (default <user>/llm-splits-<slug>)")
     parser.add_argument("--public", action="store_true", help="Public repo (default private)")
     parser.add_argument("--no-split", action="store_true", help="Upload existing splits; skip split_llm")
+    parser.add_argument("--folder", help="Upload from this local path instead of the default splits cache")
     parser.add_argument("--download", action="store_true", help="Download instead of upload")
     args = parser.parse_args()
 
     if args.download:
         download_splits(args.model, repo=args.repo)
     else:
-        upload_splits(args.model, repo=args.repo, public=args.public, do_split=not args.no_split)
+        upload_splits(args.model, repo=args.repo, public=args.public, do_split=not args.no_split, folder=args.folder)
 
 
 if __name__ == "__main__":
