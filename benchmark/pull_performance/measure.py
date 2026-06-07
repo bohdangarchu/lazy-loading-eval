@@ -69,7 +69,7 @@ EXPERIMENTS = [
     MultiModel("cv-4model",
                ["resnet50_seperated", "deeplab_v3_seperated",
                 "efficientnet_v2M_seperated", "yolov3_seperated"],
-               "docker.io/library/python:3.12-slim"),
+               "docker.io/tensorflow/tensorflow"),
 ]
 CFG = load_config()
 VERBOSE = False
