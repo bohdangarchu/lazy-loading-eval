@@ -2,6 +2,7 @@ import os
 import subprocess
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 
@@ -10,10 +11,13 @@ import matplotlib.patches as mpatches
 import numpy as np
 
 from shared import log
+from shared import cv_splits as cv
 from shared.charts import MODE_COLORS, figure_footer, save_figure, write_csv
 from pull_performance.paths import (
     pull_csv_path, pull_chart_path, pull_artifacts_dir, pull_stargz_config_path,
     pull_merged_csv_path, pull_run_metadata_path,
+    pull_multimodel_csv_path, pull_multimodel_chart_path,
+    pull_multimodel_merged_csv_path, pull_multimodel_resource_merged_csv_path,
     pull_resource_csv_path, pull_resource_merged_csv_path, pull_resource_chart_path,
     pull_resource_cpu_charts_run_dir, pull_resource_ram_charts_run_dir,
     pull_resource_cores_charts_run_dir, pull_resource_disk_charts_run_dir,
@@ -40,19 +44,39 @@ from pull_performance.images import (
     pull_name_stargz, pull_name_base,
 )
 
+
+@dataclass(frozen=True)
+class SingleModel:
+    """A single HuggingFace model split into allotments; x-axis = partition %."""
+    hf_model: str
+    base_image: str
+
+
+@dataclass(frozen=True)
+class MultiModel:
+    """Several pre-split CV models packed one-allotment-per-model into one image;
+    x-axis = how many models are accessed (cumulative, stack order = list order)."""
+    label: str
+    split_dirs: list[str]
+    base_image: str
+
+
 EXPERIMENTS = [
-    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5GB     ~50 MB
-    # ("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),                      # ~3.09 GB     ~3.4 GB
-    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
-    # ("EleutherAI/pythia-1.4b", "docker.io/library/python:3.12-slim"),
-    # ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),    # ~6.0 GB     ~3.4 GB
-    ("Qwen/Qwen3.5-9B", "docker.io/ollama/ollama")
+    # SingleModel("openai-community/gpt2", "docker.io/library/python:3.12-slim"),  # ~0.5GB  ~50 MB
+    # SingleModel("Qwen/Qwen2-1.5B", "docker.io/library/python:3.12-slim"),        # ~3.09 GB
+    # SingleModel("openlm-research/open_llama_3b", "docker.io/ollama/ollama"),     # ~6.0 GB
+    # SingleModel("Qwen/Qwen3.5-9B", "docker.io/ollama/ollama"),
+    MultiModel("cv-4model",
+               ["resnet50_seperated", "deeplab_v3_seperated",
+                "efficientnet_v2M_seperated", "yolov3_seperated"],
+               "docker.io/library/python:3.12-slim"),
 ]
 CFG = load_config()
 VERBOSE = False
-MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
+MODES = ["2dfs-stargz"]
 PARTITION_PERCENTS = [25, 50, 75, 100]
 SCHEMA_VERSION = 1
+MULTI_SCHEMA_VERSION = 1
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -70,6 +94,41 @@ class PullRow:
     pull_s: float
     run_s: float
     total_s: float
+
+
+@dataclass(frozen=True)
+class MultiModelPullRow:
+    schema_version: int
+    label: str
+    base_image: str
+    num_models_total: int
+    run: int
+    num_models: int        # k = x position (cumulative count accessed)
+    models: str            # ordered prefix names, e.g. "resnet50|deeplab_v3"
+    num_allotments: int
+    mode: str
+    pull_s: float
+    run_s: float
+    total_s: float
+
+
+@dataclass(frozen=True)
+class ExperimentPlan:
+    """What prepare_single/prepare_multi resolve an experiment into, and what the
+    measure loop consumes — uniform across both arms. steps = [(x_value, n_allotments), ...];
+    make_row builds the arm's row; is_multi selects the output/plot path."""
+    model: str
+    base_image: str
+    allotments: list[list[str]]
+    max_allowed_splits: int
+    steps: list[tuple[int, int]]
+    dim_col: str
+    x_label: str
+    x_tag: str
+    is_multi: bool
+    meta: dict
+    make_row: Callable[[str, int, int, int, float, float], object]
+
 
 # ── helpers ────────────────────────────────────────────────────────
 
@@ -245,10 +304,6 @@ def _measure_one(mode: str, allotments: list[list[str]], n: int, source_image: s
     return (n, pull_t, run_t)
 
 
-def _splits_for(max_allowed_splits: int) -> list[int]:
-    return [layers_for_percent(max_allowed_splits, pct) for pct in PARTITION_PERCENTS]
-
-
 def split_stats(allotments: list[list[str]]) -> dict:
     """Aggregate split-pool stats (sizes in MB) for run metadata."""
     sizes = [
@@ -294,13 +349,70 @@ def print_packing_table(allotments: list[list[str]], model: str, max_allowed_spl
         log.result(f"{e['partition_pct']:>9}%  {e['num_splits']:>11}  {sizes_str}")
 
 
-def measure(
-    allotments: list[list[str]], max_allowed_splits: int, source_image: str, cfg,
-    model: str, execution_ts: str, monitor: ResourceMonitor | None = None,
-) -> list[PullRow]:
-    results: list[PullRow] = []
+def prepare_single(exp: SingleModel) -> ExperimentPlan:
+    allotments, max_allowed_splits = prepare_model_splits(exp.hf_model)
+    print_packing_table(allotments, exp.hf_model, max_allowed_splits)
+    steps = [(pct, layers_for_percent(max_allowed_splits, pct)) for pct in PARTITION_PERCENTS]
+    meta = {
+        "model": exp.hf_model,
+        "base_image": exp.base_image,
+        "max_allowed_splits": max_allowed_splits,
+        "splits": split_stats(allotments),
+        "packing_preview": packing_preview_data(allotments, max_allowed_splits),
+    }
 
-    base_splits = _splits_for(max_allowed_splits)
+    def make_row(mode: str, run: int, x_value: int, n: int, pull_t: float, run_t: float) -> PullRow:
+        return PullRow(
+            schema_version=SCHEMA_VERSION, model=exp.hf_model, base_image=exp.base_image,
+            max_allowed_splits=max_allowed_splits, run=run, partition_pct=x_value,
+            num_splits=n, mode=mode, pull_s=pull_t, run_s=run_t, total_s=pull_t + run_t,
+        )
+
+    return ExperimentPlan(exp.hf_model, exp.base_image, allotments, max_allowed_splits,
+                          steps, "partition_pct", "Partition size (%)", "pct", False, meta, make_row)
+
+
+def prepare_multi(exp: MultiModel) -> ExperimentPlan:
+    models = cv.prepare_cv_splits(exp.label, exp.split_dirs, SCRIPT_DIR)
+    groups, _ = cv.pack_cv(models, [1] * len(models))  # one allotment per model
+    names = [m.name for m in models]
+    n_models = len(models)
+    cv.print_cv_packing_table(exp.label, models, [100])
+    steps = [(k, k) for k in range(1, n_models + 1)]  # 1 allotment/model → n == k
+    meta = {
+        "model": exp.label,
+        "base_image": exp.base_image,
+        "max_allowed_splits": n_models,
+        "models": names,
+        "splits": cv.cv_split_stats(models),
+    }
+
+    def make_row(mode: str, run: int, x_value: int, n: int, pull_t: float, run_t: float) -> MultiModelPullRow:
+        return MultiModelPullRow(
+            schema_version=MULTI_SCHEMA_VERSION, label=exp.label, base_image=exp.base_image,
+            num_models_total=n_models, run=run, num_models=x_value,
+            models="|".join(names[:x_value]), num_allotments=n, mode=mode,
+            pull_s=pull_t, run_s=run_t, total_s=pull_t + run_t,
+        )
+
+    return ExperimentPlan(exp.label, exp.base_image, groups, n_models,
+                          steps, "num_models", "Models accessed", "model", True, meta, make_row)
+
+
+def measure(
+    allotments: list[list[str]], source_image: str, cfg, model: str, execution_ts: str,
+    steps: list[tuple[int, int]], dim_col: str,
+    make_row: Callable[[str, int, int, int, float, float], object],
+    monitor: ResourceMonitor | None = None,
+) -> list:
+    """Build+push each mode once, then for every (x_value, n) step pull the first
+    n allotments and read them. steps come from the ExperimentPlan: x_value is
+    partition % (single) or models accessed (multi). make_row(mode, run, x_value,
+    n, pull, run) builds the arm's row type; dim_col is the resource-monitor
+    dimension name."""
+    results: list = []
+
+    base_splits = [n for _, n in steps]
 
     clear_registry(cfg, preserve_base=True, verbose=False)
     for mode in MODES:
@@ -312,29 +424,16 @@ def measure(
 
         for run in range(CFG.pull_n_runs):
             log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] === Run {run + 1}/{CFG.pull_n_runs} ===")
-            for pct in PARTITION_PERCENTS:
-                n = layers_for_percent(max_allowed_splits, pct)
+            for x_value, n in steps:
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-                log.info(f"\n[{ts}] === {mode}: {pct}% ({n} allotments) ===")
+                log.info(f"\n[{ts}] === {mode}: {dim_col}={x_value} ({n} allotments) ===")
                 clear_stargz_cache()
                 if monitor:
-                    monitor.set_context(mode, pct, run)
+                    monitor.set_context(mode, x_value, run)
                 _, pull_t, run_t = _measure_one(mode, allotments, n, source_image, cfg)
                 if monitor:
                     monitor.set_idle()
-                results.append(PullRow(
-                    schema_version=SCHEMA_VERSION,
-                    model=model,
-                    base_image=source_image,
-                    max_allowed_splits=max_allowed_splits,
-                    run=run,
-                    partition_pct=pct,
-                    num_splits=n,
-                    mode=mode,
-                    pull_s=pull_t,
-                    run_s=run_t,
-                    total_s=pull_t + run_t,
-                ))
+                results.append(make_row(mode, run, x_value, n, pull_t, run_t))
                 log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
                 time.sleep(cfg.pull_cooldown)
 
@@ -343,7 +442,81 @@ def measure(
     return results
 
 
-# ── output ─────────────────────────────────────────────────────────
+# ── output: shared ─────────────────────────────────────────────────
+
+
+def _write_rows(output_path: str, results: list) -> None:
+    """Write any PullRow/MultiModelPullRow list to CSV (fields from the row type)."""
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    fieldnames = [f.name for f in fields(type(results[0]))]
+    rows = [{
+        **asdict(r),
+        "pull_s": f"{r.pull_s:.4f}",
+        "run_s": f"{r.run_s:.4f}",
+        "total_s": f"{r.total_s:.4f}",
+    } for r in results]
+    write_csv(output_path, fieldnames, rows)
+
+
+def _plot_pull_run(
+    results: list, dim_attr: str, x_label: str, xtick_fmt: Callable[[int], str],
+    title: str, output_path: str, footer_label: str, base_image: str,
+    footer_extra: str | None = None,
+) -> None:
+    """Stacked pull(hatched)+run bars per mode across the x-axis values found in
+    `dim_attr` (partition_pct or num_models)."""
+    xs = sorted({getattr(r, dim_attr) for r in results})
+    x = np.arange(len(xs))
+    n_modes = len(MODES)
+    width = min(0.8 / n_modes, 0.15)
+
+    fig, ax = plt.subplots(figsize=(max(10, n_modes * 2), 6))
+
+    for i, mode in enumerate(MODES):
+        color = MODE_COLORS[mode]
+        offset = (i - (n_modes - 1) / 2) * width
+        mean_pulls, std_pulls, mean_runs, std_totals = [], [], [], []
+        for xv in xs:
+            group = [(r.pull_s, r.run_s) for r in results
+                     if r.mode == mode and getattr(r, dim_attr) == xv]
+            if group:
+                pull_arr = np.array([g[0] for g in group])
+                run_arr = np.array([g[1] for g in group])
+                mean_pulls.append(float(pull_arr.mean()))
+                std_pulls.append(float(pull_arr.std(ddof=0)))
+                mean_runs.append(float(run_arr.mean()))
+                std_totals.append(float((pull_arr + run_arr).std(ddof=0)))
+            else:
+                mean_pulls.append(0.0)
+                std_pulls.append(0.0)
+                mean_runs.append(0.0)
+                std_totals.append(0.0)
+        ax.bar(x + offset, mean_pulls, width, yerr=std_pulls, capsize=3,
+               color=color, alpha=0.5, hatch="//", edgecolor=color, linewidth=0.5)
+        ax.bar(x + offset, mean_runs, width, bottom=mean_pulls, yerr=std_totals, capsize=3,
+               color=color, edgecolor=color, linewidth=0.5, label=mode)
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("Time (s)")
+    ax.set_title(title)
+    ax.set_xticks(x)
+    ax.set_xticklabels([xtick_fmt(v) for v in xs])
+    ax.grid(True, linestyle="--", alpha=0.3, axis="y")
+
+    method_handles = [mpatches.Patch(facecolor=MODE_COLORS[m], edgecolor=MODE_COLORS[m], label=m)
+                      for m in MODES]
+    pull_patch = mpatches.Patch(facecolor="gray", alpha=0.5, hatch="//",
+                                edgecolor="gray", label="pull")
+    run_patch = mpatches.Patch(facecolor="gray", edgecolor="gray", label="run")
+    ax.legend(handles=method_handles + [pull_patch, run_patch], loc="upper left")
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    fig.tight_layout()
+    figure_footer(fig, footer_label, base_image, extra=footer_extra)
+    save_figure(fig, output_path)
+
+
+# ── output: single-model ───────────────────────────────────────────
 
 
 def print_results(results: list[PullRow]) -> None:
@@ -370,89 +543,62 @@ def print_results(results: list[PullRow]) -> None:
         log.result(f"{pct:>7}%  {row}")
 
 
-def _write_pull_rows(output_path: str, results: list[PullRow]) -> None:
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fieldnames = [f.name for f in fields(PullRow)]
-    rows = [{
-        **asdict(r),
-        "pull_s": f"{r.pull_s:.4f}",
-        "run_s": f"{r.run_s:.4f}",
-        "total_s": f"{r.total_s:.4f}",
-    } for r in results]
-    write_csv(output_path, fieldnames, rows)
-
-
 def save_csv(results: list[PullRow], model: str, base_image: str, execution_ts: str) -> None:
     pcts = sorted({r.partition_pct for r in results})
-    output_path = pull_csv_path(SCRIPT_DIR, model, base_image, len(pcts), execution_ts)
-    _write_pull_rows(output_path, results)
+    _write_rows(pull_csv_path(SCRIPT_DIR, model, base_image, len(pcts), execution_ts), results)
 
 
 def save_merged_csv(results: list[PullRow], execution_ts: str) -> None:
-    _write_pull_rows(pull_merged_csv_path(SCRIPT_DIR, execution_ts), results)
+    _write_rows(pull_merged_csv_path(SCRIPT_DIR, execution_ts), results)
 
 
-def save_resource_csv(samples: list[ResourceRow], model: str, base_image: str, execution_ts: str) -> None:
-    write_resource_csv(pull_resource_csv_path(SCRIPT_DIR, model, base_image, execution_ts), samples, "partition_pct")
+def plot(results: list[PullRow], model: str, base_image: str, execution_ts: str) -> None:
+    pcts = sorted({r.partition_pct for r in results})
+    _plot_pull_run(
+        results, "partition_pct", "Partition size (%)", lambda p: f"{p}%",
+        f"Pull + Run Performance (mean ± stddev, n={CFG.pull_n_runs} runs)",
+        pull_chart_path(SCRIPT_DIR, model, base_image, len(pcts), execution_ts),
+        model, base_image,
+    )
+
+
+# ── output: multimodel ─────────────────────────────────────────────
+
+
+def save_multimodel_csv(results: list[MultiModelPullRow], label: str, base_image: str, execution_ts: str) -> None:
+    n = len(sorted({r.num_models for r in results}))
+    _write_rows(pull_multimodel_csv_path(SCRIPT_DIR, label, base_image, n, execution_ts), results)
+
+
+def save_merged_multimodel_csv(results: list[MultiModelPullRow], execution_ts: str) -> None:
+    _write_rows(pull_multimodel_merged_csv_path(SCRIPT_DIR, execution_ts), results)
+
+
+def plot_multimodel(results: list[MultiModelPullRow], label: str, base_image: str, execution_ts: str) -> None:
+    ks = sorted({r.num_models for r in results})
+    full_order = max(results, key=lambda r: r.num_models).models.split("|")
+    access_order = " -> ".join(name.removesuffix("_seperated") for name in full_order)
+    _plot_pull_run(
+        results, "num_models", "Models accessed", str,
+        f"Multimodel pull + run (mean ± stddev, n={CFG.pull_n_runs} runs)",
+        pull_multimodel_chart_path(SCRIPT_DIR, label, base_image, len(ks), execution_ts),
+        label, base_image, footer_extra=f"access order: {access_order}",
+    )
+
+
+# ── output: resource ───────────────────────────────────────────────
+
+
+def save_resource_csv(samples: list[ResourceRow], model: str, base_image: str, execution_ts: str, dim_col: str) -> None:
+    write_resource_csv(pull_resource_csv_path(SCRIPT_DIR, model, base_image, execution_ts), samples, dim_col)
 
 
 def save_merged_resource_csv(samples: list[ResourceRow], execution_ts: str) -> None:
     write_resource_csv(pull_resource_merged_csv_path(SCRIPT_DIR, execution_ts), samples, "partition_pct")
 
 
-def plot(results: list[PullRow], model: str, base_image: str, execution_ts: str) -> None:
-    pcts = sorted({r.partition_pct for r in results})
-    x = np.arange(len(pcts))
-    n_modes = len(MODES)
-    width = min(0.8 / n_modes, 0.15)
-
-    fig, ax = plt.subplots(figsize=(max(10, n_modes * 2), 6))
-
-    for i, mode in enumerate(MODES):
-        color = MODE_COLORS[mode]
-        offset = (i - (n_modes - 1) / 2) * width
-        mean_pulls, std_pulls = [], []
-        mean_runs = []
-        std_totals = []
-        for pct in pcts:
-            group = [(r.pull_s, r.run_s) for r in results if r.mode == mode and r.partition_pct == pct]
-            if group:
-                pull_arr = np.array([g[0] for g in group])
-                run_arr = np.array([g[1] for g in group])
-                tot_arr = pull_arr + run_arr
-                mean_pulls.append(float(pull_arr.mean()))
-                std_pulls.append(float(pull_arr.std(ddof=0)))
-                mean_runs.append(float(run_arr.mean()))
-                std_totals.append(float(tot_arr.std(ddof=0)))
-            else:
-                mean_pulls.append(0.0)
-                std_pulls.append(0.0)
-                mean_runs.append(0.0)
-                std_totals.append(0.0)
-        ax.bar(x + offset, mean_pulls, width, yerr=std_pulls, capsize=3,
-               color=color, alpha=0.5, hatch="//", edgecolor=color, linewidth=0.5)
-        ax.bar(x + offset, mean_runs, width, bottom=mean_pulls, yerr=std_totals, capsize=3,
-               color=color, edgecolor=color, linewidth=0.5, label=mode)
-
-    ax.set_xlabel("Partition size (%)")
-    ax.set_ylabel("Time (s)")
-    ax.set_title(f"Pull + Run Performance (mean ± stddev, n={CFG.pull_n_runs} runs)")
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"{p}%" for p in pcts])
-    ax.grid(True, linestyle="--", alpha=0.3, axis="y")
-
-    method_handles = [mpatches.Patch(facecolor=MODE_COLORS[m], edgecolor=MODE_COLORS[m], label=m)
-                      for m in MODES]
-    pull_patch = mpatches.Patch(facecolor="gray", alpha=0.5, hatch="//",
-                                edgecolor="gray", label="pull")
-    run_patch = mpatches.Patch(facecolor="gray", edgecolor="gray", label="run")
-    ax.legend(handles=method_handles + [pull_patch, run_patch], loc="upper left")
-
-    output_path = pull_chart_path(SCRIPT_DIR, model, base_image, len(pcts), execution_ts)
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fig.tight_layout()
-    figure_footer(fig, model, base_image)
-    save_figure(fig, output_path)
+def save_merged_multimodel_resource_csv(samples: list[ResourceRow], execution_ts: str) -> None:
+    write_resource_csv(pull_multimodel_resource_merged_csv_path(SCRIPT_DIR, execution_ts), samples, "num_models")
 
 
 # ── main ───────────────────────────────────────────────────────────
@@ -469,8 +615,9 @@ def main():
     log.info(f"Runs: {CFG.pull_n_runs}")
 
     log.info("Pre-run cleanup...")
-    for model, _ in EXPERIMENTS:
-        cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
+    for exp in EXPERIMENTS:
+        name = exp.label if isinstance(exp, MultiModel) else exp.hf_model
+        cleanup_pull_experiment(name, SCRIPT_DIR, CFG)
 
     stargz_config_path = pull_stargz_config_path(SCRIPT_DIR, execution_ts)
     os.makedirs(os.path.dirname(stargz_config_path), exist_ok=True)
@@ -478,34 +625,32 @@ def main():
         f.write(read_base_config())
     log.result(f"Stargz config snapshot saved to {stargz_config_path}")
 
-    all_results: list[PullRow] = []
-    all_samples: list[ResourceRow] = []
+    all_single: list[PullRow] = []
+    all_multi: list[MultiModelPullRow] = []
+    single_samples: list[ResourceRow] = []
+    multi_samples: list[ResourceRow] = []
     experiments_meta: list[dict] = []
-    for model, base_image in EXPERIMENTS:
-        allotments, max_allowed_splits = prepare_model_splits(model)
+    for exp in EXPERIMENTS:
+        prepared = prepare_multi(exp) if isinstance(exp, MultiModel) else prepare_single(exp)
+        model, base_image = prepared.model, prepared.base_image
+        max_allowed_splits = prepared.max_allowed_splits
         log.result(f"\n===== Experiment: {model} / {base_image} (max_splits={max_allowed_splits}) =====")
-        print_packing_table(allotments, model, max_allowed_splits)
 
-        experiments_meta.append({
-            "model": model,
-            "base_image": base_image,
-            "max_allowed_splits": max_allowed_splits,
-            "splits": split_stats(allotments),
-            "packing_preview": packing_preview_data(allotments, max_allowed_splits),
-        })
+        experiments_meta.append(prepared.meta)
 
         monitor = ResourceMonitor(model, base_image, max_allowed_splits, build_tmpdir(CFG),
                                   data_volume(CFG), registry(CFG))
         monitor.start()
 
-        results = measure(allotments, max_allowed_splits, base_image, CFG, model, execution_ts, monitor=monitor)
+        results = measure(prepared.allotments, base_image, CFG, model, execution_ts,
+                          prepared.steps, prepared.dim_col, prepared.make_row, monitor=monitor)
 
         samples = monitor.stop()
-        save_resource_csv(samples, model, base_image, execution_ts)  # raw counters
+        save_resource_csv(samples, model, base_image, execution_ts, prepared.dim_col)  # raw counters
         enriched = derive_samples(samples)
         plot_resource_aggregate(
             enriched, modes=MODES, n_runs=CFG.pull_n_runs,
-            xlabel="Partition size (%)",
+            xlabel=prepared.x_label,
             title=f"Resource usage during pull+run (mean ± std, n={CFG.pull_n_runs} runs)",
             model=model, base_image=base_image, max_allowed_splits=max_allowed_splits,
             output_path=pull_resource_chart_path(SCRIPT_DIR, model, base_image, execution_ts),
@@ -513,25 +658,37 @@ def main():
         plot_resource_timeseries(
             enriched, model=model, base_image=base_image,
             max_allowed_splits=max_allowed_splits,
-            dimension_label="partition", dimension_tag="pct",
+            dimension_label="models" if prepared.is_multi else "partition",
+            dimension_tag=prepared.x_tag,
+            dimension_unit="" if prepared.is_multi else "%",
             cpu_dir=pull_resource_cpu_charts_run_dir(SCRIPT_DIR, execution_ts),
             ram_dir=pull_resource_ram_charts_run_dir(SCRIPT_DIR, execution_ts),
             cores_dir=pull_resource_cores_charts_run_dir(SCRIPT_DIR, execution_ts),
             disk_dir=pull_resource_disk_charts_run_dir(SCRIPT_DIR, execution_ts),
             net_dir=pull_resource_net_charts_run_dir(SCRIPT_DIR, execution_ts),
         )
-        all_samples.extend(samples)
 
-        print_results(results)
-        save_csv(results, model, base_image, execution_ts)
-        plot(results, model, base_image, execution_ts)
-        all_results.extend(results)
+        if prepared.is_multi:
+            save_multimodel_csv(results, model, base_image, execution_ts)
+            plot_multimodel(results, model, base_image, execution_ts)
+            all_multi.extend(results)
+            multi_samples.extend(samples)
+        else:
+            print_results(results)
+            save_csv(results, model, base_image, execution_ts)
+            plot(results, model, base_image, execution_ts)
+            all_single.extend(results)
+            single_samples.extend(samples)
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
 
-    if all_results:
-        save_merged_csv(all_results, execution_ts)
-    if all_samples:
-        save_merged_resource_csv(all_samples, execution_ts)
+    if all_single:
+        save_merged_csv(all_single, execution_ts)
+    if all_multi:
+        save_merged_multimodel_csv(all_multi, execution_ts)
+    if single_samples:
+        save_merged_resource_csv(single_samples, execution_ts)
+    if multi_samples:
+        save_merged_multimodel_resource_csv(multi_samples, execution_ts)
 
     write_run_json(
         pull_run_metadata_path(SCRIPT_DIR, execution_ts),

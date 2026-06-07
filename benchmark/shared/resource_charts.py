@@ -138,6 +138,7 @@ def plot_resource_timeseries(
     model: str, base_image: str, max_allowed_splits: int,
     dimension_label: str, dimension_tag: str,
     cpu_dir: str, ram_dir: str, cores_dir: str, disk_dir: str, net_dir: str,
+    dimension_unit: str = "%",
 ) -> None:
     """Per-(mode, dimension, run) over-time charts: CPU, RAM, per-core heatmap, disk, net."""
     if not samples:
@@ -175,7 +176,7 @@ def plot_resource_timeseries(
             figure_footer(fig, model, base_image, max_allowed_splits=max_allowed_splits)
             fig.text(
                 0.99, 0.01,
-                f"mode: {mode_name}  |  run: {run + 1}  |  {dimension_label}: {dim}%",
+                f"mode: {mode_name}  |  run: {run + 1}  |  {dimension_label}: {dim}{dimension_unit}",
                 fontsize=8,
                 verticalalignment="bottom",
                 horizontalalignment="right",

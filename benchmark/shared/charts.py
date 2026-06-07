@@ -14,6 +14,7 @@ def figure_footer(
     fig, model: str, base_image: str, fontsize: int = 8,
     max_allowed_splits: int | None = None,
     model_size: str | None = None,
+    extra: str | None = None,
 ) -> None:
     """Stamp bottom-left corner of a figure with model/image metadata."""
     text = f"model: {model}"
@@ -22,6 +23,8 @@ def figure_footer(
     text += f"\nbase image: {base_image}"
     if max_allowed_splits is not None:
         text += f"\nmax_allowed_splits: {max_allowed_splits}"
+    if extra is not None:
+        text += f"\n{extra}"
     n_lines = text.count("\n") + 1
     fig_h_in = fig.get_size_inches()[1]
     footer_in = (n_lines * fontsize * 1.4) / 72.0
