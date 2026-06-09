@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euox pipefail
 
-REGISTRY_SRC="/home/garchu/workspace/2dfs-custom/2dfs-registry"
+REGISTRY_SRC="/home/garchu/2dfs-registry"
 IMAGE_NAME="tdfs-registry-1"
 VOLUME_NAME="2dfs-registry-data"
 
