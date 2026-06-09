@@ -21,14 +21,14 @@ def run_phases():
     # log.result("=== Phase 1: Build Performance ===")
     # bm.main()
 
-    # log.result("=== Phase 2: Build Rebuild Performance ===")
-    # bmr.main()
+    log.result("=== Phase 2: Build Rebuild Performance ===")
+    bmr.main()
 
     # log.result("=== Transition: clearing build artifacts ===")
     # cleanup_build_artifacts(paths.build_perf_dir(_BENCHMARK_DIR), cfg)
 
-    log.result("=== Phase 3: Pull Performance ===")
-    pm.main()
+    # log.result("=== Phase 3: Pull Performance ===")
+    # pm.main()
 
     # log.result("=== Phase 4: Refresh Performance ===")
     # pmr.main()
