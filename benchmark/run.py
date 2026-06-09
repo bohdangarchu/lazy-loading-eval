@@ -8,6 +8,7 @@ from shared.model import cleanup_build_artifacts, cleanup_pull_artifacts
 
 import build_performance.measure as bm
 import build_performance.measure_rebuild as bmr
+import build_performance.measure_cv_rebuild as bcr
 import pull_performance.measure as pm
 import pull_performance.measure_refresh as pmr
 
@@ -23,6 +24,9 @@ def run_phases():
 
     log.result("=== Phase 2: Build Rebuild Performance ===")
     bmr.main()
+
+    log.result("=== Phase 2b: CV Multi-Model Rebuild Performance ===")
+    bcr.main()
 
     # log.result("=== Transition: clearing build artifacts ===")
     # cleanup_build_artifacts(paths.build_perf_dir(_BENCHMARK_DIR), cfg)

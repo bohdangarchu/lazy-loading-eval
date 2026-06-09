@@ -26,16 +26,16 @@ EXPERIMENTS = [
     MultiModel("cv-4model",
                ["resnet50_seperated", "deeplab_v3_seperated",
                 "efficientnet_v2M_seperated", "yolov3_seperated"],
-               "docker.io/library/python:3.12-slim"),
+               "docker.io/tensorflow/tensorflow"),
 ]
 CFG = load_config()
 VERBOSE = False
-MODES = ["2dfs", "base"]
-# Knob: how many whole models are updated (1..N). Replaces the single-model
-# layers_mutated_pct axis. Each model is a contiguous allotment block; direction
-# picks the top-k (largest, YOLOv3 first) or bottom-k (smallest, ResNet50 first).
+MODES = ["2dfs", "2dfs-stargz", "2dfs-stargz-zstd", "stargz", "base"]
+# how many whole models are updated (1..N). Replaces the single-model
+# layers_mutated_pct axis. Each model is one allotment. direction picks the
+# top-k (last in EXPERIMENTS order) or bottom-k (first in EXPERIMENTS order).
 MODELS_UPDATED = [1, 2, 3, 4]
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,7 @@ class CvRebuildRow:
     models_updated: int
     n_allotments_mutated: int  # columns actually touched (differs per direction)
     direction: str
+    models_mutated: str  # ";"-joined model names, stack order (bottom->top)
     mode: str
     total_s: float
 
@@ -56,9 +57,18 @@ def cv_buckets_for(
     groups: list[list[str]], ranges: list[tuple[int, int]], k: int, direction: str,
 ) -> list[list[str]]:
     """Allotment buckets of the k model-blocks selected from the top or bottom
-    of the stack (models are ordered smallest→largest, bottom→top)."""
+    of the stack."""
     chosen = get_buckets_to_mutate(list(range(len(ranges))), k, direction)
     return [g for idx in chosen for g in groups[ranges[idx][0]:ranges[idx][1]]]
+
+
+def cv_models_for(
+    model_names: list[str], n_models: int, k: int, direction: str,
+) -> list[str]:
+    """The k model names selected from the top or bottom of the stack, in stack
+    order (bottom->top)."""
+    chosen = get_buckets_to_mutate(list(range(n_models)), k, direction)
+    return [model_names[i] for i in chosen]
 
 
 def cv_mutation_preview_data(
@@ -94,7 +104,7 @@ def print_cv_mutation_table(groups: list[list[str]], ranges: list[tuple[int, int
 
 def measure_cv_rebuilds(
     groups: list[list[str]], ranges: list[tuple[int, int]], methods: list,
-    model: str, base_image: str, max_allowed_splits: int,
+    model_names: list[str], model: str, base_image: str, max_allowed_splits: int,
 ) -> list[CvRebuildRow]:
     def select_targets(direction: str, k: int) -> tuple[int, list[list[str]]]:
         buckets = cv_buckets_for(groups, ranges, k, direction)
@@ -104,8 +114,9 @@ def measure_cv_rebuilds(
         return CvRebuildRow(
             schema_version=SCHEMA_VERSION, model=model, base_image=base_image,
             max_allowed_splits=max_allowed_splits, run=run, models_updated=k,
-            n_allotments_mutated=n_allotments, direction=direction, mode=mode_name,
-            total_s=br.total_s,
+            n_allotments_mutated=n_allotments, direction=direction,
+            models_mutated=";".join(cv_models_for(model_names, len(ranges), k, direction)),
+            mode=mode_name, total_s=br.total_s,
         )
 
     return measure_rebuild_matrix(
@@ -164,7 +175,10 @@ def main():
             rebuild_artifacts_dir(SCRIPT_DIR, execution_ts, exp.label, exp.base_image),
         )
 
-        results = measure_cv_rebuilds(groups, ranges, methods, exp.label, exp.base_image, max_allowed_splits)
+        results = measure_cv_rebuilds(
+            groups, ranges, methods, [m.name for m in models],
+            exp.label, exp.base_image, max_allowed_splits,
+        )
 
         plot(results, exp.label, exp.base_image, max_allowed_splits, execution_ts)
         all_results.extend(results)
