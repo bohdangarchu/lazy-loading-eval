@@ -9,7 +9,7 @@ sudo rm -rf "$REGISTRY_DATA"
 
 WORKDIR="$HOME/2dfs-registry"
 cd "$WORKDIR"
-git pull
+sudo git pull
 
 sudo docker build -t 2dfs/registry:latest .
 
