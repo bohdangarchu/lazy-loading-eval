@@ -12,8 +12,11 @@ import numpy as np
 from dotenv import load_dotenv
 from huggingface_hub import snapshot_download
 
+from shared import cv_splits as cv
 from shared import log, paths
-from shared.artifacts import clear_artifacts, snapshot_artifacts, write_2dfs_json
+from shared.artifacts import (
+    clear_artifacts, snapshot_artifacts, write_2dfs_json, xor_first_byte,
+)
 from shared.charts import figure_footer, save_figure, write_csv
 from shared.config import load_config
 from shared.prometheus import bytes_by_layer
@@ -22,8 +25,8 @@ from shared.registry import (
     prepare_local_registry, registry, save_toc, tdfs_cmd,
 )
 from shared.services import (
-    clear_2dfs_cache, clear_stargz_cache, ensure_buildkit, prune_buildkit,
-    save_stargz_run_log,
+    clear_2dfs_cache, clear_overlayfs_cache, clear_stargz_cache, ensure_buildkit,
+    prune_buildkit, save_stargz_run_log,
 )
 from shared.stargz_config import read_base_config
 from pull_performance.measure import _next_container_name
@@ -31,6 +34,7 @@ from pull_performance.paths import (
     refresh_artifacts_dir, refresh_bytes_chart_path, refresh_bytes_csv_path,
     refresh_chart_path, refresh_csv_path, refresh_log_path,
     refresh_merged_csv_path, refresh_merged_bytes_csv_path,
+    refresh_multimodel_merged_csv_path, refresh_multimodel_merged_bytes_csv_path,
     refresh_stargz_config_path, refresh_run_metadata_path,
 )
 from shared.run_metadata import write_run_json
@@ -42,26 +46,63 @@ from pull_performance.refresh_common import (
 load_dotenv()
 
 CFG = load_config()
-VERBOSE = True
+VERBOSE = False
 N_RUNS = CFG.refresh_n_runs
 LAZY_MODE = "2dfs-stargz"   # used by manual-lazy + refresh
 NO_LAZY_MODE = "oci"        # used by manual-oci (full pull)
-MODEL = "Qwen/Qwen3.5-9B"
-SOURCE_IMAGE = "docker.io/ollama/ollama"
+
+# Single-model config (chat_template mutation on a tokenizer JSON).
 MUTATED_FILENAME = "tokenizer_config.json"
 MUTATED_FIELD = "chat_template"
 MUTATION_STRING = b"added string"
-OP_TYPES = ["on_demand_bytes_fetched"]
 WEIGHT_SUFFIXES = (".safetensors", ".bin")  # safetensors or PyTorch pickle weights
-PROM_SETTLE_S = 1.0  # > scrape_interval (500ms) so post-op scrape is visible
+
+OP_TYPES = ["on_demand_bytes_fetched"]
+PROM_SETTLE_S = 1.0
 SCHEMA_VERSION = 4
+MULTI_SCHEMA_VERSION = 1
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 UpdateStrategy = Literal["manual-lazy", "manual-oci", "refresh"]
 ExperimentPhase = Literal["setup", "update"]
 ImageVersion = Literal["before", "after"]
-StrategyRunner = Callable[[list[str], str | None], "StrategyResult"]
+StrategyRunner = Callable[["RefreshExperiment", str | None], "StrategyResult"]
+
+
+# ── experiment configs ──────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class SingleModel:
+    """A single HuggingFace model packed into one allotment; a config JSON field
+    is mutated to produce the after-image."""
+    hf_model: str
+    base_image: str
+
+
+@dataclass(frozen=True)
+class MultiModel:
+    """Several pre-split CV models packed one-allotment-per-model into one image.
+    One model (modified_model) is mutated across ALL its files to produce
+    the after-image; the other allotments are byte-identical before vs after."""
+    label: str
+    split_dirs: list[str]   # stack order, bottom -> top
+    modified_model: str     # must be one of split_dirs
+    base_image: str
+
+
+EXPERIMENTS = [
+    # SingleModel("Qwen/Qwen3.5-9B", "docker.io/ollama/ollama"),
+    MultiModel(
+        "cv-4model",
+        ["resnet50_seperated", "deeplab_v3_seperated",
+         "efficientnet_v2M_seperated", "yolov3_seperated"],
+        modified_model="resnet50_seperated",
+        base_image="docker.io/tensorflow/tensorflow",
+    ),
+]
+
 
 @dataclass(frozen=True)
 class RefreshTimeRow:
@@ -85,10 +126,51 @@ class RefreshTimeRow:
 
 
 @dataclass(frozen=True)
+class RefreshTimeRowMultimodal:
+    schema_version: int
+    label: str
+    base_image: str
+    num_models: int
+    models: str             # ordered stack names, e.g. "resnet50|deeplab_v3"
+    modified_model: str
+    mode: str
+    run: int
+    update_strategy: UpdateStrategy
+    setup_cold_read_s: float | None
+    setup_warm_read_s: float | None
+    stop_total_s: float | None
+    stop_kill_s: float | None
+    stop_task_delete_s: float | None
+    stop_container_delete_s: float | None
+    pull_s: float | None
+    run_s: float | None
+    refresh_s: float | None
+    read_s: float
+    total_s: float
+
+
+@dataclass(frozen=True)
 class RefreshBytesRow:
     schema_version: int
     model: str
     base_image: str
+    mode: str
+    run: int
+    update_strategy: UpdateStrategy
+    experiment_phase: ExperimentPhase
+    layer: str
+    op_type: str
+    bytes: int
+
+
+@dataclass(frozen=True)
+class RefreshBytesRowMultimodal:
+    schema_version: int
+    label: str
+    base_image: str
+    num_models: int
+    models: str
+    modified_model: str
     mode: str
     run: int
     update_strategy: UpdateStrategy
@@ -125,18 +207,38 @@ class StrategyResult:
     refresh_s: float | None = None
 
 
-# ── snapshot download ──────────────────────────────────────────────────
+@dataclass(frozen=True)
+class RefreshExperiment:
+    """A resolved experiment the build/measure/output code runs, uniform across arms."""
+    label: str
+    base_image: str
+    name_slug: str                  # registry image-name slug
+    is_multi: bool
+    groups: list[list[str]]         # allotments for write_2dfs_json
+    in_paths: list[str]             # every file to cat
+    size_str: str | None
+    mutate: Callable[[], Callable[[], None]]  # apply after-image change, return its undo
+    assert_mutated: Callable[[str, bool], None]  # (container, expect_mutated)
+    meta: dict
+    make_time_row: Callable[[int, UpdateStrategy, str, StrategyResult], object]
+    make_bytes_rows: Callable[
+        [int, UpdateStrategy, str, ExperimentPhase, dict[str, dict[str, int]]], list
+    ]
+    probe_disk_byte: Callable[[], int | None] | None = None  # rep file first byte on disk
 
 
-def _model_snapshot_dir() -> str:
-    return paths.models_dir(SCRIPT_DIR, MODEL)
+# ── single-model snapshot download + mutation ───────────────────────────
 
 
-def download_snapshot() -> list[str]:
+def _model_snapshot_dir(hf_model: str) -> str:
+    return paths.models_dir(SCRIPT_DIR, hf_model)
+
+
+def download_snapshot(hf_model: str) -> list[str]:
     """Download full HF snapshot (weights + tokenizer/config JSONs).
     Returns absolute paths of every file in the snapshot dir.
     """
-    local_dir = _model_snapshot_dir()
+    local_dir = _model_snapshot_dir(hf_model)
     os.makedirs(local_dir, exist_ok=True)
 
     has_cfg = os.path.exists(os.path.join(local_dir, MUTATED_FILENAME))
@@ -146,10 +248,10 @@ def download_snapshot() -> list[str]:
     if has_cfg and has_weights:
         log.info(f"Model snapshot present at {local_dir}, skipping download")
     else:
-        log.info(f"Downloading full snapshot {MODEL} -> {local_dir}")
+        log.info(f"Downloading full snapshot {hf_model} -> {local_dir}")
         token = os.environ.get("HF_TOKEN")
         snapshot_download(
-            repo_id=MODEL,
+            repo_id=hf_model,
             local_dir=local_dir,
             token=token,
             allow_patterns=["*.safetensors", "*.bin", "*.json", "*.txt", "*.model"],
@@ -168,14 +270,11 @@ def download_snapshot() -> list[str]:
     return files
 
 
-# ── mutation ───────────────────────────────────────────────────────────
-
-
-def _mutate_chat_template() -> tuple[int, int]:
+def _mutate_chat_template(hf_model: str) -> tuple[int, int]:
     """Insert MUTATION_STRING at the start of tokenizer_config.json's
     chat_template value. Returns (offset, length) so we can restore.
     """
-    path = os.path.join(_model_snapshot_dir(), MUTATED_FILENAME)
+    path = os.path.join(_model_snapshot_dir(hf_model), MUTATED_FILENAME)
     with open(path, "rb") as f:
         data = bytearray(f.read())
 
@@ -200,8 +299,8 @@ def _mutate_chat_template() -> tuple[int, int]:
     return insert_at, len(MUTATION_STRING)
 
 
-def _restore_byte(offset: int, length: int) -> None:
-    path = os.path.join(_model_snapshot_dir(), MUTATED_FILENAME)
+def _restore_byte(hf_model: str, offset: int, length: int) -> None:
+    path = os.path.join(_model_snapshot_dir(hf_model), MUTATED_FILENAME)
     with open(path, "rb") as f:
         data = bytearray(f.read())
     del data[offset:offset + length]
@@ -210,28 +309,80 @@ def _restore_byte(offset: int, length: int) -> None:
     log.info(f"Removed {length} bytes at offset {offset} in {MUTATED_FILENAME}")
 
 
-# ── image naming ───────────────────────────────────────────────────────
+def _assert_chat_template_mutated(name: str, expected: bool) -> None:
+    """Verify whether MUTATION_STRING is present in MUTATED_FILENAME inside the
+    container. Runs outside any timed window."""
+    r = subprocess.run(
+        ["sudo", "ctr", "tasks", "exec", "--exec-id", uuid.uuid4().hex[:8],
+         name, "cat", f"/{MUTATED_FILENAME}"],
+        capture_output=True, check=True,
+    )
+    found = MUTATION_STRING in r.stdout
+    if found != expected:
+        raise RuntimeError(
+            f"validation failed in {name}: expected mutated={expected}, got {found}"
+        )
+    log.result(f"  validation OK ({name}): mutated={found}")
 
 
-def _build_target(image_version: ImageVersion, mode: str = LAZY_MODE) -> str:
-    return f"{registry(CFG)}/{image_slug(SOURCE_IMAGE)}-{mode}-refresh:{image_version}"
+# ── multi-model mutation ────────────────────────────────────────────────
 
 
-def _pull_ref(image_version: ImageVersion, mode: str = LAZY_MODE) -> str:
-    return f"{registry(CFG)}/library/{image_slug(SOURCE_IMAGE)}-{mode}-refresh:{image_version}--0.0.0.0"
+def _mutate_model_files(model_files: list[str]) -> None:
+    """XOR the first byte of every file of the modified model (reversible)."""
+    for p in model_files:
+        xor_first_byte(p)
+    log.info(f"Mutated first byte of {len(model_files)} files of modified model")
 
 
-# ── TOC export ─────────────────────────────────────────────────────────
+def _assert_first_byte_mutated(
+    name: str, in_path: str, orig_byte: int, expected: bool,
+) -> None:
+    """Verify the first byte of a representative modified file inside the
+    container matches the expected image version. Runs outside any timed window."""
+    r = subprocess.run(
+        ["sudo", "ctr", "tasks", "exec", "--exec-id", uuid.uuid4().hex[:8],
+         name, "head", "-c", "1", in_path],
+        capture_output=True, check=True,
+    )
+    got = r.stdout[0] if r.stdout else None
+    want = (orig_byte ^ 0xFF) if expected else orig_byte
+    if got != want:
+        raise RuntimeError(
+            f"validation failed in {name}: {in_path} first byte expected "
+            f"{want} (mutated={expected}), got {got}"
+        )
+    log.result(f"  validation OK ({name}): mutated={expected}")
 
 
-def _repo(mode: str = LAZY_MODE) -> str:
-    return f"library/{image_slug(SOURCE_IMAGE)}-{mode}-refresh"
+# ── image naming ────────────────────────────────────────────────────────
 
 
-def _export_tocs(image_version: ImageVersion, toc_dir: str) -> list[str]:
+def _repo(exp: RefreshExperiment, mode: str = LAZY_MODE) -> str:
+    return f"library/{exp.name_slug}-{mode}-refresh"
+
+
+def _build_target(exp: RefreshExperiment, image_version: ImageVersion, mode: str = LAZY_MODE) -> str:
+    return f"{registry(CFG)}/{exp.name_slug}-{mode}-refresh:{image_version}"
+
+
+def _partition_tag(exp: RefreshExperiment) -> str:
+    """Full-content partition (all cols) — needed by OCI so no columns are
+    dropped; a no-op for stargz under noprefetch=true."""
+    return f"--0.0.0.{len(exp.groups) - 1}"
+
+
+def _pull_ref(exp: RefreshExperiment, image_version: ImageVersion, mode: str = LAZY_MODE) -> str:
+    return f"{registry(CFG)}/library/{exp.name_slug}-{mode}-refresh:{image_version}{_partition_tag(exp)}"
+
+
+# ── TOC export ───────────────────────────────────────────────────────────
+
+
+def _export_tocs(exp: RefreshExperiment, image_version: ImageVersion, toc_dir: str) -> list[str]:
     os.makedirs(toc_dir, exist_ok=True)
-    repo = _repo()
-    digests = fetch_layer_digests(registry(CFG), repo, f"{image_version}--0.0.0.0")
+    repo = _repo(exp)
+    digests = fetch_layer_digests(registry(CFG), repo, f"{image_version}{_partition_tag(exp)}")
     log.info(f"{image_version} layers: {[d[:19] for d in digests]}")
     for i, d in enumerate(digests):
         save_toc(
@@ -241,16 +392,16 @@ def _export_tocs(image_version: ImageVersion, toc_dir: str) -> list[str]:
     return digests
 
 
-# ── build helpers ──────────────────────────────────────────────────────
+# ── build helpers ────────────────────────────────────────────────────────
 
 
 def _build_version(
-    snapshot_files: list[str], image_version: ImageVersion, mode: str = LAZY_MODE,
+    exp: RefreshExperiment, image_version: ImageVersion, mode: str = LAZY_MODE,
 ) -> None:
-    target = _build_target(image_version, mode)
-    base = base_image(SOURCE_IMAGE, CFG, mode)
+    target = _build_target(exp, image_version, mode)
+    base = base_image(exp.base_image, CFG, mode)
 
-    write_2dfs_json([snapshot_files], SCRIPT_DIR)
+    write_2dfs_json(exp.groups, SCRIPT_DIR)
 
     cmd = tdfs_cmd(CFG, SCRIPT_DIR) + [
         "build", "--platforms", "linux/amd64",
@@ -268,32 +419,37 @@ def _build_version(
     log.result(f"Pushed {target}")
 
 
-# ── prepare ────────────────────────────────────────────────────────────
-
-
 def _build_mode_pair(
-    snapshot_files: list[str],
+    exp: RefreshExperiment,
     mode: str,
     artifacts_dir: str | None = None,
     toc_dir: str | None = None,
 ) -> None:
-    """Build and push before + after images for one mode (mutates tokenizer for
-    after, restores it in a finally block)."""
-    _build_version(snapshot_files, "before", mode)
+    """Build and push before + after images for one mode (mutates for after,
+    restores it in a finally block)."""
+    def _probe(when: str) -> None:
+        if exp.probe_disk_byte:
+            log.result(f"PROBE [{when}] rep first byte on disk = {exp.probe_disk_byte()}")
+
+    _probe("pre-before-build")
+    _build_version(exp, "before", mode)
     if artifacts_dir:
         snapshot_artifacts(SCRIPT_DIR, artifacts_dir)
     before_digests: list[str] = []
     if toc_dir:
-        before_digests = _export_tocs("before", toc_dir)
+        before_digests = _export_tocs(exp, "before", toc_dir)
 
-    offset, original = _mutate_chat_template()
+    _probe("post-before-build")
+    undo = exp.mutate()
+    _probe("post-mutate")
     try:
-        _build_version(snapshot_files, "after", mode)
+        _probe("pre-after-build")
+        _build_version(exp, "after", mode)
     finally:
-        _restore_byte(offset, original)
+        undo()
 
     if toc_dir:
-        after_digests = _export_tocs("after", toc_dir)
+        after_digests = _export_tocs(exp, "after", toc_dir)
         changed = [
             i for i in range(min(len(before_digests), len(after_digests)))
             if before_digests[i] != after_digests[i]
@@ -304,19 +460,19 @@ def _build_mode_pair(
         )
 
 
-# ── measurement helpers ────────────────────────────────────────────────
+# ── measurement helpers ──────────────────────────────────────────────────
 
 
-def _container_paths(snapshot_files: list[str]) -> list[str]:
+def _container_paths(files: list[str]) -> list[str]:
     """In-container paths: files land at /{basename} per write_2dfs_json layout."""
-    return [f"/{os.path.basename(p)}" for p in snapshot_files]
+    return [f"/{os.path.basename(p)}" for p in files]
 
 
 def _cat_all_in_container(name: str, in_paths: list[str]) -> float:
-    """Exec cat over all snapshot files inside container, return elapsed seconds."""
+    """Exec cat over all files inside container, return elapsed seconds."""
     exec_id = uuid.uuid4().hex[:8]
     files = " ".join(in_paths)
-    log.info(f"Reading {len(in_paths)} files in {name}: {in_paths}")
+    log.info(f"Reading {len(in_paths)} files in {name}")
     start = time.perf_counter()
     subprocess.run(
         ["sudo", "ctr", "tasks", "exec", "--exec-id", exec_id,
@@ -324,22 +480,6 @@ def _cat_all_in_container(name: str, in_paths: list[str]) -> float:
         check=True, capture_output=not log.VERBOSE,
     )
     return time.perf_counter() - start
-
-
-def _assert_mutated(name: str, expected: bool) -> None:
-    """Verify whether MUTATION_STRING is present in MUTATED_FILENAME inside the
-    container. Runs outside any timed window."""
-    r = subprocess.run(
-        ["sudo", "ctr", "tasks", "exec", "--exec-id", uuid.uuid4().hex[:8],
-         name, "cat", f"/{MUTATED_FILENAME}"],
-        capture_output=True, check=True,
-    )
-    found = MUTATION_STRING in r.stdout
-    if found != expected:
-        raise RuntimeError(
-            f"validation failed in {name}: expected mutated={expected}, got {found}"
-        )
-    log.result(f"  validation OK ({name}): mutated={found}")
 
 
 def _snapshot_bytes() -> dict[str, dict[str, int]]:
@@ -372,8 +512,8 @@ def _fmt_bytes(n: float) -> str:
     return f"{n:.1f}TB"
 
 
-def _model_size_str() -> str | None:
-    d = _model_snapshot_dir()
+def _model_size_str(hf_model: str) -> str | None:
+    d = _model_snapshot_dir(hf_model)
     if not os.path.isdir(d):
         return None
     total = 0
@@ -381,6 +521,11 @@ def _model_size_str() -> str | None:
         p = os.path.join(d, f)
         if os.path.isfile(p):
             total += os.path.getsize(p)
+    return _fmt_bytes(total) if total > 0 else None
+
+
+def _groups_size_str(groups: list[list[str]]) -> str | None:
+    total = sum(os.path.getsize(p) for g in groups for p in g)
     return _fmt_bytes(total) if total > 0 else None
 
 
@@ -403,7 +548,7 @@ def _log_bytes_fetched(label: str, bytes_fetched: dict[str, dict[str, int]]) -> 
                    f"layers={len(bytes_fetched.get(op, {}))}")
 
 
-def _setup(in_paths: list[str], mode: str = LAZY_MODE) -> SetupResult:
+def _setup(exp: RefreshExperiment, mode: str = LAZY_MODE) -> SetupResult:
     """Clear stargz cache, pull before-image, start container, warm page cache
     via cat.
 
@@ -418,9 +563,11 @@ def _setup(in_paths: list[str], mode: str = LAZY_MODE) -> SetupResult:
     lazy = mode == LAZY_MODE
     snapshotter = "stargz" if lazy else "overlayfs"
     clear_stargz_cache()
+    if not lazy:
+        clear_overlayfs_cache()
     time.sleep(PROM_SETTLE_S)
     bytes_before = _snapshot_bytes()
-    before_ref = _pull_ref("before", mode)
+    before_ref = _pull_ref(exp, "before", mode)
     log.info(f"Pulling before-image (setup, {mode}): {before_ref}")
     if lazy:
         pull_cmd = ["sudo", "ctr-remote", "images", "rpull",
@@ -432,9 +579,9 @@ def _setup(in_paths: list[str], mode: str = LAZY_MODE) -> SetupResult:
     name = _next_container_name("refresh-before")
     start_container(before_ref, name, snapshotter=snapshotter)
 
-    cold_t = _cat_all_in_container(name, in_paths)
-    warm_t = _cat_all_in_container(name, in_paths)
-    _assert_mutated(name, expected=False)
+    cold_t = _cat_all_in_container(name, exp.in_paths)
+    warm_t = _cat_all_in_container(name, exp.in_paths)
+    exp.assert_mutated(name, False)
     time.sleep(PROM_SETTLE_S)
     setup_bytes_fetched = _bytes_fetched_delta(bytes_before, _snapshot_bytes())
     log.result(
@@ -451,21 +598,24 @@ def _setup(in_paths: list[str], mode: str = LAZY_MODE) -> SetupResult:
     return SetupResult(name, cold_t, warm_t, bytes_fetched=setup_bytes_fetched)
 
 
-def _oci_after_layer_bytes() -> dict[str, int]:
+def _oci_after_layer_bytes(exp: RefreshExperiment) -> dict[str, int]:
     """Per-layer compressed sizes of the whole OCI after-image, from the
     registry manifest. Represents the full image a no-lazy pull downloads."""
-    return fetch_layer_sizes(registry(CFG), _repo(NO_LAZY_MODE), "after--0.0.0.0")
+    return fetch_layer_sizes(
+        registry(CFG), _repo(exp, NO_LAZY_MODE),
+        f"after{_partition_tag(exp)}",
+    )
 
 
 def _run_manual_oci_strategy(
-    in_paths: list[str], log_path: str | None = None,
+    exp: RefreshExperiment, log_path: str | None = None,
 ) -> StrategyResult:
     """No lazy loading: stop -> full pull after-image -> run -> read.
     Mirrors manual-lazy but pulls the whole image over overlayfs."""
     log_window_start = time.time()
-    setup = _setup(in_paths, NO_LAZY_MODE)
+    setup = _setup(exp, NO_LAZY_MODE)
     name = setup.name
-    after_ref = _pull_ref("after", NO_LAZY_MODE)
+    after_ref = _pull_ref(exp, "after", NO_LAZY_MODE)
 
     # overlayfs rootfs unmounts cheaply, so this stop should be fast (vs stargz FUSE).
     kill_t, task_del_t, container_del_t = stop_container(name)
@@ -482,9 +632,9 @@ def _run_manual_oci_strategy(
     start_container(after_ref, name2, snapshotter="overlayfs")
     run_t = time.perf_counter() - t0
 
-    read_t = _cat_all_in_container(name2, in_paths)
-    _assert_mutated(name2, expected=True)
-    update_bytes_fetched = {OP_TYPES[0]: _oci_after_layer_bytes()}
+    read_t = _cat_all_in_container(name2, exp.in_paths)
+    exp.assert_mutated(name2, True)
+    update_bytes_fetched = {OP_TYPES[0]: _oci_after_layer_bytes(exp)}
     stop_container(name2)
     log.result(
         f"  manual-oci: stop={stop_t:.2f}s (kill={kill_t:.2f} task-del={task_del_t:.2f} "
@@ -510,13 +660,13 @@ def _run_manual_oci_strategy(
 
 
 def _run_manual_lazy_strategy(
-    in_paths: list[str], log_path: str | None = None,
+    exp: RefreshExperiment, log_path: str | None = None,
 ) -> StrategyResult:
     """stop -> rpull after-image -> run -> read."""
     log_window_start = time.time()
-    setup = _setup(in_paths)
+    setup = _setup(exp)
     name = setup.name
-    after_ref = _pull_ref("after")
+    after_ref = _pull_ref(exp, "after")
 
     update_before = _snapshot_bytes()
 
@@ -535,8 +685,8 @@ def _run_manual_lazy_strategy(
     start_container(after_ref, name2)
     run_t = time.perf_counter() - t0
 
-    read_t = _cat_all_in_container(name2, in_paths)
-    _assert_mutated(name2, expected=True)
+    read_t = _cat_all_in_container(name2, exp.in_paths)
+    exp.assert_mutated(name2, True)
     time.sleep(PROM_SETTLE_S)
     update_bytes_fetched = _bytes_fetched_delta(update_before, _snapshot_bytes())
     stop_container(name2)
@@ -564,14 +714,14 @@ def _run_manual_lazy_strategy(
 
 
 def _run_refresh_strategy(
-    in_paths: list[str], log_path: str | None = None,
+    exp: RefreshExperiment, log_path: str | None = None,
 ) -> StrategyResult:
     """ctr-remote refresh before-image after-image -> read."""
     log_window_start = time.time()
-    setup = _setup(in_paths)
+    setup = _setup(exp)
     name = setup.name
-    before_ref = _pull_ref("before")
-    after_ref = _pull_ref("after")
+    before_ref = _pull_ref(exp, "before")
+    after_ref = _pull_ref(exp, "after")
 
     update_before = _snapshot_bytes()
 
@@ -582,8 +732,8 @@ def _run_refresh_strategy(
     )
     refresh_t = time.perf_counter() - t0
 
-    read_t = _cat_all_in_container(name, in_paths)
-    _assert_mutated(name, expected=True)
+    read_t = _cat_all_in_container(name, exp.in_paths)
+    exp.assert_mutated(name, True)
     time.sleep(PROM_SETTLE_S)
     update_bytes_fetched = _bytes_fetched_delta(update_before, _snapshot_bytes())
     stop_container(name)
@@ -601,67 +751,21 @@ def _run_refresh_strategy(
     )
 
 
-def _time_row(
-    run: int, strategy: UpdateStrategy, mode: str, r: StrategyResult,
-) -> RefreshTimeRow:
-    return RefreshTimeRow(
-        schema_version=SCHEMA_VERSION,
-        model=MODEL,
-        base_image=SOURCE_IMAGE,
-        mode=mode,
-        run=run,
-        update_strategy=strategy,
-        setup_cold_read_s=r.setup.cold_read_s if r.setup else None,
-        setup_warm_read_s=r.setup.warm_read_s if r.setup else None,
-        stop_total_s=r.stop_total_s,
-        stop_kill_s=r.stop_kill_s,
-        stop_task_delete_s=r.stop_task_delete_s,
-        stop_container_delete_s=r.stop_container_delete_s,
-        pull_s=r.pull_s,
-        run_s=r.run_s,
-        refresh_s=r.refresh_s,
-        read_s=r.read_s,
-        total_s=r.total_s,
-    )
-
-
-def _bytes_rows(
-    run: int, update_strategy: UpdateStrategy, mode: str, experiment_phase: ExperimentPhase, bytes_fetched: dict[str, dict[str, int]],
-) -> list[RefreshBytesRow]:
-    rows: list[RefreshBytesRow] = []
-    for op in OP_TYPES:
-        for layer, b in sorted(bytes_fetched.get(op, {}).items()):
-            rows.append(RefreshBytesRow(
-                schema_version=SCHEMA_VERSION,
-                model=MODEL,
-                base_image=SOURCE_IMAGE,
-                mode=mode,
-                run=run,
-                update_strategy=update_strategy,
-                experiment_phase=experiment_phase,
-                layer=layer,
-                op_type=op,
-                bytes=b,
-            ))
-    return rows
-
-
 def measure_refresh(
-    snapshot_files: list[str], execution_ts: str,
+    exp: RefreshExperiment, execution_ts: str,
     strategy_names: list[str] | None = None,
-) -> tuple[list[RefreshTimeRow], list[RefreshBytesRow]]:
-    in_paths = _container_paths(snapshot_files)
-    time_rows: list[RefreshTimeRow] = []
-    bytes_rows: list[RefreshBytesRow] = []
+) -> tuple[list, list]:
+    time_rows: list = []
+    bytes_rows: list = []
 
     def record(run: int, strategy: UpdateStrategy, mode: str, r: StrategyResult) -> None:
-        time_rows.append(_time_row(run, strategy, mode, r))
+        time_rows.append(exp.make_time_row(run, strategy, mode, r))
         if r.setup is not None:
             bytes_rows.extend(
-                _bytes_rows(run, strategy, mode, "setup", r.setup.bytes_fetched)
+                exp.make_bytes_rows(run, strategy, mode, "setup", r.setup.bytes_fetched)
             )
         bytes_rows.extend(
-            _bytes_rows(run, strategy, mode, "update", r.update_bytes_fetched)
+            exp.make_bytes_rows(run, strategy, mode, "update", r.update_bytes_fetched)
         )
 
     all_strategies: list[tuple[UpdateStrategy, str, StrategyRunner]] = [
@@ -678,18 +782,156 @@ def measure_refresh(
         rot = run % len(active)
         for strategy, mode, runner in active[rot:] + active[:rot]:
             log_path = refresh_log_path(
-                SCRIPT_DIR, MODEL, SOURCE_IMAGE, strategy, run, execution_ts,
+                SCRIPT_DIR, exp.label, exp.base_image, strategy, run, execution_ts,
             )
-            record(run, strategy, mode, runner(in_paths, log_path))
+            record(run, strategy, mode, runner(exp, log_path))
             time.sleep(CFG.pull_cooldown)
 
     return time_rows, bytes_rows
 
 
-# ── output ─────────────────────────────────────────────────────────────
+# ── prepare ───────────────────────────────────────────────────────────────
 
 
-def print_results(time_rows: list[RefreshTimeRow]) -> None:
+def prepare_single(exp: SingleModel) -> RefreshExperiment:
+    hf_model, source_image = exp.hf_model, exp.base_image
+    snapshot_files = download_snapshot(hf_model)
+    groups = [snapshot_files]
+    in_paths = _container_paths(snapshot_files)
+    meta = {
+        "model": hf_model,
+        "base_image": source_image,
+        "mode": LAZY_MODE,
+        "splits": _snapshot_stats(snapshot_files),
+        "mutation": {
+            "filename": MUTATED_FILENAME,
+            "target": MUTATED_FIELD,
+            "inserted_string": MUTATION_STRING.decode("utf-8", "replace"),
+        },
+    }
+
+    def make_time_row(run, strategy, mode, r: StrategyResult) -> RefreshTimeRow:
+        return RefreshTimeRow(
+            schema_version=SCHEMA_VERSION, model=hf_model, base_image=source_image,
+            mode=mode, run=run, update_strategy=strategy,
+            setup_cold_read_s=r.setup.cold_read_s if r.setup else None,
+            setup_warm_read_s=r.setup.warm_read_s if r.setup else None,
+            stop_total_s=r.stop_total_s, stop_kill_s=r.stop_kill_s,
+            stop_task_delete_s=r.stop_task_delete_s,
+            stop_container_delete_s=r.stop_container_delete_s,
+            pull_s=r.pull_s, run_s=r.run_s, refresh_s=r.refresh_s,
+            read_s=r.read_s, total_s=r.total_s,
+        )
+
+    def make_bytes_rows(run, strategy, mode, phase, bytes_fetched) -> list[RefreshBytesRow]:
+        rows: list[RefreshBytesRow] = []
+        for op in OP_TYPES:
+            for layer, b in sorted(bytes_fetched.get(op, {}).items()):
+                rows.append(RefreshBytesRow(
+                    schema_version=SCHEMA_VERSION, model=hf_model, base_image=source_image,
+                    mode=mode, run=run, update_strategy=strategy,
+                    experiment_phase=phase, layer=layer, op_type=op, bytes=b,
+                ))
+        return rows
+
+    def mutate() -> Callable[[], None]:
+        offset, length = _mutate_chat_template(hf_model)
+        return lambda: _restore_byte(hf_model, offset, length)
+
+    return RefreshExperiment(
+        label=hf_model, base_image=source_image, name_slug=image_slug(source_image),
+        is_multi=False, groups=groups, in_paths=in_paths,
+        size_str=_model_size_str(hf_model), mutate=mutate,
+        assert_mutated=_assert_chat_template_mutated,
+        meta=meta, make_time_row=make_time_row, make_bytes_rows=make_bytes_rows,
+    )
+
+
+def prepare_multi(exp: MultiModel) -> RefreshExperiment:
+    if exp.modified_model not in exp.split_dirs:
+        raise ValueError(
+            f"modified_model {exp.modified_model!r} not in split_dirs {exp.split_dirs}"
+        )
+    models = cv.prepare_cv_splits(exp.label, exp.split_dirs, SCRIPT_DIR)
+    groups, _ = cv.pack_cv(models, [1] * len(models))  # one allotment per model
+    names = [m.name for m in models]
+    cv.print_cv_packing_table(exp.label, models, [100])
+
+    modified_index = exp.split_dirs.index(exp.modified_model)
+    modified_files = groups[modified_index]
+    in_paths = _container_paths([p for g in groups for p in g])
+
+    rep = modified_files[0]
+    with open(rep, "rb") as f:
+        orig_byte = f.read(1)[0]
+    rep_in_path = f"/{os.path.basename(rep)}"
+
+    meta = {
+        "label": exp.label,
+        "base_image": exp.base_image,
+        "mode": LAZY_MODE,
+        "models": names,
+        "modified_model": exp.modified_model,
+        "splits": cv.cv_split_stats(models),
+        "mutation": {
+            "modified_model": exp.modified_model,
+            "num_files": len(modified_files),
+            "method": "xor first byte of every file (reversible)",
+        },
+    }
+
+    def make_time_row(run, strategy, mode, r: StrategyResult) -> RefreshTimeRowMultimodal:
+        return RefreshTimeRowMultimodal(
+            schema_version=MULTI_SCHEMA_VERSION, label=exp.label, base_image=exp.base_image,
+            num_models=len(names), models="|".join(names), modified_model=exp.modified_model,
+            mode=mode, run=run, update_strategy=strategy,
+            setup_cold_read_s=r.setup.cold_read_s if r.setup else None,
+            setup_warm_read_s=r.setup.warm_read_s if r.setup else None,
+            stop_total_s=r.stop_total_s, stop_kill_s=r.stop_kill_s,
+            stop_task_delete_s=r.stop_task_delete_s,
+            stop_container_delete_s=r.stop_container_delete_s,
+            pull_s=r.pull_s, run_s=r.run_s, refresh_s=r.refresh_s,
+            read_s=r.read_s, total_s=r.total_s,
+        )
+
+    def make_bytes_rows(run, strategy, mode, phase, bytes_fetched) -> list[RefreshBytesRowMultimodal]:
+        rows: list[RefreshBytesRowMultimodal] = []
+        for op in OP_TYPES:
+            for layer, b in sorted(bytes_fetched.get(op, {}).items()):
+                rows.append(RefreshBytesRowMultimodal(
+                    schema_version=MULTI_SCHEMA_VERSION, label=exp.label, base_image=exp.base_image,
+                    num_models=len(names), models="|".join(names),
+                    modified_model=exp.modified_model, mode=mode, run=run,
+                    update_strategy=strategy, experiment_phase=phase,
+                    layer=layer, op_type=op, bytes=b,
+                ))
+        return rows
+
+    def mutate() -> Callable[[], None]:
+        _mutate_model_files(modified_files)
+        return lambda: _mutate_model_files(modified_files)  # xor is its own inverse
+
+    def probe_disk_byte() -> int | None:
+        with open(rep, "rb") as f:
+            b = f.read(1)
+        return b[0] if b else None
+
+    return RefreshExperiment(
+        label=exp.label, base_image=exp.base_image, name_slug=image_slug(exp.label),
+        is_multi=True, groups=groups, in_paths=in_paths, size_str=_groups_size_str(groups),
+        mutate=mutate,
+        assert_mutated=lambda name, expected: _assert_first_byte_mutated(
+            name, rep_in_path, orig_byte, expected,
+        ),
+        meta=meta, make_time_row=make_time_row, make_bytes_rows=make_bytes_rows,
+        probe_disk_byte=probe_disk_byte,
+    )
+
+
+# ── output ───────────────────────────────────────────────────────────────
+
+
+def print_results(time_rows: list) -> None:
     log.result(f"\n=== Refresh-vs-Baseline Results (mean ± stddev, n={N_RUNS} runs) ===")
 
     manual_lazy = [r for r in time_rows if r.update_strategy == "manual-lazy"]
@@ -726,7 +968,7 @@ def print_results(time_rows: list[RefreshTimeRow]) -> None:
         )
 
 
-def _format_time_row(r: RefreshTimeRow) -> dict:
+def _format_time_row(r) -> dict:
     row = asdict(r)
     for k, v in row.items():
         if isinstance(v, float):
@@ -736,35 +978,29 @@ def _format_time_row(r: RefreshTimeRow) -> dict:
     return row
 
 
-def _write_time_rows(output_path: str, rows: list[RefreshTimeRow]) -> None:
+def _write_time_rows(output_path: str, rows: list) -> None:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fieldnames = [f.name for f in fields(RefreshTimeRow)]
+    fieldnames = [f.name for f in fields(type(rows[0]))]
     write_csv(output_path, fieldnames, [_format_time_row(r) for r in rows])
 
 
-def _write_bytes_rows(output_path: str, rows: list[RefreshBytesRow]) -> None:
+def _write_bytes_rows(output_path: str, rows: list) -> None:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fieldnames = [f.name for f in fields(RefreshBytesRow)]
+    fieldnames = [f.name for f in fields(type(rows[0]))]
     write_csv(output_path, fieldnames, [asdict(r) for r in rows])
 
 
-def save_results_csv(rows: list[RefreshTimeRow], execution_ts: str) -> None:
-    _write_time_rows(refresh_csv_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, execution_ts), rows)
+def save_results_csv(exp: RefreshExperiment, rows: list, execution_ts: str) -> None:
+    if rows:
+        _write_time_rows(refresh_csv_path(SCRIPT_DIR, exp.label, exp.base_image, execution_ts), rows)
 
 
-def save_merged_csv(rows: list[RefreshTimeRow], execution_ts: str) -> None:
-    _write_time_rows(refresh_merged_csv_path(SCRIPT_DIR, execution_ts), rows)
+def save_bytes_csv(exp: RefreshExperiment, rows: list, execution_ts: str) -> None:
+    if rows:
+        _write_bytes_rows(refresh_bytes_csv_path(SCRIPT_DIR, exp.label, exp.base_image, execution_ts), rows)
 
 
-def save_bytes_csv(rows: list[RefreshBytesRow], execution_ts: str) -> None:
-    _write_bytes_rows(refresh_bytes_csv_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, execution_ts), rows)
-
-
-def save_merged_bytes_csv(rows: list[RefreshBytesRow], execution_ts: str) -> None:
-    _write_bytes_rows(refresh_merged_bytes_csv_path(SCRIPT_DIR, execution_ts), rows)
-
-
-# ── chart ──────────────────────────────────────────────────────────────
+# ── chart ─────────────────────────────────────────────────────────────────
 
 
 PHASE_COLORS = {
@@ -776,7 +1012,7 @@ PHASE_COLORS = {
 }
 
 
-def plot(time_rows: list[RefreshTimeRow], execution_ts: str) -> None:
+def plot(exp: RefreshExperiment, time_rows: list, execution_ts: str) -> None:
     fig, ax = plt.subplots(figsize=(10, 4.2))
 
     # (y, label, strategy, phase keys, per-row value extractor)
@@ -813,9 +1049,7 @@ def plot(time_rows: list[RefreshTimeRow], execution_ts: str) -> None:
     ax.set_yticks(y_positions)
     ax.set_yticklabels(labels)
     ax.set_xlabel("Elapsed time (s)")
-    ax.set_title(
-        f"model access time after config update"
-    )
+    ax.set_title("model access time after config update")
     ax.invert_yaxis()
     ax.grid(True, linestyle="--", alpha=0.3, axis="x")
 
@@ -830,14 +1064,14 @@ def plot(time_rows: list[RefreshTimeRow], execution_ts: str) -> None:
         ncol=5, fontsize=9, frameon=False,
     )
 
-    figure_footer(fig, MODEL, SOURCE_IMAGE, model_size=_model_size_str())
-    output_path = refresh_chart_path(SCRIPT_DIR, MODEL, SOURCE_IMAGE, execution_ts)
+    figure_footer(fig, exp.label, exp.base_image, model_size=exp.size_str)
+    output_path = refresh_chart_path(SCRIPT_DIR, exp.label, exp.base_image, execution_ts)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout(rect=(0, 0.12, 1, 1))
     save_figure(fig, output_path)
 
 
-def plot_bytes(bytes_rows: list[RefreshBytesRow], execution_ts: str) -> None:
+def plot_bytes(exp: RefreshExperiment, bytes_rows: list, execution_ts: str) -> None:
     """One bar per (update_strategy, experiment_phase). Bytes = on_demand_bytes_fetched, mean across runs."""
     op = OP_TYPES[0]
     groups = [
@@ -888,15 +1122,12 @@ def plot_bytes(bytes_rows: list[RefreshBytesRow], execution_ts: str) -> None:
     ax.set_xticklabels([g[2] for g in groups], fontsize=10)
 
     ax.set_ylabel("GiB")
-    ax.set_title(
-        f"bytes fetched after config update",
-        pad=24,
-    )
+    ax.set_title("bytes fetched after config update", pad=24)
     ax.grid(True, linestyle="--", alpha=0.3, axis="y")
 
-    figure_footer(fig, MODEL, SOURCE_IMAGE, fontsize=7, model_size=_model_size_str())
+    figure_footer(fig, exp.label, exp.base_image, fontsize=7, model_size=exp.size_str)
     output_path = refresh_bytes_chart_path(
-        SCRIPT_DIR, MODEL, SOURCE_IMAGE, execution_ts
+        SCRIPT_DIR, exp.label, exp.base_image, execution_ts
     )
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.tight_layout(rect=(0, 0.10, 1, 1))
@@ -906,42 +1137,29 @@ def plot_bytes(bytes_rows: list[RefreshBytesRow], execution_ts: str) -> None:
 # ── main ───────────────────────────────────────────────────────────────
 
 
-def main(execution_ts: str | None = None) -> None:
-    if execution_ts is None:
-        execution_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-    run_started = datetime.now(timezone.utc)
-    log.set_verbose(VERBOSE)
-    log.info(f"Model: {MODEL}")
-    log.info(f"Mode: {LAZY_MODE}")
-    log.info(f"N_RUNS: {N_RUNS}")
-
-    ensure_buildkit()
-    prepare_local_registry(SOURCE_IMAGE, registry(CFG))
-
-    stargz_config_path = refresh_stargz_config_path(SCRIPT_DIR, execution_ts)
-    os.makedirs(os.path.dirname(stargz_config_path), exist_ok=True)
-    with open(stargz_config_path, "w") as f:
-        f.write(read_base_config())
-    log.result(f"Stargz config snapshot saved to {stargz_config_path}")
-
-    artifacts_dir = refresh_artifacts_dir(
-        SCRIPT_DIR, execution_ts, MODEL, SOURCE_IMAGE, build_mode(LAZY_MODE)
-    )
-    toc_dir = os.path.join(artifacts_dir, "toc")
-    log.result(f"TOC artifacts -> {toc_dir}")
-
-    snapshot_files = download_snapshot()
+def _run_experiment(
+    exp: RefreshExperiment, execution_ts: str,
+) -> tuple[list, list]:
+    """Two-phase build+measure for one prepared experiment: stargz phase
+    (manual-lazy + refresh), then OCI phase (manual-oci)."""
+    prepare_local_registry(exp.base_image, registry(CFG))
     clear_2dfs_cache(CFG)
     clear_registry(CFG, preserve_base=True, verbose=False)
     clear_artifacts(SCRIPT_DIR)
 
+    artifacts_dir = refresh_artifacts_dir(
+        SCRIPT_DIR, execution_ts, exp.label, exp.base_image, build_mode(LAZY_MODE)
+    )
+    toc_dir = os.path.join(artifacts_dir, "toc")
+    log.result(f"TOC artifacts -> {toc_dir}")
+
     # ── phase 1: stargz — build, measure, then free local caches ──────
     log.result("=== Phase 1: stargz builds (manual-lazy + refresh) ===")
     os.makedirs(toc_dir, exist_ok=True)
-    _build_mode_pair(snapshot_files, LAZY_MODE, artifacts_dir=artifacts_dir, toc_dir=toc_dir)
+    _build_mode_pair(exp, LAZY_MODE, artifacts_dir=artifacts_dir, toc_dir=toc_dir)
 
     time_rows, bytes_rows = measure_refresh(
-        snapshot_files, execution_ts, ["manual-lazy", "refresh"]
+        exp, execution_ts, ["manual-lazy", "refresh"]
     )
 
     log.result("=== Phase 1 cleanup: 2dfs cache + buildkit ===")
@@ -951,24 +1169,66 @@ def main(execution_ts: str | None = None) -> None:
 
     # ── phase 2: OCI — build, measure ─────────────────────────────────
     log.result("=== Phase 2: OCI builds (manual-oci) ===")
-    _build_mode_pair(snapshot_files, NO_LAZY_MODE)
+    _build_mode_pair(exp, NO_LAZY_MODE)
 
-    time_rows_2, bytes_rows_2 = measure_refresh(
-        snapshot_files, execution_ts, ["manual-oci"]
-    )
+    time_rows_2, bytes_rows_2 = measure_refresh(exp, execution_ts, ["manual-oci"])
     time_rows.extend(time_rows_2)
     bytes_rows.extend(bytes_rows_2)
 
     clear_registry(CFG, verbose=False, preserve_base=True)
-    print_results(time_rows)
-    save_results_csv(time_rows, execution_ts)
-    save_bytes_csv(bytes_rows, execution_ts)
-    if time_rows:
-        save_merged_csv(time_rows, execution_ts)
-    if bytes_rows:
-        save_merged_bytes_csv(bytes_rows, execution_ts)
-    plot(time_rows, execution_ts)
-    plot_bytes(bytes_rows, execution_ts)
+    return time_rows, bytes_rows
+
+
+def main(execution_ts: str | None = None) -> None:
+    if execution_ts is None:
+        execution_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    run_started = datetime.now(timezone.utc)
+    log.set_verbose(VERBOSE)
+    log.info(f"Mode: {LAZY_MODE}")
+    log.info(f"N_RUNS: {N_RUNS}")
+
+    ensure_buildkit()
+
+    stargz_config_path = refresh_stargz_config_path(SCRIPT_DIR, execution_ts)
+    os.makedirs(os.path.dirname(stargz_config_path), exist_ok=True)
+    with open(stargz_config_path, "w") as f:
+        f.write(read_base_config())
+    log.result(f"Stargz config snapshot saved to {stargz_config_path}")
+
+    all_single_time: list = []
+    all_single_bytes: list = []
+    all_multi_time: list = []
+    all_multi_bytes: list = []
+    experiments_meta: list[dict] = []
+
+    for raw in EXPERIMENTS:
+        prepared = prepare_multi(raw) if isinstance(raw, MultiModel) else prepare_single(raw)
+        log.result(f"\n===== Experiment: {prepared.label} / {prepared.base_image} =====")
+        experiments_meta.append(prepared.meta)
+
+        time_rows, bytes_rows = _run_experiment(prepared, execution_ts)
+
+        print_results(time_rows)
+        save_results_csv(prepared, time_rows, execution_ts)
+        save_bytes_csv(prepared, bytes_rows, execution_ts)
+        plot(prepared, time_rows, execution_ts)
+        plot_bytes(prepared, bytes_rows, execution_ts)
+
+        if prepared.is_multi:
+            all_multi_time.extend(time_rows)
+            all_multi_bytes.extend(bytes_rows)
+        else:
+            all_single_time.extend(time_rows)
+            all_single_bytes.extend(bytes_rows)
+
+    if all_single_time:
+        _write_time_rows(refresh_merged_csv_path(SCRIPT_DIR, execution_ts), all_single_time)
+    if all_single_bytes:
+        _write_bytes_rows(refresh_merged_bytes_csv_path(SCRIPT_DIR, execution_ts), all_single_bytes)
+    if all_multi_time:
+        _write_time_rows(refresh_multimodel_merged_csv_path(SCRIPT_DIR, execution_ts), all_multi_time)
+    if all_multi_bytes:
+        _write_bytes_rows(refresh_multimodel_merged_bytes_csv_path(SCRIPT_DIR, execution_ts), all_multi_bytes)
 
     write_run_json(
         refresh_run_metadata_path(SCRIPT_DIR, execution_ts),
@@ -982,17 +1242,7 @@ def main(execution_ts: str | None = None) -> None:
             "update_strategies": ["manual-lazy", "manual-oci", "refresh"],
             "op_types": OP_TYPES,
             "prom_settle_s": PROM_SETTLE_S,
-            "mutation": {
-                "filename": MUTATED_FILENAME,
-                "target": "chat_template",
-                "inserted_string": MUTATION_STRING.decode("utf-8", "replace"),
-            },
-            "experiments": [{
-                "model": MODEL,
-                "base_image": SOURCE_IMAGE,
-                "mode": LAZY_MODE,
-                "splits": _snapshot_stats(snapshot_files),
-            }],
+            "experiments": experiments_meta,
         },
     )
 

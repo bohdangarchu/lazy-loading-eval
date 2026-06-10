@@ -6,13 +6,15 @@ import time
 
 from shared import log
 
-_JOURNAL_KV_RE = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\S+)')
+JOURNAL_KV_REGEX = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\S+)')
+STARGZ_ROOT = "/var/lib/containerd-stargz-grpc"
+OVERLAYFS_ROOT = "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs"
 
 
 def parse_journal_kv(text: str) -> dict[str, str]:
     """Parse a logrus-formatted log line into a key→value dict."""
     result = {}
-    for m in _JOURNAL_KV_RE.finditer(text):
+    for m in JOURNAL_KV_REGEX.finditer(text):
         result[m.group(1)] = m.group(2).strip('"')
     return result
 
@@ -56,9 +58,6 @@ def clear_2dfs_cache(cfg) -> None:
         subprocess.run(["sudo", "rm", "-rf", f"{home}/{sub}"], check=True)
 
 
-STARGZ_ROOT = "/var/lib/containerd-stargz-grpc"
-
-
 def clear_stargz_cache() -> None:
     """Full stargz wipe: unmount FUSE, rm -rf stargz root, restart containerd."""
     log.info("Clearing stargz cache...")
@@ -77,6 +76,26 @@ def clear_stargz_cache() -> None:
     )
     subprocess.run("sudo systemctl start stargz-snapshotter", shell=True, check=True)
     subprocess.run("sudo systemctl restart containerd", shell=True, check=True)
+
+
+def clear_overlayfs_cache() -> None:
+    """Wipe the overlayfs snapshotter state. containerd must be stopped and the
+    overlay mounts unmounted first, otherwise live mounts get partially removed
+    and later pulls hit 'file exists' on snapshot rename. Pair with
+    clear_stargz_cache (which drops meta.db) before an overlayfs pull so the two
+    snapshotter states stay consistent."""
+    log.info("Clearing overlayfs cache...")
+    subprocess.run("sudo systemctl stop containerd", shell=True, check=True)
+    subprocess.run(
+        f"grep '{OVERLAYFS_ROOT}/snapshots' /proc/mounts"
+        " | awk '{print $2}' | sort -r | xargs -r sudo umount -l",
+        shell=True, check=True,
+    )
+    subprocess.run(
+        f"sudo bash -c 'rm -rf {OVERLAYFS_ROOT}/metadata.db {OVERLAYFS_ROOT}/snapshots/*'",
+        shell=True, check=True,
+    )
+    subprocess.run("sudo systemctl start containerd", shell=True, check=True)
 
 
 def prune_buildkit() -> None:

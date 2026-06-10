@@ -22,11 +22,11 @@ def run_phases():
     # log.result("=== Phase 1: Build Performance ===")
     # bm.main()
 
-    log.result("=== Phase 2: Build Rebuild Performance ===")
-    bmr.main()
+    # log.result("=== Phase 2: Build Rebuild Performance ===")
+    # bmr.main()
 
-    log.result("=== Phase 2b: CV Multi-Model Rebuild Performance ===")
-    bcr.main()
+    # log.result("=== Phase 2b: CV Multi-Model Rebuild Performance ===")
+    # bcr.main()
 
     # log.result("=== Transition: clearing build artifacts ===")
     # cleanup_build_artifacts(paths.build_perf_dir(_BENCHMARK_DIR), cfg)
@@ -34,8 +34,8 @@ def run_phases():
     # log.result("=== Phase 3: Pull Performance ===")
     # pm.main()
 
-    # log.result("=== Phase 4: Refresh Performance ===")
-    # pmr.main()
+    log.result("=== Phase 4: Refresh Performance ===")
+    pmr.main()
 
     # log.result("=== Final cleanup ===")
     # cleanup_pull_artifacts(pm.EXPERIMENTS, paths.pull_perf_dir(_BENCHMARK_DIR), cfg)

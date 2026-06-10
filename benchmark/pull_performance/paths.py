@@ -194,6 +194,12 @@ def refresh_merged_csv_path(base_dir: str, execution_ts: str) -> str:
 def refresh_merged_bytes_csv_path(base_dir: str, execution_ts: str) -> str:
     return os.path.join(refresh_run_dir(base_dir, execution_ts), "merged_bytes.csv")
 
+def refresh_multimodel_merged_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(refresh_run_dir(base_dir, execution_ts), "merged_multimodel.csv")
+
+def refresh_multimodel_merged_bytes_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(refresh_run_dir(base_dir, execution_ts), "merged_multimodel_bytes.csv")
+
 def refresh_stargz_config_path(base_dir: str, execution_ts: str) -> str:
     return os.path.join(refresh_run_dir(base_dir, execution_ts), "stargz-config.toml")
 

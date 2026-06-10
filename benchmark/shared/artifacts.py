@@ -52,6 +52,17 @@ def mutate_safetensors(path: str) -> None:
         f.write(bytes([b[0] ^ 0xFF]))
 
 
+def xor_first_byte(path: str) -> None:
+    """XOR the first byte of the file with 0xFF. Format-agnostic (works on .h5,
+    .json, etc.); calling twice restores original content."""
+    with open(path, "r+b") as f:
+        b = f.read(1)
+        if not b:
+            return
+        f.seek(0)
+        f.write(bytes([b[0] ^ 0xFF]))
+
+
 def chunks_to_groups(chunk_paths: list[str], num_layers: int) -> list[list[str]]:
     # Partition `chunk_paths` into `num_layers` consecutive groups for split-capacity
     # benchmarks. When len(chunks) is not divisible by num_layers (75%-capacity case, e.g. 12 chunks → 9 layers), 
