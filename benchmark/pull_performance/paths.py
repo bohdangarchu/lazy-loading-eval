@@ -98,17 +98,17 @@ def prefetch_layered_run_dir(base_dir: str, execution_ts: str) -> str:
 def prefetch_layered_charts_run_dir(base_dir: str, execution_ts: str) -> str:
     return os.path.join(prefetch_layered_charts_dir(base_dir), execution_ts)
 
-def prefetch_pull_results_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "results", "prefetch-pull")
+def prefetch_stages_results_dir(base_dir: str) -> str:
+    return os.path.join(base_dir, "results", "prefetch-stages")
 
-def prefetch_pull_charts_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "charts", "prefetch-pull")
+def prefetch_stages_charts_dir(base_dir: str) -> str:
+    return os.path.join(base_dir, "charts", "prefetch-stages")
 
-def prefetch_pull_run_dir(base_dir: str, execution_ts: str) -> str:
-    return os.path.join(prefetch_pull_results_dir(base_dir), execution_ts)
+def prefetch_stages_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_stages_results_dir(base_dir), execution_ts)
 
-def prefetch_pull_charts_run_dir(base_dir: str, execution_ts: str) -> str:
-    return os.path.join(prefetch_pull_charts_dir(base_dir), execution_ts)
+def prefetch_stages_charts_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_stages_charts_dir(base_dir), execution_ts)
 
 
 # ── output file paths ──────────────────────────────────────────────
@@ -240,21 +240,21 @@ def prefetch_layered_chart_path(base_dir: str, model: str, base_image: str, mode
     mode_slug = mode.replace("-", "_")
     return os.path.join(prefetch_layered_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}.png")
 
-def prefetch_pull_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
-    return os.path.join(prefetch_pull_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}.csv")
+def prefetch_stages_csv_path(base_dir: str, model: str, base_image: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_stages_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}.csv")
 
-def prefetch_pull_chart_path(base_dir: str, model: str, base_image: str, mode: str, execution_ts: str) -> str:
+def prefetch_stages_chart_path(base_dir: str, model: str, base_image: str, mode: str, execution_ts: str) -> str:
     mode_slug = mode.replace("-", "_")
-    return os.path.join(prefetch_pull_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}.png")
+    return os.path.join(prefetch_stages_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}.png")
 
-def prefetch_pull_merged_csv_path(base_dir: str, execution_ts: str) -> str:
-    return os.path.join(prefetch_pull_run_dir(base_dir, execution_ts), "merged.csv")
+def prefetch_stages_merged_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_stages_run_dir(base_dir, execution_ts), "merged.csv")
 
-def prefetch_pull_run_metadata_path(base_dir: str, execution_ts: str) -> str:
-    return os.path.join(prefetch_pull_run_dir(base_dir, execution_ts), "run.json")
+def prefetch_stages_run_metadata_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_stages_run_dir(base_dir, execution_ts), "run.json")
 
-def prefetch_pull_base_config_path(base_dir: str, execution_ts: str) -> str:
-    return os.path.join(prefetch_pull_run_dir(base_dir, execution_ts), "stargz-config.toml")
+def prefetch_stages_base_config_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_stages_run_dir(base_dir, execution_ts), "stargz-config.toml")
 
 def prefetch_layered_logs_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "logs", "prefetch-layered")
@@ -296,16 +296,16 @@ def refresh_log_path(base_dir: str, model: str, base_image: str, arm: str, run: 
     return os.path.join(refresh_logs_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{arm}_run{run}.json")
 
 
-def prefetch_pull_logs_dir(base_dir: str) -> str:
-    return os.path.join(base_dir, "logs", "prefetch-pull")
+def prefetch_stages_logs_dir(base_dir: str) -> str:
+    return os.path.join(base_dir, "logs", "prefetch-stages")
 
-def prefetch_pull_logs_run_dir(base_dir: str, execution_ts: str) -> str:
-    return os.path.join(prefetch_pull_logs_dir(base_dir), execution_ts)
+def prefetch_stages_logs_run_dir(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_stages_logs_dir(base_dir), execution_ts)
 
-def prefetch_pull_log_path(base_dir: str, model: str, base_image: str, mode: str, config_label: str, n: int, run: int, execution_ts: str) -> str:
+def prefetch_stages_log_path(base_dir: str, model: str, base_image: str, mode: str, config_label: str, n: int, run: int, execution_ts: str) -> str:
     mode_slug = mode.replace("-", "_")
     label_slug = config_label.replace(" ", "_").replace(",", "").replace("/", "_")
-    return os.path.join(prefetch_pull_logs_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{label_slug}_{n}allotments_run{run}.json")
+    return os.path.join(prefetch_stages_logs_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}_{label_slug}_{n}allotments_run{run}.json")
 
 
 # ── artifact directories ──────────────────────────────────────────
@@ -343,5 +343,5 @@ def stargz_config_artifacts_dir(base_dir: str, execution_ts: str, model: str, ba
 def prefetch_layered_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, mode: str) -> str:
     return os.path.join(_experiment_dir(base_dir, "prefetch-layered", execution_ts, model, base_image), mode)
 
-def prefetch_pull_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, mode: str) -> str:
-    return os.path.join(_experiment_dir(base_dir, "prefetch-pull", execution_ts, model, base_image), mode)
+def prefetch_stages_artifacts_dir(base_dir: str, execution_ts: str, model: str, base_image: str, mode: str) -> str:
+    return os.path.join(_experiment_dir(base_dir, "prefetch-stages", execution_ts, model, base_image), mode)

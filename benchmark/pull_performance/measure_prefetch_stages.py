@@ -19,9 +19,9 @@ from shared.services import clear_2dfs_cache
 from shared.packing import layers_for_percent
 from pull_performance.measure import _timed_pull, _timed_run, _run_cmd
 from pull_performance.paths import (
-    prefetch_pull_charts_run_dir, prefetch_pull_csv_path, prefetch_pull_chart_path,
-    prefetch_pull_log_path, prefetch_pull_artifacts_dir,
-    prefetch_pull_merged_csv_path, prefetch_pull_run_metadata_path, prefetch_pull_base_config_path,
+    prefetch_stages_charts_run_dir, prefetch_stages_csv_path, prefetch_stages_chart_path,
+    prefetch_stages_log_path, prefetch_stages_artifacts_dir,
+    prefetch_stages_merged_csv_path, prefetch_stages_run_metadata_path, prefetch_stages_base_config_path,
 )
 from shared.run_metadata import write_run_json
 from shared.artifacts import clear_artifacts
@@ -65,7 +65,7 @@ LAYER_CMAP = plt.get_cmap("tab10")  # per-layer color (shared by prefetch + file
 # ── data structures ────────────────────────────────────────────────
 
 @dataclass(frozen=True)
-class PrefetchPullRow:
+class PrefetchStageRow:
     schema_version: int
     model: str
     base_image: str
@@ -89,7 +89,7 @@ class PrefetchPullRow:
     task_rel_end_s: str
 
 @dataclass
-class PullPrefetchSpan:
+class PrefetchStageSpan:
     """In-memory span with absolute timestamps + nested event lists; used for plotting."""
     run: int
     mode: str
@@ -134,7 +134,7 @@ def _prepare_all_images(
         log.info(f"\n--- Preparing mode: {mode} ---")
         prepare_local_registry(source_image, registry(cfg))
         artifacts_dir = (
-            prefetch_pull_artifacts_dir(SCRIPT_DIR, execution_ts, model, source_image, mode)
+            prefetch_stages_artifacts_dir(SCRIPT_DIR, execution_ts, model, source_image, mode)
             if model and execution_ts else None
         )
         _prepare_mode(mode, allotments, source_image, cfg, artifacts_dir)
@@ -146,7 +146,7 @@ def _prepare_all_images(
 def _measure_config_option(
     mode: str, allotments: list[list[str]], max_allowed_splits: int, source_image: str, cfg,
     config_label: str, run_idx: int, model: str, base_image: str, execution_ts: str,
-) -> list[PullPrefetchSpan]:
+) -> list[PrefetchStageSpan]:
     results = []
     for pct in PARTITION_PERCENTS:
         n = layers_for_percent(max_allowed_splits, pct)
@@ -160,7 +160,7 @@ def _measure_config_option(
         pull_end_s = pull_start_s + pull_t
         log.result(f"  pull: {pull_t:.2f}s")
 
-        name = f"run-stargz-pull-{uuid.uuid4().hex[:8]}"
+        name = f"run-stargz-stages-{uuid.uuid4().hex[:8]}"
         create_start_s = time.time()
         create_t = _timed_run([
             "sudo", "ctr-remote", "c", "create", "--snapshotter=stargz",
@@ -209,10 +209,10 @@ def _measure_config_option(
         save_stargz_run_log(
             pull_start_s,
             max(ends),
-            prefetch_pull_log_path(SCRIPT_DIR, model, base_image, mode, config_label, n, run_idx, execution_ts),
+            prefetch_stages_log_path(SCRIPT_DIR, model, base_image, mode, config_label, n, run_idx, execution_ts),
         )
 
-        results.append(PullPrefetchSpan(
+        results.append(PrefetchStageSpan(
             run=run_idx,
             mode=mode,
             partition_pct=pct,
@@ -244,8 +244,8 @@ def _measure_config_option(
 def measure(
     allotments: list[list[str]], max_allowed_splits: int, source_image: str, cfg,
     model: str, base_image: str, execution_ts: str,
-) -> dict[tuple[str, str], list[PullPrefetchSpan]]:
-    results: dict[tuple[str, str], list[PullPrefetchSpan]] = {}
+) -> dict[tuple[str, str], list[PrefetchStageSpan]]:
+    results: dict[tuple[str, str], list[PrefetchStageSpan]] = {}
 
     base_config = read_base_config()
 
@@ -286,13 +286,13 @@ def _encode_events(spans: list[tuple[str, float, float]], ref: float) -> str:
 
 
 def _build_rows(
-    results: dict[tuple[str, str], list[PullPrefetchSpan]], model: str, base_image: str,
-) -> list[PrefetchPullRow]:
+    results: dict[tuple[str, str], list[PrefetchStageSpan]], model: str, base_image: str,
+) -> list[PrefetchStageRow]:
     rows = []
     for (mode, label), entries in results.items():
         for s in entries:
             ref = s.pull_start_s
-            rows.append(PrefetchPullRow(
+            rows.append(PrefetchStageRow(
                 schema_version=SCHEMA_VERSION, model=model, base_image=base_image,
                 run=s.run, mode=mode, config=label, partition_pct=s.partition_pct,
                 n_allotments=s.n_allotments, max_allowed_splits=s.max_allowed_splits,
@@ -309,26 +309,26 @@ def _build_rows(
     return rows
 
 
-def _write_rows(output_path: str, rows: list[PrefetchPullRow]) -> None:
-    """Write PrefetchPullRow list to CSV; columns derive from the dataclass fields."""
-    fieldnames = [f.name for f in fields(PrefetchPullRow)]
+def _write_rows(output_path: str, rows: list[PrefetchStageRow]) -> None:
+    """Write PrefetchStageRow list to CSV; columns derive from the dataclass fields."""
+    fieldnames = [f.name for f in fields(PrefetchStageRow)]
     write_csv(output_path, fieldnames, [asdict(r) for r in rows])
 
 
-def save_csv(rows: list[PrefetchPullRow], model: str, base_image: str, execution_ts: str) -> None:
+def save_csv(rows: list[PrefetchStageRow], model: str, base_image: str, execution_ts: str) -> None:
     if not rows:
         log.info("No data to save.")
         return
-    _write_rows(prefetch_pull_csv_path(SCRIPT_DIR, model, base_image, execution_ts), rows)
+    _write_rows(prefetch_stages_csv_path(SCRIPT_DIR, model, base_image, execution_ts), rows)
 
 
-def save_merged_csv(rows: list[PrefetchPullRow], execution_ts: str) -> None:
+def save_merged_csv(rows: list[PrefetchStageRow], execution_ts: str) -> None:
     if not rows:
         return
-    _write_rows(prefetch_pull_merged_csv_path(SCRIPT_DIR, execution_ts), rows)
+    _write_rows(prefetch_stages_merged_csv_path(SCRIPT_DIR, execution_ts), rows)
 
 
-def _median_span(entries: list[PullPrefetchSpan], pct: int) -> PullPrefetchSpan | None:
+def _median_span(entries: list[PrefetchStageSpan], pct: int) -> PrefetchStageSpan | None:
     """Pick the run with median total elapsed time at this partition percentage."""
     runs = [s for s in entries if s.partition_pct == pct]
     if not runs:
@@ -338,12 +338,12 @@ def _median_span(entries: list[PullPrefetchSpan], pct: int) -> PullPrefetchSpan 
 
 
 def plot(
-    results: dict[tuple[str, str], list[PullPrefetchSpan]],
+    results: dict[tuple[str, str], list[PrefetchStageSpan]],
     model: str,
     base_image: str,
     execution_ts: str,
 ) -> None:
-    os.makedirs(prefetch_pull_charts_run_dir(SCRIPT_DIR, execution_ts), exist_ok=True)
+    os.makedirs(prefetch_stages_charts_run_dir(SCRIPT_DIR, execution_ts), exist_ok=True)
 
     config_labels = [label for _, label in CONFIG_OPTIONS]
     pcts = sorted({s.partition_pct for entries in results.values() for s in entries})
@@ -491,7 +491,7 @@ def plot(
         )
         figure_footer(fig, model, base_image)
         fig.tight_layout(rect=(0, 0.08, 1, 1))
-        save_figure(fig, prefetch_pull_chart_path(SCRIPT_DIR, model, base_image, mode, execution_ts))
+        save_figure(fig, prefetch_stages_chart_path(SCRIPT_DIR, model, base_image, mode, execution_ts))
 
 
 # ── main ───────────────────────────────────────────────────────────
@@ -511,13 +511,13 @@ def main():
     for model, _ in EXPERIMENTS:
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
 
-    base_config_path = prefetch_pull_base_config_path(SCRIPT_DIR, execution_ts)
+    base_config_path = prefetch_stages_base_config_path(SCRIPT_DIR, execution_ts)
     os.makedirs(os.path.dirname(base_config_path), exist_ok=True)
     with open(base_config_path, "w") as f:
         f.write(read_base_config())
     log.result(f"Stargz base config snapshot saved to {base_config_path}")
 
-    all_rows: list[PrefetchPullRow] = []
+    all_rows: list[PrefetchStageRow] = []
     experiments_meta: list[dict] = []
     for model, base_image in EXPERIMENTS:
         allotments, max_allowed_splits = prepare_model_splits(model)
@@ -542,7 +542,7 @@ def main():
         save_merged_csv(all_rows, execution_ts)
 
     write_run_json(
-        prefetch_pull_run_metadata_path(SCRIPT_DIR, execution_ts),
+        prefetch_stages_run_metadata_path(SCRIPT_DIR, execution_ts),
         execution_ts=execution_ts,
         started_at=run_started,
         config=asdict(CFG),
