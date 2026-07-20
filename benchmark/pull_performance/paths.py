@@ -216,6 +216,15 @@ def stargz_config_chart_path(base_dir: str, model: str, base_image: str, mode: s
     mode_slug = mode.replace("-", "_")
     return os.path.join(stargz_config_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}.png")
 
+def stargz_config_merged_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(stargz_config_run_dir(base_dir, execution_ts), "merged.csv")
+
+def stargz_config_base_config_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(stargz_config_run_dir(base_dir, execution_ts), "stargz-config.toml")
+
+def stargz_config_run_metadata_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(stargz_config_run_dir(base_dir, execution_ts), "run.json")
+
 def build_config_csv_path(base_dir: str, model: str, base_image: str, mode: str, execution_ts: str) -> str:
     mode_slug = mode.replace("-", "_")
     return os.path.join(config_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}.csv")

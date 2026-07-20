@@ -1,8 +1,7 @@
-import csv
-import json
 import os
 import time
 import uuid
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
 import matplotlib.patches as mpatches
@@ -13,13 +12,15 @@ from shared import log
 from shared.charts import MODE_COLORS, figure_footer, add_run_dots, bar_group_xticks, save_figure
 from pull_performance.paths import (
     stargz_config_charts_run_dir, stargz_config_csv_path, stargz_config_chart_path, stargz_config_log_path,
+    stargz_config_merged_csv_path, stargz_config_run_metadata_path, stargz_config_base_config_path,
     stargz_config_artifacts_dir,
 )
 from shared.artifacts import clear_artifacts
 from shared.config import load_config
 from shared.registry import prepare_local_registry, clear_registry, registry, image_slug
+from shared.run_metadata import write_run_json
 from shared.stargz_config import read_base_config, apply_overrides, apply_stargz_config
-from pull_performance.measure import _timed_pull, _timed_run, _run_cmd
+from pull_performance.measure import _timed_pull, _timed_run, _run_cmd, _write_rows
 from shared.services import clear_stargz_cache, save_stargz_run_log
 from pull_performance.prepare import (
     prepare_2dfs_stargz, prepare_2dfs_stargz_zstd, prepare_chunks,
@@ -35,18 +36,31 @@ EXPERIMENTS = [
     ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
     # ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),    # ~6 GB    ~50 MB
 ]
-MODES = ["2dfs-stargz", "2dfs-stargz-zstd"]
+MODES = ["2dfs-stargz-zstd"]
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
-    ({"noprefetch": True, "prefetch_async_size": 0, "no_background_fetch": True}, "no prefetch"),
-    ({"noprefetch": False, "prefetch_async_size": 0, "no_background_fetch": True}, "prefetch"),
-    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True}, "prefetch, async"),
-    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False}, "prefetch, async, bg fetch"),
+    ({"passthrough": True}, "with passthrough"),
+    ({"passthrough": False}, "no passthrough"),
 ]
 N_SPLITS = 10            # total allotments the model is chunked into
 BASE_SPLITS = [2, 4, 6, 8]  # allotment counts actually pulled/measured
 N_RUNS = 1
 CFG = load_config()
 VERBOSE = True
+SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class StargzConfigRow:
+    schema_version: int
+    model: str
+    base_image: str
+    mode: str
+    config_label: str
+    run: int
+    num_splits: int
+    pull_s: float
+    run_s: float
+    total_s: float
 
 
 # ── image naming ───────────────────────────────────────────────────
@@ -112,9 +126,8 @@ def _measure_config_option(
 
 def measure(
     chunk_paths: list[str], source_image: str, cfg, model: str, base_image: str, execution_ts: str,
-) -> dict[tuple[str, str], list[tuple[int, int, float, float]]]:
-    # results[(mode, config_label)] = list of (run, n, pull_t, run_t)
-    results: dict[tuple[str, str], list[tuple[int, int, float, float]]] = {}
+) -> list[StargzConfigRow]:
+    results: list[StargzConfigRow] = []
 
     base_config = read_base_config()
 
@@ -135,15 +148,17 @@ def measure(
             apply_stargz_config(config_content)
 
             for mode in MODES:
-                key = (mode, label)
-                results[key] = []
                 for run in range(N_RUNS):
                     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
                              f"=== Run {run + 1}/{N_RUNS} | {mode} | {label} ===")
                     for n, pull_t, run_t in _measure_config_option(
                         mode, source_image, cfg, label, run, model, base_image, execution_ts,
                     ):
-                        results[key].append((run, n, pull_t, run_t))
+                        results.append(StargzConfigRow(
+                            schema_version=SCHEMA_VERSION, model=model, base_image=base_image,
+                            mode=mode, config_label=label, run=run, num_splits=n,
+                            pull_s=pull_t, run_s=run_t, total_s=pull_t + run_t,
+                        ))
     finally:
         log.info("\n=== Restoring base stargz config ===")
         apply_stargz_config(base_config)
@@ -154,57 +169,19 @@ def measure(
 # ── output ─────────────────────────────────────────────────────────
 
 
-def save_csv(
-    results: dict[tuple[str, str], list[tuple[int, int, float, float]]],
-    model: str,
-    base_image: str,
-    execution_ts: str,
-) -> None:
-    output_path = stargz_config_csv_path(SCRIPT_DIR, model, base_image, execution_ts)
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
-
-    header = ["run", "splits"]
-    for mode in MODES:
-        for _, label in CONFIG_OPTIONS:
-            slug = f"{mode.replace('-', '_')}_{label.replace('-', '_')}"
-            header += [f"{slug}_pull_s", f"{slug}_run_s", f"{slug}_total_s"]
-
-    with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(header)
-        for run in range(N_RUNS):
-            for n in splits:
-                def row_vals(key: tuple[str, str]) -> list[str]:
-                    match = [
-                        (pull_t, run_t)
-                        for r, n_val, pull_t, run_t in results.get(key, [])
-                        if r == run and n_val == n
-                    ]
-                    if not match:
-                        return ["", "", ""]
-                    p, r_t = match[0]
-                    return [f"{p:.4f}", f"{r_t:.4f}", f"{p + r_t:.4f}"]
-
-                row: list = [run, n]
-                for mode in MODES:
-                    for _, label in CONFIG_OPTIONS:
-                        row += row_vals((mode, label))
-                writer.writerow(row)
-
-    log.result(f"Results saved to {output_path}")
+def save_csv(results: list[StargzConfigRow], model: str, base_image: str, execution_ts: str) -> None:
+    _write_rows(stargz_config_csv_path(SCRIPT_DIR, model, base_image, execution_ts), results)
 
 
-def plot(
-    results: dict[tuple[str, str], list[tuple[int, int, float, float]]],
-    model: str,
-    base_image: str,
-    execution_ts: str,
-) -> None:
+def save_merged_csv(results: list[StargzConfigRow], execution_ts: str) -> None:
+    _write_rows(stargz_config_merged_csv_path(SCRIPT_DIR, execution_ts), results)
+
+
+def plot(results: list[StargzConfigRow], model: str, base_image: str, execution_ts: str) -> None:
     os.makedirs(stargz_config_charts_run_dir(SCRIPT_DIR, execution_ts), exist_ok=True)
 
     config_labels = [label for _, label in CONFIG_OPTIONS]
-    splits = sorted(set(n for entries in results.values() for _, n, _, _ in entries))
+    splits = sorted({r.num_splits for r in results})
     n_configs = len(config_labels)
     width = min(0.8 / n_configs, 0.15)
 
@@ -214,13 +191,12 @@ def plot(
         x = np.arange(len(splits))
 
         for i, label in enumerate(config_labels):
-            key = (mode, label)
-            entries = results.get(key, [])
+            entries = [r for r in results if r.mode == mode and r.config_label == label]
             offset = (i - (n_configs - 1) / 2) * width
             med_pulls = []
             med_runs = []
             for j, n in enumerate(splits):
-                group = [(pull_t, run_t) for _, n_val, pull_t, run_t in entries if n_val == n]
+                group = [(r.pull_s, r.run_s) for r in entries if r.num_splits == n]
                 med_p = float(np.median([g[0] for g in group])) if group else 0.0
                 med_r = float(np.median([g[1] for g in group])) if group else 0.0
                 med_pulls.append(med_p)
@@ -269,8 +245,10 @@ def main():
     log.set_verbose(VERBOSE)
     clear_artifacts(SCRIPT_DIR)
     execution_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_started = datetime.now(timezone.utc)
+    config_labels = [label for _, label in CONFIG_OPTIONS]
     log.info(f"Modes: {MODES}")
-    log.info(f"Config options: {[label for _, label in CONFIG_OPTIONS]}")
+    log.info(f"Config options: {config_labels}")
     log.info(f"Splits (total): {N_SPLITS}")
     log.info(f"Splits (measured): {BASE_SPLITS}")
     log.info(f"Runs: {N_RUNS}")
@@ -279,6 +257,14 @@ def main():
     for model, _ in EXPERIMENTS:
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
 
+    base_config_path = stargz_config_base_config_path(SCRIPT_DIR, execution_ts)
+    os.makedirs(os.path.dirname(base_config_path), exist_ok=True)
+    with open(base_config_path, "w") as f:
+        f.write(read_base_config())
+    log.result(f"Stargz base config snapshot saved to {base_config_path}")
+
+    all_results: list[StargzConfigRow] = []
+    experiments_meta: list[dict] = []
     for model, base_image in EXPERIMENTS:
         log.result(f"\n===== Experiment: {model} / {base_image} =====")
         prepare_local_registry(base_image, registry(CFG))
@@ -288,7 +274,32 @@ def main():
 
         save_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, execution_ts)
+        all_results.extend(results)
+        experiments_meta.append({
+            "model": model,
+            "base_image": base_image,
+            "n_splits": N_SPLITS,
+            "measured_splits": BASE_SPLITS,
+        })
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
+
+    if all_results:
+        save_merged_csv(all_results, execution_ts)
+
+    write_run_json(
+        stargz_config_run_metadata_path(SCRIPT_DIR, execution_ts),
+        execution_ts=execution_ts,
+        started_at=run_started,
+        config=asdict(CFG),
+        sections={
+            "modes": MODES,
+            "config_options": [{"label": label, "overrides": overrides} for overrides, label in CONFIG_OPTIONS],
+            "n_splits": N_SPLITS,
+            "measured_splits": BASE_SPLITS,
+            "n_runs": N_RUNS,
+            "experiments": experiments_meta,
+        },
+    )
 
     clear_artifacts(SCRIPT_DIR)
 
