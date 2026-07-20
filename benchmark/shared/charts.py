@@ -15,8 +15,12 @@ def figure_footer(
     max_allowed_splits: int | None = None,
     model_size: str | None = None,
     extra: str | None = None,
+    lower_in: float = 0.0,
 ) -> None:
-    """Stamp bottom-left corner of a figure with model/image metadata."""
+    """Stamp bottom-left corner of a figure with model/image metadata.
+
+    lower_in shifts the footer text down by that many inches (chart-specific nudge).
+    """
     text = f"model: {model}"
     if model_size is not None:
         text += f" ({model_size})"
@@ -34,7 +38,7 @@ def figure_footer(
     new_bottom = min(0.55, current_bottom + footer_block_frac)
     fig.subplots_adjust(bottom=new_bottom)
     fig.text(
-        0.01, (footer_in + pad_in / 2) / fig_h_in,
+        0.01, (footer_in + pad_in / 2 - lower_in) / fig_h_in,
         text,
         fontsize=fontsize,
         verticalalignment="top",

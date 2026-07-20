@@ -247,6 +247,15 @@ def prefetch_pull_chart_path(base_dir: str, model: str, base_image: str, mode: s
     mode_slug = mode.replace("-", "_")
     return os.path.join(prefetch_pull_charts_run_dir(base_dir, execution_ts), f"{_model_slug(model)}_{_image_slug(base_image)}_{mode_slug}.png")
 
+def prefetch_pull_merged_csv_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_pull_run_dir(base_dir, execution_ts), "merged.csv")
+
+def prefetch_pull_run_metadata_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_pull_run_dir(base_dir, execution_ts), "run.json")
+
+def prefetch_pull_base_config_path(base_dir: str, execution_ts: str) -> str:
+    return os.path.join(prefetch_pull_run_dir(base_dir, execution_ts), "stargz-config.toml")
+
 def prefetch_layered_logs_dir(base_dir: str) -> str:
     return os.path.join(base_dir, "logs", "prefetch-layered")
 

@@ -21,9 +21,10 @@ from shared.registry import prepare_local_registry, clear_registry, registry, im
 from shared.run_metadata import write_run_json
 from shared.stargz_config import read_base_config, apply_overrides, apply_stargz_config
 from pull_performance.measure import _timed_pull, _timed_run, _run_cmd, _write_rows
-from shared.services import clear_stargz_cache, save_stargz_run_log
+from shared.services import clear_stargz_cache, clear_2dfs_cache, save_stargz_run_log
+from shared.packing import layers_for_percent
 from pull_performance.prepare import (
-    prepare_2dfs_stargz, prepare_2dfs_stargz_zstd, prepare_chunks,
+    prepare_model_splits, build_and_push_2dfs_stargz, build_and_push_2dfs_stargz_zstd,
 )
 from shared.model import cleanup_pull_experiment
 from pull_performance.images import pull_name_2dfs_stargz, pull_name_2dfs_stargz_zstd
@@ -41,11 +42,10 @@ CONFIG_OPTIONS: list[tuple[dict, str]] = [
     ({"passthrough": True}, "with passthrough"),
     ({"passthrough": False}, "no passthrough"),
 ]
-N_SPLITS = 10            # total allotments the model is chunked into
-BASE_SPLITS = [2, 4, 6, 8]  # allotment counts actually pulled/measured
+PARTITION_PERCENTS = [25, 50, 75, 100]
 N_RUNS = 1
 CFG = load_config()
-VERBOSE = True
+VERBOSE = False
 SCHEMA_VERSION = 1
 
 
@@ -57,7 +57,9 @@ class StargzConfigRow:
     mode: str
     config_label: str
     run: int
+    partition_pct: int
     num_splits: int
+    max_allowed_splits: int
     pull_s: float
     run_s: float
     total_s: float
@@ -78,11 +80,12 @@ def _pull_name(mode: str, source_image: str, cfg, n: int) -> str:
 # ── prepare ────────────────────────────────────────────────────────
 
 
-def _prepare_mode(mode: str, chunk_paths: list[str], source_image: str, cfg, artifacts_dir: str | None = None) -> None:
+def _prepare_mode(mode: str, allotments: list[list[str]], source_image: str, cfg, artifacts_dir: str | None = None) -> None:
+    clear_2dfs_cache(cfg)
     if mode == "2dfs-stargz":
-        prepare_2dfs_stargz(chunk_paths, source_image, cfg, artifacts_dir)
+        build_and_push_2dfs_stargz(allotments, source_image, cfg, artifacts_dir)
     elif mode == "2dfs-stargz-zstd":
-        prepare_2dfs_stargz_zstd(chunk_paths, source_image, cfg, artifacts_dir)
+        build_and_push_2dfs_stargz_zstd(allotments, source_image, cfg, artifacts_dir)
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
@@ -91,13 +94,14 @@ def _prepare_mode(mode: str, chunk_paths: list[str], source_image: str, cfg, art
 
 
 def _measure_config_option(
-    mode: str, source_image: str, cfg,
+    mode: str, allotments: list[list[str]], max_allowed_splits: int, source_image: str, cfg,
     config_label: str, run_idx: int, model: str, base_image: str, execution_ts: str,
-) -> list[tuple[int, float, float]]:
+) -> list[tuple[int, int, float, float]]:
     results = []
-    for n in BASE_SPLITS:
+    for pct in PARTITION_PERCENTS:
+        n = layers_for_percent(max_allowed_splits, pct)
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        log.info(f"\n[{ts}] === {mode}: {n} allotments ===")
+        log.info(f"\n[{ts}] === {mode}: {pct}% ({n} allotments) ===")
         clear_stargz_cache()
 
         image = _pull_name(mode, source_image, cfg, n)
@@ -108,14 +112,14 @@ def _measure_config_option(
         name = f"run-stargz-cfg-{uuid.uuid4().hex[:8]}"
         run_t = _timed_run([
             "sudo", "ctr-remote", "run", "--rm", "--snapshotter=stargz",
-            image, name, *_run_cmd(n),
+            image, name, *_run_cmd(allotments, n),
         ])
         run_end_s = time.time()
         log.result(f"  run: {run_t:.2f}s")
 
         save_stargz_run_log(pull_start_s, run_end_s, stargz_config_log_path(SCRIPT_DIR, model, base_image, mode, config_label, n, run_idx, execution_ts))
 
-        results.append((n, pull_t, run_t))
+        results.append((pct, n, pull_t, run_t))
         log.info(f"\nSleeping {cfg.pull_cooldown}s before next...")
         time.sleep(cfg.pull_cooldown)
     return results
@@ -125,7 +129,8 @@ def _measure_config_option(
 
 
 def measure(
-    chunk_paths: list[str], source_image: str, cfg, model: str, base_image: str, execution_ts: str,
+    allotments: list[list[str]], max_allowed_splits: int, source_image: str, cfg,
+    model: str, base_image: str, execution_ts: str,
 ) -> list[StargzConfigRow]:
     results: list[StargzConfigRow] = []
 
@@ -137,7 +142,7 @@ def measure(
             log.info(f"\n--- Preparing mode: {mode} ---")
             prepare_local_registry(source_image, registry(cfg))
             artifacts_dir = stargz_config_artifacts_dir(SCRIPT_DIR, execution_ts, model, base_image, mode)
-            _prepare_mode(mode, chunk_paths, source_image, cfg, artifacts_dir)
+            _prepare_mode(mode, allotments, source_image, cfg, artifacts_dir)
 
     try:
         for overrides, label in CONFIG_OPTIONS:
@@ -151,12 +156,14 @@ def measure(
                 for run in range(N_RUNS):
                     log.info(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] "
                              f"=== Run {run + 1}/{N_RUNS} | {mode} | {label} ===")
-                    for n, pull_t, run_t in _measure_config_option(
-                        mode, source_image, cfg, label, run, model, base_image, execution_ts,
+                    for pct, n, pull_t, run_t in _measure_config_option(
+                        mode, allotments, max_allowed_splits, source_image, cfg,
+                        label, run, model, base_image, execution_ts,
                     ):
                         results.append(StargzConfigRow(
                             schema_version=SCHEMA_VERSION, model=model, base_image=base_image,
-                            mode=mode, config_label=label, run=run, num_splits=n,
+                            mode=mode, config_label=label, run=run, partition_pct=pct,
+                            num_splits=n, max_allowed_splits=max_allowed_splits,
                             pull_s=pull_t, run_s=run_t, total_s=pull_t + run_t,
                         ))
     finally:
@@ -181,22 +188,22 @@ def plot(results: list[StargzConfigRow], model: str, base_image: str, execution_
     os.makedirs(stargz_config_charts_run_dir(SCRIPT_DIR, execution_ts), exist_ok=True)
 
     config_labels = [label for _, label in CONFIG_OPTIONS]
-    splits = sorted({r.num_splits for r in results})
+    pcts = sorted({r.partition_pct for r in results})
     n_configs = len(config_labels)
     width = min(0.8 / n_configs, 0.15)
 
     for mode in MODES:
         color = MODE_COLORS[mode]
         fig, ax = plt.subplots(figsize=(max(10, n_configs * 2), 6))
-        x = np.arange(len(splits))
+        x = np.arange(len(pcts))
 
         for i, label in enumerate(config_labels):
             entries = [r for r in results if r.mode == mode and r.config_label == label]
             offset = (i - (n_configs - 1) / 2) * width
             med_pulls = []
             med_runs = []
-            for j, n in enumerate(splits):
-                group = [(r.pull_s, r.run_s) for r in entries if r.num_splits == n]
+            for j, pct in enumerate(pcts):
+                group = [(r.pull_s, r.run_s) for r in entries if r.partition_pct == pct]
                 med_p = float(np.median([g[0] for g in group])) if group else 0.0
                 med_r = float(np.median([g[1] for g in group])) if group else 0.0
                 med_pulls.append(med_p)
@@ -211,8 +218,8 @@ def plot(results: list[StargzConfigRow], model: str, base_image: str, execution_
             ax.bar(x + offset, med_runs, width, bottom=med_pulls, color=color,
                    alpha=alpha, edgecolor=color, linewidth=0.5, label=label)
 
-        bar_group_xticks(ax, len(splits), n_configs, width, [str(s) for s in splits])
-        ax.set_xlabel("Number of allotments pulled")
+        bar_group_xticks(ax, len(pcts), n_configs, width, [f"{p}%" for p in pcts])
+        ax.set_xlabel("Partition size (%)")
         ax.set_ylabel("Time (s)")
         ax.set_title(
             f"Pull + Run by stargz config ({mode}, "
@@ -231,7 +238,7 @@ def plot(results: list[StargzConfigRow], model: str, base_image: str, execution_
         ]
         ax.legend(handles=config_handles + [pull_patch, run_patch], loc="upper left")
 
-        figure_footer(fig, model, base_image)
+        figure_footer(fig, model, base_image, lower_in=0.25)
         fig.tight_layout()
 
         output_path = stargz_config_chart_path(SCRIPT_DIR, model, base_image, mode, execution_ts)
@@ -249,8 +256,7 @@ def main():
     config_labels = [label for _, label in CONFIG_OPTIONS]
     log.info(f"Modes: {MODES}")
     log.info(f"Config options: {config_labels}")
-    log.info(f"Splits (total): {N_SPLITS}")
-    log.info(f"Splits (measured): {BASE_SPLITS}")
+    log.info(f"Partition percents: {PARTITION_PERCENTS}")
     log.info(f"Runs: {N_RUNS}")
 
     log.info("Pre-run cleanup...")
@@ -266,11 +272,11 @@ def main():
     all_results: list[StargzConfigRow] = []
     experiments_meta: list[dict] = []
     for model, base_image in EXPERIMENTS:
-        log.result(f"\n===== Experiment: {model} / {base_image} =====")
+        allotments, max_allowed_splits = prepare_model_splits(model)
+        log.result(f"\n===== Experiment: {model} / {base_image} (max_splits={max_allowed_splits}) =====")
         prepare_local_registry(base_image, registry(CFG))
 
-        chunk_paths = prepare_chunks(model, N_SPLITS)
-        results = measure(chunk_paths, base_image, CFG, model, base_image, execution_ts)
+        results = measure(allotments, max_allowed_splits, base_image, CFG, model, base_image, execution_ts)
 
         save_csv(results, model, base_image, execution_ts)
         plot(results, model, base_image, execution_ts)
@@ -278,8 +284,8 @@ def main():
         experiments_meta.append({
             "model": model,
             "base_image": base_image,
-            "n_splits": N_SPLITS,
-            "measured_splits": BASE_SPLITS,
+            "max_allowed_splits": max_allowed_splits,
+            "partition_percents": PARTITION_PERCENTS,
         })
         cleanup_pull_experiment(model, SCRIPT_DIR, CFG)
 
@@ -294,8 +300,7 @@ def main():
         sections={
             "modes": MODES,
             "config_options": [{"label": label, "overrides": overrides} for overrides, label in CONFIG_OPTIONS],
-            "n_splits": N_SPLITS,
-            "measured_splits": BASE_SPLITS,
+            "partition_percents": PARTITION_PERCENTS,
             "n_runs": N_RUNS,
             "experiments": experiments_meta,
         },
