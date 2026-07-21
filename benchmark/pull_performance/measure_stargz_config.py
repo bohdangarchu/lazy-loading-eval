@@ -32,10 +32,7 @@ from pull_performance.images import pull_name_2dfs_stargz, pull_name_2dfs_stargz
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXPERIMENTS = [
-    # ("openai-community/gpt2", "docker.io/library/python:3.12-slim"),         # ~0.5 GB     ~50 MB
-    # ("openai-community/gpt2-medium", "docker.io/library/python:3.12-slim"),   # ~1.52 GB    ~50 MB
-    ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
-    # ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"),    # ~6 GB    ~50 MB
+    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"), 
 ]
 MODES = ["2dfs-stargz-zstd"]
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
@@ -43,7 +40,7 @@ CONFIG_OPTIONS: list[tuple[dict, str]] = [
     ({"passthrough": False}, "no passthrough"),
 ]
 PARTITION_PERCENTS = [25, 50, 75, 100]
-N_RUNS = 1
+N_RUNS = 3
 CFG = load_config()
 VERBOSE = False
 SCHEMA_VERSION = 1

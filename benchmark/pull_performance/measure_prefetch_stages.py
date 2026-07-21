@@ -36,10 +36,9 @@ from pull_performance.prefetch_common import (
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXPERIMENTS = [
-    ("openai-community/gpt2-large", "docker.io/library/python:3.12-slim"),    # ~3.25 GB    ~50 MB
-    # ("openlm-research/open_llama_3b", "docker.io/library/python:3.12-slim"), 
+    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"), 
 ]
-MODES = ["2dfs-stargz"]
+MODES = ["2dfs-stargz-zstd"]
 PARTITION_PERCENTS = [25, 50, 75, 100]
 N_RUNS = 1
 SCHEMA_VERSION = 1
@@ -79,6 +78,7 @@ class PrefetchStageRow:
     pull_rel_end_s: str
     prefetch_rel_start_s: str
     prefetch_rel_end_s: str
+    prefetch_rel_events: str
     bg_download_rel_start_s: str
     bg_download_rel_end_s: str
     file_open_cache_rel_events: str
@@ -299,6 +299,7 @@ def _build_rows(
                 pull_rel_start_s="0.000", pull_rel_end_s=_rel(s.pull_end_s, ref),
                 prefetch_rel_start_s=_rel(s.prefetch_start_s, ref),
                 prefetch_rel_end_s=_rel(s.prefetch_end_s, ref),
+                prefetch_rel_events=_encode_events(s.prefetch_layer_events, ref),
                 bg_download_rel_start_s=_rel(s.bg_download_start_s, ref),
                 bg_download_rel_end_s=_rel(s.bg_download_end_s, ref),
                 file_open_cache_rel_events=_encode_events(s.file_open_cache_spans, ref),

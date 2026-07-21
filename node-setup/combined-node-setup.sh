@@ -222,8 +222,10 @@ cat > /etc/containerd-stargz-grpc/config.toml <<EOF
 noprefetch = true
 no_background_fetch = true
 disable_verification = true
-prefetch_async_size = 1
+prefetch_async_size = 0
+log_file_access = false
 metrics_address = "127.0.0.1:8234"
+prefetch_timeout_sec = 60
 
 [[resolver.host."${REGISTRY_NODE}:5000".mirrors]]
 host = "${REGISTRY_NODE}:5000"
