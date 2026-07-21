@@ -11,6 +11,8 @@ import build_performance.measure_rebuild as bmr
 import build_performance.measure_cv_rebuild as bcr
 import pull_performance.measure as pm
 import pull_performance.measure_refresh as pmr
+import pull_performance.measure_prefetch_stages as pps
+import pull_performance.measure_stargz_config as psc
 
 _BENCHMARK_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -34,8 +36,14 @@ def run_phases():
     # log.result("=== Phase 3: Pull Performance ===")
     # pm.main()
 
-    log.result("=== Phase 4: Refresh Performance ===")
-    pmr.main()
+    # log.result("=== Phase 4: Refresh Performance ===")
+    # pmr.main()
+
+    log.result("=== Phase 5: Prefetch Stages ===")
+    pps.main()
+
+    log.result("=== Phase 6: Stargz Config ===")
+    psc.main()
 
     # log.result("=== Final cleanup ===")
     # cleanup_pull_artifacts(pm.EXPERIMENTS, paths.pull_perf_dir(_BENCHMARK_DIR), cfg)
