@@ -42,8 +42,8 @@ def run_phases():
     log.result("=== Phase 5: Prefetch Stages ===")
     pps.main()
 
-    log.result("=== Phase 6: Stargz Config ===")
-    psc.main()
+    # log.result("=== Phase 6: Stargz Config ===")
+    # psc.main()
 
     # log.result("=== Final cleanup ===")
     # cleanup_pull_artifacts(pm.EXPERIMENTS, paths.pull_perf_dir(_BENCHMARK_DIR), cfg)

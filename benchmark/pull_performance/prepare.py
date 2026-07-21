@@ -36,11 +36,14 @@ def prepare_chunks(model_name: str, num_splits: int) -> list[str]:
 # ── safetensors splits ──────────────────────────────────────────────
 
 
-def prepare_model_splits(model_name: str) -> tuple[list[list[str]], int]:
+def prepare_model_splits(
+    model_name: str, max_allotments_cap: int | None = None,
+) -> tuple[list[list[str]], int]:
     """Run split_llm, copy splits into the build context, repack into allotments.
 
     Returns (allotments, max_allotments) where allotments is the best-fit pack
-    of safetensors files into max_allotments buckets.
+    of safetensors files into max_allotments buckets. If max_allotments_cap is
+    given and smaller, uses that many buckets instead.
     """
     chunks_dir = paths.model_chunks_dir(SCRIPT_DIR, model_name)
     chunks_manifest = os.path.join(chunks_dir, "manifest.json")
@@ -57,15 +60,23 @@ def prepare_model_splits(model_name: str) -> tuple[list[list[str]], int]:
                     if f.endswith(".safetensors")
                 )
                 metadata_files = split_metadata_paths(chunks_dir)
-                max_allotments, _, _ = compute_split_stats(safetensor_paths)
-                return repack(safetensor_paths, max_allotments, extra_files=metadata_files), max_allotments
+                n = _capped_allotments(safetensor_paths, max_allotments_cap)
+                return repack(safetensor_paths, n, extra_files=metadata_files), n
         except (OSError, json.JSONDecodeError):
             pass
 
     splits_dir = run_split_llm(model_name)
     safetensor_paths, metadata_files = copy_splits_to_work_dir(splits_dir, chunks_dir)
+    n = _capped_allotments(safetensor_paths, max_allotments_cap)
+    return repack(safetensor_paths, n, extra_files=metadata_files), n
+
+
+def _capped_allotments(safetensor_paths: list[str], cap: int | None) -> int:
     max_allotments, _, _ = compute_split_stats(safetensor_paths)
-    return repack(safetensor_paths, max_allotments, extra_files=metadata_files), max_allotments
+    if cap is not None and cap < max_allotments:
+        log.info(f"Capping allotments {max_allotments} -> {cap}")
+        return cap
+    return max_allotments
 
 
 # ── build + push per mode (allotments-native) ───────────────────────

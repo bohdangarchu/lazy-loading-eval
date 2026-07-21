@@ -39,6 +39,8 @@ EXPERIMENTS = [
     ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"), 
 ]
 MODES = ["2dfs-stargz-zstd"]
+# 8 -> 25/50/75/100% = 2/4/6/8 allotments
+MAX_ALLOTMENTS = 8
 PARTITION_PERCENTS = [25, 50, 75, 100]
 N_RUNS = 1
 SCHEMA_VERSION = 1
@@ -250,6 +252,10 @@ def measure(
     base_config = read_base_config()
 
     try:
+        # TODO: the built image is byte-identical across config options (only the
+        # client-side stargz config changes). Hoist
+        # clear_registry + _prepare_all_images out of this loop to build/push once
+        # instead of rebuilding per config option.
         for overrides, label in CONFIG_OPTIONS:
             log.info(f"\n=== Config option: {label} ===")
             clear_registry(cfg, preserve_base=True)
@@ -521,7 +527,7 @@ def main():
     all_rows: list[PrefetchStageRow] = []
     experiments_meta: list[dict] = []
     for model, base_image in EXPERIMENTS:
-        allotments, max_allowed_splits = prepare_model_splits(model)
+        allotments, max_allowed_splits = prepare_model_splits(model, MAX_ALLOTMENTS)
         log.result(f"\n===== Experiment: {model} / {base_image} (max_splits={max_allowed_splits}) =====")
         prepare_local_registry(base_image, registry(CFG))
 
