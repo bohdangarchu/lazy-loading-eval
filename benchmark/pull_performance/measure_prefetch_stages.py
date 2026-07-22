@@ -49,9 +49,9 @@ SCHEMA_VERSION = 1
 # prefetch_chunk_size might also be relevant. the default (0) makes layer be fetched in a single call
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
     ({"noprefetch": True, "no_background_fetch": True, "log_file_access": True}, "no prefetch"),
-    ({"noprefetch": False, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 120, "request_timeout_sec": 120}, "prefetch"),
-    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 120, "request_timeout_sec": 120}, "prefetch, async"),
-    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False, "log_file_access": True, "prefetch_timeout_sec": 120, "request_timeout_sec": 120}, "prefetch, async, bg fetch"),
+    ({"noprefetch": False, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 120, "resolver.request_timeout_sec": 120}, "prefetch"),
+    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 120, "resolver.request_timeout_sec": 120}, "prefetch, async"),
+    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False, "log_file_access": True, "prefetch_timeout_sec": 120, "resolver.request_timeout_sec": 120}, "prefetch, async, bg fetch"),
 ]
 CFG = load_config()
 VERBOSE = False

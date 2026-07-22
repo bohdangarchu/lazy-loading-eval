@@ -1,17 +1,9 @@
-import re
 import subprocess
+import tomlkit
 
 from shared import log
 
 STARGZ_CONFIG_PATH = "/etc/containerd-stargz-grpc/config.toml"
-
-
-def _to_toml_value(v) -> str:
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    if isinstance(v, str):
-        return f'"{v}"'
-    return str(v)
 
 
 def read_base_config() -> str:
@@ -23,22 +15,21 @@ def read_base_config() -> str:
 
 
 def apply_overrides(base_content: str, overrides: dict) -> str:
-    """Replace existing key=value lines or append new ones for each override."""
-    content = base_content
-    for key, value in overrides.items():
-        toml_val = _to_toml_value(value)
-        pattern = re.compile(rf"^{re.escape(key)}\s*=.*$", re.MULTILINE)
-        replacement = f"{key} = {toml_val}"
-        if pattern.search(content):
-            content = pattern.sub(replacement, content)
-        else:
-            section_match = re.search(r"^\[", content, re.MULTILINE)
-            if section_match:
-                idx = section_match.start()
-                content = content[:idx].rstrip("\n") + f"\n{replacement}\n\n" + content[idx:]
-            else:
-                content = content.rstrip("\n") + f"\n{replacement}\n"
-    return content
+    """Set each override in the right TOML table, preserving comments/formatting.
+
+    Keys are dotted paths, e.g. "fuse.passthrough" targets [fuse]; a bare key
+    targets the root table. Missing tables are created.
+    """
+    doc = tomlkit.parse(base_content)
+    for dotted_key, value in overrides.items():
+        *tables, leaf = dotted_key.split(".")
+        node = doc
+        for table in tables:
+            if table not in node:
+                node[table] = tomlkit.table()
+            node = node[table]
+        node[leaf] = value
+    return tomlkit.dumps(doc)
 
 
 def apply_stargz_config(config_content: str) -> None:

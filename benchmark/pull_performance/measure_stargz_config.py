@@ -36,8 +36,8 @@ EXPERIMENTS = [
 ]
 MODES = ["2dfs-stargz-zstd"]
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
-    ({"passthrough": True}, "with passthrough"),
-    ({"passthrough": False}, "no passthrough"),
+    ({"fuse.passthrough": True}, "with passthrough"),
+    ({"fuse.passthrough": False}, "no passthrough"),
 ]
 PARTITION_PERCENTS = [25, 50, 75, 100]
 N_RUNS = 3

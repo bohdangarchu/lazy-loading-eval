@@ -3,3 +3,4 @@ matplotlib
 psutil
 python-dotenv
 requests
+tomlkit
