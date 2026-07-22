@@ -36,7 +36,7 @@ from pull_performance.prefetch_common import (
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXPERIMENTS = [
-    ("openlm-research/open_llama_3b", "docker.io/ollama/ollama"), 
+    ("Qwen/Qwen3.5-9B", "docker.io/ollama/ollama"),
 ]
 MODES = ["2dfs-stargz-zstd"]
 # 8 -> 25/50/75/100% = 2/4/6/8 allotments
@@ -44,11 +44,14 @@ MAX_ALLOTMENTS = 8
 PARTITION_PERCENTS = [25, 50, 75, 100]
 N_RUNS = 1
 SCHEMA_VERSION = 1
+# request_timeout_sec is important otherwise the layer fetch inside prefetch fails 
+# as it is done in a single fetch call and times out with default config
+# prefetch_chunk_size might also be relevant. the default (0) makes layer be fetched in a single call
 CONFIG_OPTIONS: list[tuple[dict, str]] = [
     ({"noprefetch": True, "no_background_fetch": True, "log_file_access": True}, "no prefetch"),
-    ({"noprefetch": False, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 60}, "prefetch"),
-    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 60}, "prefetch, async"),
-    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False, "log_file_access": True, "prefetch_timeout_sec": 60}, "prefetch, async, bg fetch"),
+    ({"noprefetch": False, "prefetch_async_size": 0, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 120, "request_timeout_sec": 120}, "prefetch"),
+    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": True, "log_file_access": True, "prefetch_timeout_sec": 120, "request_timeout_sec": 120}, "prefetch, async"),
+    ({"noprefetch": False, "prefetch_async_size": 1, "no_background_fetch": False, "log_file_access": True, "prefetch_timeout_sec": 120, "request_timeout_sec": 120}, "prefetch, async, bg fetch"),
 ]
 CFG = load_config()
 VERBOSE = False

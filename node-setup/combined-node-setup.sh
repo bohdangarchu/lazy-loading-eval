@@ -227,6 +227,9 @@ log_file_access = false
 metrics_address = "127.0.0.1:8234"
 prefetch_timeout_sec = 120
 
+[resolver]
+request_timeout_sec = 120
+
 [[resolver.host."${REGISTRY_NODE}:5000".mirrors]]
 host = "${REGISTRY_NODE}:5000"
 insecure = true
