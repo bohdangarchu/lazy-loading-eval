@@ -125,77 +125,79 @@ def main():
     clear_2dfs_cache(CFG)
     clear_stargz_cache()
 
-    log.result("=== Build + push v0 ===")
-    _build_and_push(chunk_paths, "v0")
-    repo = _repo()
-    v0_digests = fetch_layer_digests(registry(CFG), repo, _full_tag())
-    log.info(f"v0 layers: {[d[:19] for d in v0_digests]}")
-    for i, d in enumerate(v0_digests):
-        save_toc(registry(CFG), repo, d, os.path.join(toc_dir, f"toc_v0_layer{i}.json"))
+    name = None
+    mutated = False
+    try:
+        log.result("=== Build + push v0 ===")
+        _build_and_push(chunk_paths, "v0")
+        repo = _repo()
+        v0_digests = fetch_layer_digests(registry(CFG), repo, _full_tag())
+        log.info(f"v0 layers: {[d[:19] for d in v0_digests]}")
+        for i, d in enumerate(v0_digests):
+            save_toc(registry(CFG), repo, d, os.path.join(toc_dir, f"toc_v0_layer{i}.json"))
 
-    pull_ref = _pull_ref()
-    log.result(f"=== rpull v0: {pull_ref} ===")
-    timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", pull_ref])
+        pull_ref = _pull_ref()
+        log.result(f"=== rpull v0: {pull_ref} ===")
+        timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", pull_ref])
 
-    name = _next_container_name(f"verify-refresh-{MODE.replace('-', '')}")
-    start_container(pull_ref, name)
+        name = _next_container_name(f"verify-refresh-{MODE.replace('-', '')}")
+        start_container(pull_ref, name)
 
-    log.info(f"Cat all {NUM_CHUNKS} files in container...")
-    cat_chunks_in_container(name, NUM_CHUNKS)
+        log.info(f"Cat all {NUM_CHUNKS} files in container...")
+        cat_chunks_in_container(name, NUM_CHUNKS)
 
-    target_file = f"/chunk{MUTATED_IDX + 1}.bin"
-    pre_digest = _sha256_in_container(name, target_file)
-    log.result(f"pre-refresh  in-container sha256({target_file}) = {pre_digest}")
+        target_file = f"/chunk{MUTATED_IDX + 1}.bin"
+        pre_digest = _sha256_in_container(name, target_file)
+        log.result(f"pre-refresh  in-container sha256({target_file}) = {pre_digest}")
 
-    log.result(f"=== Mutate {os.path.basename(chunk_paths[MUTATED_IDX])} + build v1 ===")
-    mutate_chunk(chunk_paths[MUTATED_IDX])
-    expected_digest = _sha256_local(chunk_paths[MUTATED_IDX])
-    log.info(f"expected post-refresh sha256({target_file}) = {expected_digest}")
-    _build_and_push(chunk_paths, "v1")
-    v1_digests = fetch_layer_digests(registry(CFG), repo, _full_tag())
-    log.info(f"v1 layers: {[d[:19] for d in v1_digests]}")
-
-    changed = [
-        i for i in range(min(len(v0_digests), len(v1_digests)))
-        if v0_digests[i] != v1_digests[i]
-    ]
-    if not changed:
-        log.result("WARN: no changed layer detected between v0 and v1")
-    for i in changed:
-        save_toc(registry(CFG), repo, v1_digests[i], os.path.join(toc_dir, f"toc_v1_layer{i}.json"))
-
-    log.result(f"=== ctr-remote refresh {pull_ref} ===")
-    refresh = subprocess.run(
-        ["sudo", "ctr-remote", "refresh", "--plain-http", pull_ref],
-        capture_output=True, text=True,
-    )
-    if refresh.stdout:
-        print(refresh.stdout, end="")
-    if refresh.stderr:
-        print(refresh.stderr, end="")
-    if refresh.returncode != 0:
-        log.result(f"FAIL: refresh exited with code {refresh.returncode}")
-        stop_container(name)
+        log.result(f"=== Mutate {os.path.basename(chunk_paths[MUTATED_IDX])} + build v1 ===")
         mutate_chunk(chunk_paths[MUTATED_IDX])
-        return
+        mutated = True
+        expected_digest = _sha256_local(chunk_paths[MUTATED_IDX])
+        log.info(f"expected post-refresh sha256({target_file}) = {expected_digest}")
+        _build_and_push(chunk_paths, "v1")
+        v1_digests = fetch_layer_digests(registry(CFG), repo, _full_tag())
+        log.info(f"v1 layers: {[d[:19] for d in v1_digests]}")
 
-    post_digest = _sha256_in_container(name, target_file)
-    log.result(f"post-refresh in-container sha256({target_file}) = {post_digest}")
+        changed = [
+            i for i in range(min(len(v0_digests), len(v1_digests)))
+            if v0_digests[i] != v1_digests[i]
+        ]
+        if not changed:
+            log.result("WARN: no changed layer detected between v0 and v1")
+        for i in changed:
+            save_toc(registry(CFG), repo, v1_digests[i], os.path.join(toc_dir, f"toc_v1_layer{i}.json"))
 
-    if pre_digest == post_digest:
-        log.result(f"FAIL: digest unchanged after refresh ({pre_digest})")
-    elif post_digest != expected_digest:
-        log.result(f"FAIL: post-refresh digest {post_digest} != expected {expected_digest}")
-    else:
-        log.result(f"PASS: {target_file} refreshed successfully ({pre_digest[:12]}... -> {post_digest[:12]}...)")
+        log.result(f"=== ctr-remote refresh {pull_ref} ===")
+        refresh = subprocess.run(
+            ["sudo", "ctr-remote", "refresh", "--plain-http", pull_ref],
+            capture_output=True, text=True,
+        )
+        if refresh.stdout:
+            print(refresh.stdout, end="")
+        if refresh.stderr:
+            print(refresh.stderr, end="")
+        if refresh.returncode != 0:
+            log.result(f"FAIL: refresh exited with code {refresh.returncode}")
+            return
 
-    stop_container(name)
+        post_digest = _sha256_in_container(name, target_file)
+        log.result(f"post-refresh in-container sha256({target_file}) = {post_digest}")
 
-    log.info("Restoring mutated chunk...")
-    mutate_chunk(chunk_paths[MUTATED_IDX])
-
-    clear_registry(CFG, preserve_base=True, verbose=False)
-    clear_artifacts(SCRIPT_DIR)
+        if pre_digest == post_digest:
+            log.result(f"FAIL: digest unchanged after refresh ({pre_digest})")
+        elif post_digest != expected_digest:
+            log.result(f"FAIL: post-refresh digest {post_digest} != expected {expected_digest}")
+        else:
+            log.result(f"PASS: {target_file} refreshed successfully ({pre_digest[:12]}... -> {post_digest[:12]}...)")
+    finally:
+        if name is not None:
+            stop_container(name)
+        if mutated:
+            log.info("Restoring mutated chunk...")
+            mutate_chunk(chunk_paths[MUTATED_IDX])
+        clear_registry(CFG, preserve_base=True, verbose=False)
+        clear_artifacts(SCRIPT_DIR)
 
 
 if __name__ == "__main__":

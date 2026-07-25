@@ -4,3 +4,7 @@
 - ablation on registry performance with and without stargz+prefetch
 - migrate measure prefetch stages and measure stargz config to results repo
 - run on a bigger model. check latest prefetch stages chart. maybe we should remove stripes from the chart -> can experiment in results
+
+# code cleanup
+- move verification into its own folder
+- remove measure_prefetch_layered.py

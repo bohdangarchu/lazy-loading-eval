@@ -56,12 +56,12 @@ WATCH_WAIT_S = 30
 
 
 def _build_target() -> str:
-    return f"{registry(CFG)}/{image_slug(SOURCE_IMAGE)}-{MODE}-validate-watch:latest"
+    return f"{registry(CFG)}/{image_slug(SOURCE_IMAGE)}-{MODE}-verify-watch:latest"
 
 
 def _pull_ref() -> str:
     end_col = NUM_LAYERS - 1
-    return f"{registry(CFG)}/library/{image_slug(SOURCE_IMAGE)}-{MODE}-validate-watch:latest--0.0.0.{end_col}"
+    return f"{registry(CFG)}/library/{image_slug(SOURCE_IMAGE)}-{MODE}-verify-watch:latest--0.0.0.{end_col}"
 
 
 def _build_and_push(chunk_paths: list[str], label: str) -> None:
@@ -166,7 +166,7 @@ def main():
     log.result(f"=== rpull v0: {pull_ref} ===")
     timed_pull(["sudo", "ctr-remote", "images", "rpull", "--plain-http", pull_ref])
 
-    name = _next_container_name(f"validate-watch-{MODE.replace('-', '')}")
+    name = _next_container_name(f"verify-watch-{MODE.replace('-', '')}")
     start_container(pull_ref, name)
 
     log.info(f"Cat all {NUM_CHUNKS} files in container...")
@@ -213,7 +213,7 @@ def main():
 
     run_end_s = time.time()
     execution_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-    log_path = os.path.join(SCRIPT_DIR, "logs", "validate-watch", execution_ts, "stargz.json")
+    log_path = os.path.join(SCRIPT_DIR, "logs", "verify-watch", execution_ts, "stargz.json")
     save_stargz_run_log(log_window_start, run_end_s, log_path)
     log.result(f"stargz logs -> {log_path}")
 
