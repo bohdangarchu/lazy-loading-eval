@@ -27,10 +27,11 @@ def run_phases():
     log.result("=== Phase 2: Build Rebuild Performance ===")
     bmr.main()
 
-    log.result("=== Phase 2b: CV Multi-Model Rebuild Performance ===")
-    bcr.main()
+    # optional - multi-model rebuild
+    # log.result("=== Phase 2b: CV Multi-Model Rebuild Performance ===")
+    # bcr.main()
 
-    log.result("=== Transition: clearing build artifacts ===")
+    log.result("=== clear build artifacts ===")
     cleanup_build_artifacts(paths.build_perf_dir(_BENCHMARK_DIR), cfg)
 
     log.result("=== Phase 3: Pull Performance ===")
@@ -39,11 +40,12 @@ def run_phases():
     log.result("=== Phase 4: Refresh Performance ===")
     pmr.main()
 
-    log.result("=== Phase 5: Prefetch Stages ===")
-    pps.main()
+    # optional
+    # log.result("=== Phase 5: Prefetch Stages ===")
+    # pps.main()
 
-    log.result("=== Phase 6: Stargz Config ===")
-    psc.main()
+    # log.result("=== Phase 6: Stargz Config ===")
+    # psc.main()
 
 
 def main():
