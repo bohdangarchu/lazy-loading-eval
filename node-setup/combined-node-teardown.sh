@@ -19,7 +19,7 @@ echo "▶ Tearing down combined builder + client node setup..."
 # -------------------------------------------------------------------
 # Step 1: Stop and disable systemd services
 # -------------------------------------------------------------------
-for svc in prometheus node-exporter stargz-snapshotter buildkit containerd; do
+for svc in prometheus stargz-snapshotter buildkit containerd; do
   if systemctl is-active --quiet "$svc" 2>/dev/null; then
     systemctl stop "$svc" || true
   fi
@@ -32,7 +32,6 @@ done
 # Step 2: Remove systemd service files
 # -------------------------------------------------------------------
 rm -f /etc/systemd/system/prometheus.service
-rm -f /etc/systemd/system/node-exporter.service
 rm -f /etc/systemd/system/stargz-snapshotter.service
 rm -f /etc/systemd/system/buildkit.service
 rm -f /usr/local/lib/systemd/system/containerd.service
@@ -60,8 +59,7 @@ rm -f /usr/local/bin/ctr-remote
 # stargz source repo (if built from source)
 rm -rf /opt/stargz-snapshotter
 
-# node_exporter and prometheus
-rm -f /usr/local/bin/node_exporter
+# prometheus
 rm -f /usr/local/bin/prometheus
 rm -f /usr/local/bin/promtool
 

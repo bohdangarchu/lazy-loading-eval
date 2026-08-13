@@ -28,10 +28,7 @@ CNI_VERSION="1.9.0"
 NERDCTL_VERSION="2.2.1"
 STARGZ_VERSION="0.18.2"
 GO_VERSION="1.25.0"
-NODE_EXPORTER_VERSION="1.8.2"
 PROMETHEUS_VERSION="3.9.1"
-GRAFANA_PROM_URL="https://prometheus-prod-65-prod-eu-west-2.grafana.net/api/prom/push"
-GRAFANA_PROM_USER="3041204"
 
 ARCH="amd64"
 OS="linux"
@@ -50,10 +47,6 @@ fi
 if ! curl -sf --connect-timeout 5 "http://${REGISTRY_NODE}:5000/v2/" > /dev/null; then
   echo "Error: registry ${REGISTRY_NODE}:5000 is not accessible"
   exit 1
-fi
-
-if [[ -z "${GRAFANA_API_KEY:-}" ]]; then
-  echo "Warning: GRAFANA_API_KEY not set — Grafana remote_write will be disabled"
 fi
 
 echo "▶ Installing containerd=${CONTAINERD_VERSION}, runc=${RUNC_VERSION}, cni=${CNI_VERSION}, nerdctl=${NERDCTL_VERSION}, stargz=${STARGZ_VERSION}"
@@ -166,7 +159,7 @@ EOF
 # Step 11: /mydata directories
 # -------------------------------------------------------------------
 mkdir -p /mydata/tmp /mydata/buildkit
-chown -R bgarchu:"$(id -gn bgarchu)" /mydata
+chown -R "$SUDO_USER":"$(id -gn "$SUDO_USER")" /mydata
 
 echo 'export TMPDIR=/mydata/tmp' >> /root/.bashrc
 export TMPDIR=/mydata/tmp
@@ -298,30 +291,7 @@ systemctl enable --now containerd
 systemctl enable --now buildkit
 
 # -------------------------------------------------------------------
-# Step 17: node_exporter
-# -------------------------------------------------------------------
-curl -LO "https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.${OS}-${ARCH}.tar.gz"
-tar -xzf "node_exporter-${NODE_EXPORTER_VERSION}.${OS}-${ARCH}.tar.gz"
-install -m 755 "node_exporter-${NODE_EXPORTER_VERSION}.${OS}-${ARCH}/node_exporter" /usr/local/bin/node_exporter
-
-cat > /etc/systemd/system/node-exporter.service <<'EOF'
-[Unit]
-Description=Prometheus Node Exporter
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/node_exporter
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable --now node-exporter
-
-# -------------------------------------------------------------------
-# Step 18: Prometheus (scrapes stargz + node_exporter)
+# Step 17: Prometheus (scrapes stargz)
 # -------------------------------------------------------------------
 curl -sL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" \
   | tar -xz -C /usr/local/bin --strip-components=1 \
@@ -341,21 +311,8 @@ scrape_configs:
   - job_name: 'stargz-snapshotter'
     static_configs:
       - targets: ['127.0.0.1:8234']
-  - job_name: 'node'
-    static_configs:
-      - targets: ['127.0.0.1:9100']
 
 EOF
-
-if [[ -n "${GRAFANA_API_KEY:-}" ]]; then
-  cat >> /etc/prometheus/prometheus.yml <<EOF
-remote_write:
-  - url: ${GRAFANA_PROM_URL}
-    basic_auth:
-      username: "${GRAFANA_PROM_USER}"
-      password: "${GRAFANA_API_KEY}"
-EOF
-fi
 
 cat > /etc/systemd/system/prometheus.service <<'EOF'
 [Unit]
@@ -395,7 +352,6 @@ buildah --version
 
 systemctl status stargz-snapshotter --no-pager
 systemctl status buildkit --no-pager
-systemctl status node-exporter --no-pager
 systemctl status prometheus --no-pager
 
 echo "--- stargz metrics endpoint ---"

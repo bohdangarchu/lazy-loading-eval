@@ -1,7 +1,18 @@
 # Node setup
 
-- cloudlab machine: c6525-25g
-- machine [spec](https://www.utah.cloudlab.us/portal/show-nodetype.php?type=c6525-25g&_gl=1*wfe0yn*_ga*MTg1OTgyNjU4MS4xNzcxNDE4OTE3*_ga_6W2Y02FJX6*czE3NzM4NTAzNzgkbzcyJGcwJHQxNzczODUwNDIwJGoxOCRsMCRoMA)
+Two cloudlab `c6525-25g` nodes ([spec](https://www.utah.cloudlab.us/portal/show-nodetype.php?type=c6525-25g&_gl=1*wfe0yn*_ga*MTg1OTgyNjU4MNzcxNDE4OTE3*_ga_6W2Y02FJX6*czE3NzM4NTAzNzgkbzcyJGcwJHQxNzczODUwNDIwJGoxOCRsMCRoMA)):
+a registry node, and a combined node that builds and pulls/runs the images. This setup can also run on arbitrary server hardware. However, it is important to make sure that root folder `/mydata` exists.
+
+## About `/mydata`
+
+Cloudlab root disk is too small for benchmark artifacts, so the benchmark lives on the `/mydata`
+mount point allocated in the cloudlab profile. Cloudlab can allocate up to 1TB into the mount point of user's choice.
+
+- `/var/lib/containerd` and `/var/lib/containerd-stargz-grpc` are symlinked into `/mydata`
+- `TMPDIR=/mydata/tmp`, buildkit root `/mydata/buildkit`
+- 2dfs home dir → `/mydata/.2dfs`, `HF_HOME=/mydata/huggingface`
+- registry storage in `/mydata/2dfs-registry-data`
+- both repos in `/mydata/lazy-loading-eval` and `/mydata/split-llm-simple`
 
 ## get registry ip - `10.10.1.2` by default (cloudlab)
 
@@ -9,11 +20,11 @@
 hostname -I | awk '{print $2}'
 ```
 
-## registry setup
+## registry setup (run before client)
 
 ```bash
 curl -Lo "${HOME}/registry-node-setup.sh" \
-	https://raw.githubusercontent.com/bohdangarchu/lazy-loading-eval/main/node-setup/registry-node-setup.sh
+	https://raw.githubusercontent.com/mitrafsnap/lazy-loading-eval/main/node-setup/registry-node-setup.sh
 
 chmod +x "${HOME}/registry-node-setup.sh"
 sudo "${HOME}/registry-node-setup.sh"
@@ -21,24 +32,27 @@ sudo "${HOME}/registry-node-setup.sh"
 
 ## combined node setup (client + builder)
 
-- install kernel
+- install kernel (stargz FUSE passthrough needs >= 6.9)
+- the script reboots the machine, reconnect and continue after reboot
 
 ```bash
 cd /mydata
 sudo chown $USER /mydata
-git clone https://github.com/bohdangarchu/lazy-loading-eval.git
+git clone https://github.com/mitrafsnap/lazy-loading-eval.git
 cd lazy-loading-eval/
 sudo ./node-setup/install-hwe-kernel.sh
 ```
 
-- node setup (use correct registry ip)
+- node setup script
+- use correct registry ip and stargz-snapshotter implementation
 
 ```bash
 cd /mydata/lazy-loading-eval/node-setup
-sudo ./combined-node-setup.sh 10.10.1.2 https://github.com/bohdangarchu/stargz-snapshotter.git
+sudo ./combined-node-setup.sh 10.10.1.2 https://github.com/mitrafsnap/stargz-snapshotter.git
 ```
 
 - env setup
+- prepare `HF_TOKEN` with access to models used in the benchmark
 ```bash
 cd ..
 python3 -m venv .venv-benchmark
@@ -47,13 +61,13 @@ pip install -r ./benchmark/requirements.txt
 echo "HF_TOKEN=..." > ./benchmark/.env
 ```
 
-- benchmark uses `shared/config.yaml` by default. Copy desired config
+- benchmark uses `shared/config.yaml` by default. Copy desired config and adjust registry variable if needed.
 
 ```bash
 cp /mydata/lazy-loading-eval/benchmark/shared/config-cloudlab.yaml /mydata/lazy-loading-eval/benchmark/shared/config.yaml 
 ```
 
-- clone split_llm
+- clone split_llm (needs an ssh key)
 
 ```bash
 cat > ~/.ssh/id_ed25519 <<'EOF'
@@ -67,7 +81,7 @@ cd /mydata/
 git clone git@gitlab.lrz.de:distributed-ml/split-llm-simple.git
 ```
 
-- install dependencies
+- install dependencies, use specified venv name as it is later used in the benchmark 
 
 ```bash
 cd /mydata/split-llm-simple
@@ -86,9 +100,16 @@ cd /mydata/lazy-loading-eval
 
 ## Run the benchmark
 
+`run-bg.sh` runs `run.py` in detached mode. Set `NTFY_TOPIC` for
+push notifications on finish/failure.
+
 ```bash
 cd /mydata/lazy-loading-eval
 source .venv-benchmark/bin/activate
 cd benchmark
 ./run-bg.sh
 ```
+
+Edit `run.py` to specify which benchmark phases you want to run.
+Results are written to `build_performance/{results,charts}/` and
+`pull_performance/{results,charts}/`. 
