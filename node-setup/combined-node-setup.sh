@@ -8,7 +8,7 @@ set -euox pipefail
 #
 # Usage: sudo ./combined-node-setup.sh <REGISTRY_IP> [STARGZ_REPO_URL]
 # Example: sudo ./combined-node-setup.sh 10.10.1.2
-# Example: sudo ./combined-node-setup.sh 10.10.1.2 https://github.com/bohdangarchu/stargz-snapshotter.git
+# Example: sudo ./combined-node-setup.sh 10.10.1.2 https://github.com/mitrafsnap/stargz-snapshotter.git
 # -------------------------------------------------------------------
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
@@ -27,7 +27,7 @@ RUNC_VERSION="1.3.4"
 CNI_VERSION="1.9.0"
 NERDCTL_VERSION="2.2.1"
 STARGZ_VERSION="0.18.2"
-GO_VERSION="1.24.0"
+GO_VERSION="1.25.0"
 NODE_EXPORTER_VERSION="1.8.2"
 PROMETHEUS_VERSION="3.9.1"
 GRAFANA_PROM_URL="https://prometheus-prod-65-prod-eu-west-2.grafana.net/api/prom/push"
@@ -45,7 +45,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # -------------------------------------------------------------------
-# Registry reachability check (fail fast before installing anything)
+# Registry reachability check
 # -------------------------------------------------------------------
 if ! curl -sf --connect-timeout 5 "http://${REGISTRY_NODE}:5000/v2/" > /dev/null; then
   echo "Error: registry ${REGISTRY_NODE}:5000 is not accessible"
@@ -146,7 +146,7 @@ export GOTOOLCHAIN=local
 
 BUILDER_DIR="/opt/2dfs-builder"
 rm -rf "$BUILDER_DIR"
-git clone https://github.com/bohdangarchu/2dfs-builder.git "$BUILDER_DIR"
+git clone https://github.com/mitrafsnap/2dfs-builder.git "$BUILDER_DIR"
 cd "$BUILDER_DIR"
 bash install.sh
 
@@ -405,4 +405,4 @@ echo "--- Prometheus targets ---"
 curl -sf http://localhost:9090/api/v1/targets \
   | grep -q '"health":"up"' && echo "Prometheus target health: up"
 
-echo "✅ Combined builder + client node setup complete"
+echo "Combined builder + client node setup complete"

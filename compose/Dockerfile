@@ -72,8 +72,6 @@ COPY binaries/tdfs /usr/local/bin/tdfs
 RUN mkdir /2dfs-files
 COPY sample-image/ /2dfs-files/
 
-# COPY experiments/experiment1/ /experiment1
-
 # evaluation script
 # COPY *.py /
 # RUN chmod +x /eval.py

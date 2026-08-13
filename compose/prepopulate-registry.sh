@@ -25,7 +25,7 @@ STARGZ_DST="$REGISTRY/$REPO:esgz"
 
 quiet_run() {
   if ! output="$("$@" 2>&1)"; then
-    echo "❌ FAILED: $*" >&2
+    echo "FAILED: $*" >&2
     echo "$output" >&2
     exit 1
   fi

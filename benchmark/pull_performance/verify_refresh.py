@@ -33,7 +33,7 @@ from pull_performance.refresh_common import (
     cat_chunks_in_container,
 )
 
-# Verifies: `ctr-remote refresh` invalidates the FUSE/stargz cache for a layer
+# Verifies that `ctr-remote refresh` invalidates the FUSE/stargz cache for a layer
 # whose blob digest changed, so a file in the running container returns the new
 # content on next read without restarting the container.
 # Flow: build v0 → rpull → warm cache (cat all chunks) → sha256 chunk1 (old) →

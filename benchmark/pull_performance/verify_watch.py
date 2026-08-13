@@ -37,7 +37,7 @@ from pull_performance.refresh_common import (
     cat_chunks_in_container,
 )
 
-# Verifies: `ctr-remote watch` subscribes to an image tag and, when a new
+# Verifies that `ctr-remote watch` subscribes to an image tag and, when a new
 # version is pushed, auto-refreshes the FUSE/stargz cache so a file in the
 # running container returns the new content without an explicit refresh call.
 # Flow: build v0 → rpull → warm cache → sha256 chunk1 (old) → ctr-remote watch

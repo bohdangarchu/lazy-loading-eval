@@ -10,7 +10,7 @@ set -euox pipefail
 # Root check
 # -------------------------------------------------------------------
 if [[ $EUID -ne 0 ]]; then
-  echo "❌ Please run as root"
+  echo "Please run as root"
   exit 1
 fi
 
@@ -158,4 +158,4 @@ rm -rf /mydata/buildkit
 rm -f /root/.2dfs
 sed -i '/export TMPDIR=\/mydata\/tmp/d' /root/.bashrc
 
-echo "✅ Combined builder + client node teardown complete"
+echo "Combined builder + client node teardown complete"
